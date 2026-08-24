@@ -158,13 +158,13 @@ class StartParametersDialog(QDialog):
         self.waist_mode_combo.currentIndexChanged.connect(self._on_waist_mode_changed)
         scan_layout.addRow("Waist-Eingabe bezieht sich auf:", self.waist_mode_combo)
 
-        self.win_input_min = self._make_spin(0.5, 0.001, 50.0, 0.05)
-        self.win_input_max = self._make_spin(3.5, 0.001, 50.0, 0.05)
+        self.win_input_min = self._make_spin(0.8, 0.001, 50.0, 0.05)
+        self.win_input_max = self._make_spin(1.7, 0.001, 50.0, 0.05)
         scan_layout.addRow("win_input min (mm):", self.win_input_min)
         scan_layout.addRow("win_input max (mm):", self.win_input_max)
 
-        self.width_min = self._make_spin(0.15, 0.001, 5.0, 0.01)
-        self.width_max = self._make_spin(0.5, 0.001, 5.0, 0.01)
+        self.width_min = self._make_spin(0.2, 0.001, 5.0, 0.01)
+        self.width_max = self._make_spin(0.4, 0.001, 5.0, 0.01)
         scan_layout.addRow("width min (MHz):", self.width_min)
         scan_layout.addRow("width max (MHz):", self.width_max)
 
@@ -174,8 +174,8 @@ class StartParametersDialog(QDialog):
         scan_layout.addRow("Grid points per axis:", self.n_points)
 
         self.n_grid = QSpinBox()
-        self.n_grid.setRange(50, 2000)
-        self.n_grid.setValue(200)
+        self.n_grid.setRange(50, 2500)
+        self.n_grid.setValue(1000)
         self.n_grid.setToolTip(
             "Resolution of the GLOBAL intensity grid (used by geometry/lens\n"
             "helper methods, not by the weighted evaluation itself - see\n"
@@ -184,7 +184,7 @@ class StartParametersDialog(QDialog):
         )
         scan_layout.addRow("Intensity grid resolution (n_grid):", self.n_grid)
 
-        self.alpha = self._make_spin(0.9, 0.0, 1.0, 0.05)
+        self.alpha = self._make_spin(0.7, 0.0, 1.0, 0.05)
         self.alpha.setToolTip(
             "Weight of the combined score used ONLY to mark the 'best' grid\n"
             "point in the plots: alpha*uniformity_weighted + (1-alpha)*eta_weighted.\n"

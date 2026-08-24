@@ -109,7 +109,7 @@ class StartParametersDialog(QDialog):
         scan_layout.addRow("width max (MHz):", self.width_max)
 
         self.n_points = QSpinBox()
-        self.n_points.setRange(3, 100)
+        self.n_points.setRange(3, 200)
         self.n_points.setValue(15)
         self.n_points.setToolTip(
             "Grid points per axis. Unlike the plain uniformity/crosstalk scan,\n"
@@ -129,8 +129,8 @@ class StartParametersDialog(QDialog):
         amp_group = QGroupBox("Amplitude-Ratio Optimization")
         amp_layout = QFormLayout()
 
-        self.r_min = self._make_spin(0.0, 0.0, 10.0, 0.05)
-        self.r_max = self._make_spin(2.0, 0.0, 10.0, 0.05)
+        self.r_min = self._make_spin(0.1, 0.0, 10.0, 0.05)
+        self.r_max = self._make_spin(10.0, 0.0, 10.0, 0.05)
         amp_layout.addRow("r_x / r_y min:", self.r_min)
         amp_layout.addRow("r_x / r_y max:", self.r_max)
 
@@ -151,8 +151,8 @@ class StartParametersDialog(QDialog):
         grid_group = QGroupBox("Intensity Grid")
         grid_layout = QFormLayout()
         self.n_grid = QSpinBox()
-        self.n_grid.setRange(50, 2000)
-        self.n_grid.setValue(200)
+        self.n_grid.setRange(50, 5000)
+        self.n_grid.setValue(1000)
         self.n_grid.setToolTip(
             "Resolution of the GLOBAL intensity grid (used by geometry/lens\n"
             "helper methods, not by the weighted evaluation itself - see\n"
