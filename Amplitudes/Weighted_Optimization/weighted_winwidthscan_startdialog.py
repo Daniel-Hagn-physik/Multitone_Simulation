@@ -33,6 +33,17 @@ siehe scan_win_width_weighted_uniformity()). Alles andere (Tonanzahl,
 Amplituden pro Ton, Scan-Bereiche, Waist-Eingabemodus
 vor/nach der Linse, n_grid) ist 1:1 identisch zum Original uebernommen.
 
+NEU (2026-08-25): zusaetzlich zwei Felder "Atom offset x/y" (jeweils als
+Bruchteil von pitch, dem raeumlichen Tonabstand, -0.5..0.5) in derselben
+"Atom Weighting"-Gruppe. Damit laesst sich das Atom - und die 8 relativ zu
+ihm ueber pitch platzierten Nachbar-Sites, die in die atom-gewichtete
+Crosstalk-Metrik eingehen - VOR der Berechnung des Datensatzes um bis zu
+einem halben Tonabstand in x UND y aus der Site-Mitte verschieben (0/0 =
+bisheriges Verhalten, Atom exakt zentriert). Wird als atom_offset_x/
+atom_offset_y (Meter) an den Optimizer durchgereicht - siehe
+_evaluate_weighted_metrics() in weighted_multitone_flattop_optimizer.py fuer
+die Details der Verschiebung.
+
 GPU-Beschleunigung: wie bei den anderen Weighted_Optimization-Skripten
 automatisch versucht (kein Zwang), aber ueber `weighted_use_torch.py` statt
 `use_torch.py` - das Original-Modul wuerde die Funktionszeiger im FALSCHEN
@@ -83,6 +94,11 @@ _F1 = 75e-3
 _F2 = 750e-3
 _FLO = MultitoneFlatTopOptimizer.DEFAULTS['fLO']
 _LAMBDA_OPT = MultitoneFlatTopOptimizer.DEFAULTS['lambda_opt']
+# pitch = raeumlicher Tonabstand (Periodizitaet der Nachbar-Sites, siehe
+# self.pitch/create_neighbourhood() in der Optimizer-Datei) - gebraucht, um
+# den unten abgefragten Atom/Nachbar-Versatz als Bruchteil von pitch in
+# Meter umzurechnen.
+_PITCH = MultitoneFlatTopOptimizer.DEFAULTS['pitch']
 
 # Mapping zwischen dem waist_mode-Wert dieses Dialogs ("win_input"/"win_eff",
 # identisch zum Original) und dem win_axis-Argument von
@@ -239,6 +255,33 @@ class StartParametersDialog(QDialog):
         )
         atom_layout.addRow("weighted_n_grid:", self.weighted_n_grid)
 
+        offset_info = QLabel(
+            f"Optional: shifts the atom - and with it the local sub-grid used\n"
+            f"for uniformity_weighted/eta_weighted, i.e. the atom AND the 8\n"
+            f"neighbor-site images it sees - away from the exact site center,\n"
+            f"before the dataset is computed. Given as a fraction of the tone\n"
+            f"spacing pitch (currently {_PITCH * 1e6:.3f} um); 0 = atom exactly on\n"
+            f"the site (previous/default behavior)."
+        )
+        offset_info.setStyleSheet("font-style: italic;")
+        atom_layout.addRow(offset_info)
+
+        self.atom_offset_frac_x = self._make_spin(0.0, -0.5, 0.5, 0.05)
+        self.atom_offset_frac_x.setToolTip(
+            "Atom/neighbor offset in x, as a fraction of the tone spacing\n"
+            "(pitch). Range +/- 0.5 = up to half a tone spacing in either\n"
+            "direction. Applied to atom_offset_x (meters) on the optimizer."
+        )
+        atom_layout.addRow("Atom offset x (x pitch, -0.5..0.5):", self.atom_offset_frac_x)
+
+        self.atom_offset_frac_y = self._make_spin(0.0, -0.5, 0.5, 0.05)
+        self.atom_offset_frac_y.setToolTip(
+            "Atom/neighbor offset in y, as a fraction of the tone spacing\n"
+            "(pitch). Range +/- 0.5 = up to half a tone spacing in either\n"
+            "direction. Applied to atom_offset_y (meters) on the optimizer."
+        )
+        atom_layout.addRow("Atom offset y (x pitch, -0.5..0.5):", self.atom_offset_frac_y)
+
         atom_group.setLayout(atom_layout)
         main_layout.addWidget(atom_group)
 
@@ -393,6 +436,8 @@ class StartParametersDialog(QDialog):
             atom_temperature=self.atom_temperature_uK.value() * 1e-6,
             trap_freq_r=self.trap_freq_r_kHz.value() * 1e3,
             weighted_n_grid=self.weighted_n_grid.value(),
+            atom_offset_x=self.atom_offset_frac_x.value() * _PITCH,
+            atom_offset_y=self.atom_offset_frac_y.value() * _PITCH,
             force_cpu=self.force_cpu.isChecked(),
             enable_perf_log=self.enable_perf_log.isChecked(),
             # welche Achse beim direkten Plotten am Ende von main() genutzt
@@ -450,6 +495,8 @@ def main():
         atom_temperature=params["atom_temperature"],
         trap_freq_r=params["trap_freq_r"],
         weighted_n_grid=params["weighted_n_grid"],
+        atom_offset_x=params["atom_offset_x"],
+        atom_offset_y=params["atom_offset_y"],
     )
 
     total_points = params["n_points"] * params["n_points"]

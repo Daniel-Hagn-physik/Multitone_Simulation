@@ -52,14 +52,30 @@ physikalisch motivierter.
 Nutzung:
     python fit_waist_width_relation.py
 (vorher ggf. PKL_DATEI unten anpassen). Ausgabe: Konsole (Modellvergleich,
-Formel) UND, sofern PLOT_FITS=True (Default), ein Diagnose-Plot (Heatmap +
-Talpunkte + Fit-Kurve) in Fit_Plots/um_waist/.
+Formel) UND, sofern PLOT_FITS=True (Default), ein Diagnose-Plot in
+Fit_Plots/um_waist/ - links Heatmap von Uniformity_w + Talpunkte + Fit-Kurve
+(wie bisher), rechts (letztes Panel) ein SCHNITT entlang der Fit-Kurve:
+Uniformity_w ausgewertet exakt auf der gefitteten Linie width=f(waist) statt
+im Tal-Minimum, zum Vergleich mit dem tatsaechlichen Minimum je Waist-Spalte
+- zeigt an, wie gut/schlecht die Gleichmaessigkeit ist, wenn man strikt nach
+der (meist linearen) Fit-Formel faehrt, inklusive der Luecke dort, wo die
+Fit-Kurve das gescannte width-Fenster verlaesst (siehe cut_along_fit()). Auf
+User-Wunsch (NEU) zeigt bei SHOW_CROSSTALK=True (Default) ein zusaetzliches
+MITTLERES Panel dieselbe 2D-Heatmap-Ansicht fuer Crosstalk_w
+(eta_weighted_grid, direkt vergleichbar mit der Uniformity-Heatmap links,
+dieselben Talpunkte/Fit-Kurve/bester Punkt ueberlagert), und das rechte
+Schnitt-Panel zeigt zusaetzlich Crosstalk_w entlang der Fit-Kurve auf einer
+zweiten y-Achse - beides gemeinsam an/abschaltbar ueber SHOW_CROSSTALK bzw.
+den show_crosstalk-Parameter von main() (bei False: normaler 1x2-Plot wie
+zuvor, nur Uniformity).
 """
 from pathlib import Path
+from datetime import date
 
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit, brentq
+from scipy.interpolate import RegularGridInterpolator
 
 from weighted_multitone_amplitude_dependence_plots import (
     load_amp_scan_results,  # generischer Pickle-Loader (Name historisch, laedt JEDES
@@ -127,8 +143,68 @@ PLOT_FITS = True
 SHOW = False
 SAVE = True
 ASK_BEFORE_SAVE = True
-PDF_FIGSIZE = (7.5, 5.8)
+PDF_FIGSIZE = (12.5, 5.5)  # 1x2-Layout: Uniformity-Heatmap links, Schnitt-Panel rechts
+                            # (SHOW_CROSSTALK=False)
+PDF_FIGSIZE_CROSSTALK = (21.0, 5.5)  # 1x3-Layout bei SHOW_CROSSTALK=True: zusaetzlich eine
+                                      # Crosstalk-Heatmap (2D, wie links fuer Uniformity) in
+                                      # der Mitte, Schnitt-Panel rechts - insgesamt breiter,
+                                      # u.a. damit die (wegen twinx() ausgelagerte, siehe
+                                      # plot_waist_width_fit()) Legende des Schnitt-Panels
+                                      # Platz hat, ohne die Panels selbst zu quetschen.
 PDF_RASTER_DPI = 300
+CUT_N_POINTS = 400  # Aufloesung des Uniformity-Schnitts entlang der Fit-Kurve
+
+# Grafische Feintuning-Optionen (auf User-Wunsch, per run_all_fits.py von
+# aussen ueberschreibbar, siehe main()-Parameter unten) - identisches Muster
+# wie in fit_central_amplitudes.py.
+LEGEND_FONTSIZE = 9
+DRAW_BEST_POINT = False
+
+# Auf User-Wunsch: im rechten Panel (Schnitt entlang der Fit-Kurve) neben
+# Uniformity_w zusaetzlich Crosstalk_w (eta_weighted_grid) zeigen - auf einer
+# zweiten y-Achse (twinx), damit beide Kurven auch bei unterschiedlicher
+# Groessenordnung gut lesbar bleiben. Per main()-Parameter/run_all_fits.py
+# von aussen ueberschreibbar, identisches Muster wie DRAW_BEST_POINT.
+SHOW_CROSSTALK = True
+
+# Bildstil fuer den optionalen Best-Point-Marker - identisch zu
+# AmplitudeScanPlotter.BEST_POINT_STYLE und zu fit_central_amplitudes.py,
+# damit ein "bester Punkt" im ganzen Projekt visuell gleich aussieht.
+BEST_POINT_STYLE = dict(
+    marker="*", markersize=16, markeredgecolor="white",
+    markeredgewidth=1.1, color="red", zorder=8, linestyle="none",
+)
+
+
+# ======================================================================
+# 0) Bester Punkt (optional, automatisch OHNE vorgegebene Koordinaten)
+# ======================================================================
+def _find_best_point(results):
+    """Anders als fit_central_amplitudes.py's _find_best_point() muss hier
+    NICHTS berechnet werden: der Fest-Amplitude-Scan speichert den besten
+    gefundenen Punkt bereits direkt im results-dict unter dem Schluessel
+    'best' (win_input, width, uniformity_weighted, eta_weighted, combined) -
+    dieselbe Groesse, die auch die uebrigen Plots im Projekt
+    (_mark_point()-Konvention) verwenden. Braucht KEINE von Hand
+    vorgegebenen Koordinaten - komplett automatisch.
+
+    Gibt dict(waist_um=..., width_mhz=..., label=...) zurueck, oder None,
+    falls kein 'best'-Eintrag vorhanden/gueltig ist."""
+    best = results.get("best")
+    if not best or best.get("win_input") is None:
+        return None
+    f1, f2, lambda_opt, fLO = results["f1"], results["f2"], results["lambda_opt"], results["fLO"]
+    waist_um = win_input_to_win(best["win_input"], f1, f2, lambda_opt, fLO) * 1e6
+    width_mhz = best["width"] * 1e-6
+    label = "best point (scan optimum)"
+    uniformity_percent = None
+    if best.get("uniformity_weighted") is not None:
+        uniformity_percent = float(best["uniformity_weighted"]) * 100.0
+    crosstalk_percent = None
+    if best.get("eta_weighted") is not None:
+        crosstalk_percent = float(best["eta_weighted"]) * 100.0
+    return dict(waist_um=float(waist_um), width_mhz=float(width_mhz), label=label,
+                uniformity_percent=uniformity_percent, crosstalk_percent=crosstalk_percent)
 
 
 # ======================================================================
@@ -381,13 +457,146 @@ def cv_compare_models(x, y, n_blocks=CV_BLOCKS, candidates=CANDIDATE_MODELS, ver
 
 
 # ======================================================================
-# 4) Plot
+# 4) Schnitt entlang der Fit-Kurve: Uniformity_w(waist) fuer width=fit(waist)
 # ======================================================================
-def _finish_fig(fig, filename, out_dir, show, save):
+def _uniformity_interpolator(results):
+    """Baut EINEN RegularGridInterpolator auf dem ORIGINAL-Scan-Gitter
+    (win_input_vals x width_vals, beide bereits regelmaessig/aufsteigend -
+    NICHT das nichtlinear transformierte waist_um-Gitter, um keine
+    zusaetzliche Interpolations-Ungenauigkeit durch die 1/x-Umrechnung
+    einzuschleppen). Wird von cut_along_fit() UND von der
+    Talpunkt-Vergleichskurve in plot_waist_width_fit() genutzt, damit beide
+    exakt dieselbe (unverfaelschte, nicht z.B. achsen-geflippte) Grundlage
+    verwenden. Rueckgabewert erwartet Punkte als (width_Hz, win_input_m)."""
+    win_input_vals = results["win_input_vals"]
+    width_vals = results["width_vals"]
+    Z = results["uniformity_weighted_grid"]  # shape (n_width, n_win)
+    return RegularGridInterpolator((width_vals, win_input_vals), Z,
+                                    bounds_error=False, fill_value=np.nan)
+
+
+def _crosstalk_interpolator(results):
+    """Wie _uniformity_interpolator(), nur fuer Crosstalk_w
+    (eta_weighted_grid) statt Uniformity_w - identisches Gitter, identische
+    Konvention. Gibt None zurueck, falls diese Datei kein
+    'eta_weighted_grid' enthaelt (defensiv, damit ein aelteres/anderes pkl
+    nicht mit einem KeyError abbricht, sondern der Crosstalk-Teil einfach
+    weggelassen wird - siehe SHOW_CROSSTALK)."""
+    if "eta_weighted_grid" not in results:
+        return None
+    win_input_vals = results["win_input_vals"]
+    width_vals = results["width_vals"]
+    Z = results["eta_weighted_grid"]  # shape (n_width, n_win)
+    return RegularGridInterpolator((width_vals, win_input_vals), Z,
+                                    bounds_error=False, fill_value=np.nan)
+
+
+def _waist_um_to_win_input(results, waist_um):
+    """Umkehrung von win_input_to_win(): waist_um -> win_input (m). Dieselbe
+    Formel wie in weighted_multitone_amplitude_dependence_plots.py, nur nach
+    win_input aufgeloest (f1/f2*lambda_opt*fLO/(pi*win_input) = waist)."""
+    f1, f2, lambda_opt, fLO = results["f1"], results["f2"], results["lambda_opt"], results["fLO"]
+    waist_m = np.asarray(waist_um, dtype=float) * 1e-6
+    return (f1 * lambda_opt * fLO) / (f2 * np.pi * waist_m)
+
+
+def cut_along_fit(results, model_name, popt, waist_lo, waist_hi, n=CUT_N_POINTS):
+    """Wertet Uniformity_w (und, sofern vorhanden, Crosstalk_w) NICHT im
+    Tal-Minimum aus, sondern GENAU entlang der gefitteten Kurve
+    width = f(waist) - also entlang der Trajektorie, die man tatsaechlich
+    befahren wuerde, wenn man width strikt nach der Fit-Formel aus dem
+    gewuenschten waist berechnet. Punkte, an denen die Fit-Kurve das
+    gescannte width-Fenster (0.2-0.4 MHz) verlaesst, werden als NaN
+    zurueckgegeben (erscheinen im Plot als Luecke - genau dort waere die
+    Fit-Vorhersage mit den vorhandenen Scan-Daten nicht ueberpruefbar).
+
+    Gibt (waist_cut_um, width_cut_mhz, uniformity_cut_percent,
+    crosstalk_cut_percent) zurueck - crosstalk_cut_percent ist None, falls
+    'eta_weighted_grid' in dieser Datei fehlt."""
+    waist_cut_um = np.linspace(waist_lo, waist_hi, n)
+    func, _ = MODELS[model_name]
+    width_cut_mhz = func(waist_cut_um, *popt)
+
+    win_input_cut = _waist_um_to_win_input(results, waist_cut_um)
+    width_cut_hz = width_cut_mhz * 1e6
+    points = np.column_stack([width_cut_hz, win_input_cut])
+
+    interp_u = _uniformity_interpolator(results)
+    uniformity_cut = interp_u(points) * 100.0
+
+    interp_c = _crosstalk_interpolator(results)
+    crosstalk_cut = interp_c(points) * 100.0 if interp_c is not None else None
+
+    return waist_cut_um, width_cut_mhz, uniformity_cut, crosstalk_cut
+
+
+def write_formula_doc(prefix, model_name, popt, r2_cv, r2_cv_std, r2_fulldata,
+                       waist_used, waist_excluded, best_point,
+                       out_dir=FIT_RESULTS_DIR):
+    """Schreibt AUTOMATISCH ein Formel-Dokument (Markdown) mit dem gerade
+    gewaehlten Modell/Parametern/R² - analog zu fit_central_amplitudes.py's
+    write_formula_doc(), bei jedem Lauf frisch generiert."""
+    func, formula_str = MODELS[model_name]
+    param_names = "abcdefgh"[:len(popt)]
+    param_lines = "\n".join(f"{n} = {v:.8g}" for n, v in zip(param_names, popt))
+    lines = [
+        f"# {prefix} — Waist-Width-Fit (Fest-Amplitude-Scan)",
+        "",
+        f"Automatisch generiert von `fit_waist_width_relation.py` am {date.today().isoformat()}.",
+        "",
+        f"- Gewaehltes Modell (Block-CV + Occam's-Razor-Tie-Break): **{model_name}**",
+        f"- Formel: `{formula_str}`",
+        f"- R²(Block-CV): {r2_cv:.4f} +/- {r2_cv_std:.4f}",
+        f"- R²(volle bereinigte Daten, NICHT CV, nur Sanity-Check): {r2_fulldata:.5f}",
+        f"- Gueltigkeitsbereich (zuverlaessiger Talbereich): "
+        f"waist_um ∈ [{waist_used.min():.4f}, {waist_used.max():.4f}]",
+        f"- Davon ausgeschlossene Talpunkte (Scan-Fenster-Artefakte/Nebenzweig): {len(waist_excluded)}",
+        "",
+        "```",
+        param_lines,
+        "```",
+        "",
+    ]
+    if best_point is not None:
+        lines += [
+            f"Bester Punkt (automatisch, {best_point['label']}): "
+            f"waist = {best_point['waist_um']:.4f} µm (nach der Linse), "
+            f"width = {best_point['width_mhz']:.4f} MHz"
+            + (f", Uniformity_w = {best_point['uniformity_percent']:.4f} %"
+               if best_point['uniformity_percent'] is not None else "")
+            + (f", Crosstalk_w = {best_point['crosstalk_percent']:.4f} %"
+               if best_point.get('crosstalk_percent') is not None else "") + ".",
+            "",
+        ]
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Wie in fit_central_amplitudes.py: reproduzierbar aus der pkl-Datei
+    # ableitbar, deshalb bei jedem Lauf ueberschreiben statt interaktiv fragen.
+    out_file = resolve_save_path(out_dir, f"{prefix}_Formel.md", confirm_overwrite=lambda p: True)
+    out_file.write_text("\n".join(lines), encoding="utf-8")
+    print(f"Formel-Dokument gespeichert: {out_file}")
+    return out_file
+
+
+# ======================================================================
+# 5) Plot
+# ======================================================================
+def _finish_fig(fig, filename, out_dir, show, save, ask_before_save=True):
+    """ask_before_save steuert (Bugfix): frueher wurde beim UEBERSCHREIBEN
+    eines bereits vorhandenen Plots IMMER interaktiv nachgefragt
+    (confirm_overwrite=None), unabhaengig von ASK_BEFORE_SAVE - das brach
+    "ein Klick and go" (run_all_fits.py) beim ZWEITEN Lauf, sobald die PDFs
+    schon existierten (kein Terminal fuer input() vorhanden -> EOFError).
+    Jetzt: bei ask_before_save=False wird wie bei den Formel-Dokumenten ohne
+    Rueckfrage ueberschrieben (reproduzierbar aus der pkl-Datei); nur beim
+    manuellen, interaktiven Aufruf (ask_before_save=True, Default) bleibt die
+    Rueckfrage bestehen."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     if save:
-        out_file = resolve_save_path(out_dir, filename, confirm_overwrite=None)
+        confirm_overwrite = None if ask_before_save else (lambda p: True)
+        out_file = resolve_save_path(out_dir, filename, confirm_overwrite=confirm_overwrite)
         fig.savefig(out_file, format="pdf", dpi=PDF_RASTER_DPI, bbox_inches="tight")
         print(f"Plot gespeichert: {out_file}")
     if show:
@@ -398,9 +607,19 @@ def _finish_fig(fig, filename, out_dir, show, save):
 
 def plot_waist_width_fit(results, waist_used, width_used, waist_excluded, width_excluded,
                           model_name, popt, out_dir=FIT_PLOTS_DIR, prefix=OUTPUT_PREFIX,
-                          show=SHOW, save=SAVE):
-    """Heatmap von Uniformity_w (effektiver Waist in µm auf der x-Achse) mit
-    Talpunkten und Fit-Kurve - Englisch, Vektor-PDF, LaTeX-tauglich."""
+                          show=SHOW, save=SAVE, best_point=None, legend_fontsize=LEGEND_FONTSIZE,
+                          show_crosstalk=SHOW_CROSSTALK, ask_before_save=ASK_BEFORE_SAVE):
+    """Links Heatmap von Uniformity_w (effektiver Waist in µm auf der
+    x-Achse) mit Talpunkten und Fit-Kurve; bei SHOW_CROSSTALK=True (NEU)
+    zusaetzlich in der Mitte dieselbe 2D-Ansicht fuer Crosstalk_w
+    (eta_weighted_grid) - identische Talpunkte/Fit-Kurve/bester-Punkt-
+    Ueberlagerung, nur mit anderer Heatmap-Groesse dahinter, damit beide
+    Groessen direkt vergleichbar sind; rechts ein SCHNITT entlang dieser
+    Fit-Kurve - Uniformity_w(waist) (und optional Crosstalk_w), ausgewertet
+    exakt auf der gefitteten Linie width=f(waist), nicht im Tal-Minimum.
+    Zeigt, wie gut (bzw. schlecht, sobald man den zuverlaessigen Fit-Bereich
+    verlaesst) die Gleichmaessigkeit/das Crosstalk ist, wenn man strikt nach
+    der Fit-Formel faehrt. Englisch, Vektor-PDF, LaTeX-tauglich."""
     win_input_vals = results["win_input_vals"]
     width_vals = results["width_vals"]
     f1, f2, lambda_opt, fLO = results["f1"], results["f2"], results["lambda_opt"], results["fLO"]
@@ -411,31 +630,142 @@ def plot_waist_width_fit(results, waist_used, width_used, waist_excluded, width_
     x_axis = waist_um_axis[::-1] if reversed_ else waist_um_axis
     Z = (results["uniformity_weighted_grid"][:, ::-1] if reversed_
          else results["uniformity_weighted_grid"]) * 100.0
+    crosstalk_available = "eta_weighted_grid" in results
+    show_crosstalk_2d = show_crosstalk and crosstalk_available
+    if show_crosstalk_2d:
+        Z_ct = (results["eta_weighted_grid"][:, ::-1] if reversed_
+                else results["eta_weighted_grid"]) * 100.0
+    elif show_crosstalk and not crosstalk_available:
+        print("   (SHOW_CROSSTALK=True, aber diese Datei enthaelt kein 'eta_weighted_grid' - "
+              "Crosstalk-Heatmap/-Kurve wird ausgelassen.)")
 
-    fig, ax = plt.subplots(figsize=PDF_FIGSIZE, constrained_layout=True)
-    im = ax.pcolormesh(x_axis, width_mhz_axis, Z, shading="auto", cmap="viridis_r")
-    fig.colorbar(im, ax=ax, label=r"Uniformity$_w$ ($\sigma_w/\mu_w$) (%)")
-
-    if len(waist_excluded):
-        ax.plot(waist_excluded, width_excluded, "x", color="lightgray", markeredgecolor="dimgray",
-                 markersize=8, markeredgewidth=2, label="valley point, excluded (scan-window artifact)")
-    ax.plot(waist_used, width_used, "o", color="white", markeredgecolor="black",
-             markersize=6, label="valley point, used for fit")
+    figsize = PDF_FIGSIZE_CROSSTALK if show_crosstalk_2d else PDF_FIGSIZE
+    if show_crosstalk_2d:
+        fig, (ax, ax_ct2d, ax_cut) = plt.subplots(1, 3, figsize=figsize, constrained_layout=True)
+    else:
+        fig, (ax, ax_cut) = plt.subplots(1, 2, figsize=figsize, constrained_layout=True)
 
     xs = np.linspace(waist_used.min(), waist_used.max(), 200)
     func, formula_str = MODELS[model_name]
-    ax.plot(xs, func(xs, *popt), "-", color="red", linewidth=3.0, label=f"fit ({model_name})")
 
-    ax.set_xlabel(r"effective waist at focal plane ($\mu$m)")
-    ax.set_ylabel("width (MHz)")
-    ax.set_title("Waist-width coupling (fixed-amplitude scan)")
-    ax.legend(loc="best", fontsize=9)
+    def _draw_valley_and_fit(ax_hm):
+        """Talpunkte + Fit-Kurve + bester Punkt - identisch fuer die
+        Uniformity- UND (falls gezeigt) die Crosstalk-Heatmap, damit beide
+        Panels 1:1 vergleichbar sind (dieselben (waist,width)-Koordinaten,
+        nur eine andere Groesse als Hintergrundfarbe)."""
+        if len(waist_excluded):
+            ax_hm.plot(waist_excluded, width_excluded, "x", color="lightgray", markeredgecolor="dimgray",
+                        markersize=8, markeredgewidth=2, label="valley point, excluded (scan-window artifact)")
+        ax_hm.plot(waist_used, width_used, "o", color="white", markeredgecolor="black",
+                    markersize=6, label="valley point, used for fit")
+        ax_hm.plot(xs, func(xs, *popt), "-", color="red", linewidth=3.0, label=f"fit ({model_name})")
+        if best_point is not None:
+            ax_hm.plot(best_point["waist_um"], best_point["width_mhz"],
+                        label=best_point["label"], **BEST_POINT_STYLE)
+        ax_hm.set_xlabel(r"effective waist at focal plane ($\mu$m)")
+        ax_hm.set_ylabel("width (MHz)")
 
-    _finish_fig(fig, f"{prefix}_waist_width_fit.pdf", out_dir, show, save)
+    # --- linkes Panel: Uniformity-Heatmap + Talpunkte + Fit-Kurve (wie bisher) ---
+    im = ax.pcolormesh(x_axis, width_mhz_axis, Z, shading="auto", cmap="viridis_r")
+    fig.colorbar(im, ax=ax, label=r"Uniformity$_w$ ($\sigma_w/\mu_w$) (%)")
+    _draw_valley_and_fit(ax)
+    ax.set_title("Uniformity (fixed-amplitude scan)" if show_crosstalk_2d
+                 else "Waist-width coupling (fixed-amplitude scan)")
+    ax.legend(loc="best", fontsize=legend_fontsize)
+
+    # --- mittleres Panel (NEU, nur falls SHOW_CROSSTALK=True): dieselbe
+    # 2D-Ansicht, aber fuer Crosstalk_w statt Uniformity_w - auf User-Wunsch
+    # ("bitte noch die 2D Ansicht des Crosstalks dazu"). ---
+    if show_crosstalk_2d:
+        im_ct = ax_ct2d.pcolormesh(x_axis, width_mhz_axis, Z_ct, shading="auto", cmap="magma_r")
+        fig.colorbar(im_ct, ax=ax_ct2d, label=r"Crosstalk$_w$ ($\eta$) (%)")
+        _draw_valley_and_fit(ax_ct2d)
+        ax_ct2d.set_title("Crosstalk (fixed-amplitude scan)")
+        ax_ct2d.legend(loc="best", fontsize=legend_fontsize)
+
+    # --- rechtes Panel: Uniformity_w (und optional Crosstalk_w) entlang der
+    # Fit-Kurve (NEU) ---
+    waist_cut, width_cut, uniformity_cut, crosstalk_cut = cut_along_fit(
+        results, model_name, popt, waist_lo=x_axis.min(), waist_hi=x_axis.max())
+
+    ax_cut.axvspan(waist_used.min(), waist_used.max(), color="tab:green", alpha=0.10,
+                    label="reliable fit domain")
+    l1, = ax_cut.plot(waist_cut, uniformity_cut, "-", color="red", linewidth=2.0,
+                        label=f"Uniformity, along fit ({model_name})")
+    # Talpunkt-Uniformity (echtes Minimum je Spalte) zum Vergleich - zeigt,
+    # wie nah die (einfache) Fit-Kurve am tatsaechlichen Optimum je Waist liegt.
+    # Dieselbe Interpolationsgrundlage wie cut_along_fit() (siehe
+    # _uniformity_interpolator), nicht das oben ggf. geflippte Plot-Z.
+    interp_used = _uniformity_interpolator(results)
+    win_input_used = _waist_um_to_win_input(results, waist_used)
+    width_used_hz = width_used * 1e6
+    points_used = np.column_stack([width_used_hz, win_input_used])
+    valley_uniformity_used = interp_used(points_used) * 100.0
+    l2, = ax_cut.plot(waist_used, valley_uniformity_used, "o", color="black", markersize=4,
+                        label="Uniformity, true valley minimum")
+
+    handles = [l1, l2]
+    ax_cut.set_xlabel(r"effective waist at focal plane ($\mu$m)")
+    ax_cut.set_ylabel(r"Uniformity$_w$ ($\sigma_w/\mu_w$) (%)", color="red")
+    ax_cut.tick_params(axis="y", labelcolor="red")
+
+    # Crosstalk_w (eta_weighted_grid) auf einer zweiten y-Achse (auf
+    # User-Wunsch, per SHOW_CROSSTALK an/abschaltbar) - eigene Achse statt
+    # gemeinsam mit Uniformity_w, damit beide Kurven unabhaengig von ihrer
+    # relativen Groessenordnung gut lesbar bleiben.
+    if show_crosstalk_2d:
+        ax_ct = ax_cut.twinx()
+        l3, = ax_ct.plot(waist_cut, crosstalk_cut, "--", color="tab:blue", linewidth=2.0,
+                           label=f"Crosstalk, along fit ({model_name})")
+        interp_c_used = _crosstalk_interpolator(results)
+        crosstalk_used = interp_c_used(points_used) * 100.0
+        l4, = ax_ct.plot(waist_used, crosstalk_used, "s", color="navy", markersize=4,
+                           label="Crosstalk, at valley point")
+        ax_ct.set_ylabel(r"Crosstalk$_w$ ($\eta$) (%)", color="tab:blue")
+        ax_ct.tick_params(axis="y", labelcolor="tab:blue")
+        handles += [l3, l4]
+
+        if best_point is not None and best_point.get("crosstalk_percent") is not None:
+            (bp_ct,) = ax_ct.plot(best_point["waist_um"], best_point["crosstalk_percent"],
+                                    label=best_point["label"], **BEST_POINT_STYLE)
+
+    if best_point is not None and best_point["uniformity_percent"] is not None:
+        (bp_u,) = ax_cut.plot(best_point["waist_um"], best_point["uniformity_percent"],
+                                label=best_point["label"], **BEST_POINT_STYLE)
+        # Bester Punkt nur EINMAL in der Legende (Uniformity-Achse reicht -
+        # bei show_crosstalk erscheint er ggf. zusaetzlich, aber unbeschriftet,
+        # auf der Crosstalk-Achse, siehe oben).
+        handles.append(bp_u)
+
+    ax_cut.set_title("Uniformity / Crosstalk cut along the fitted line"
+                      if show_crosstalk_2d else "Uniformity cut along the fitted line")
+    # Gleiche x-Achse wie das Heatmap-Panel (statt Auto-Crop auf den letzten
+    # endlichen Punkt) - macht sichtbar, dass die Kurve jenseits des
+    # zuverlaessigen Bereichs abbricht, weil die Fit-Vorhersage dort das
+    # gescannte width-Fenster verlaesst (siehe cut_along_fit()-Docstring).
+    ax_cut.set_xlim(x_axis.min(), x_axis.max())
+    if show_crosstalk_2d:
+        # loc="best" beruecksichtigt bei einer zweiten y-Achse (twinx) NICHT
+        # deren Kurven (matplotlib kennt nur die Artists der eigenen Achse) -
+        # koennte die Legende also mitten auf die (ggf. stark oszillierende)
+        # Crosstalk-Kurve legen, die je nach Datensatz unterschiedlich hoch
+        # ausschlagen kann. Robuste Loesung: Legende komplett AUSSERHALB des
+        # Panels platzieren (rechts daneben, siehe PDF_FIGSIZE_CROSSTALK) -
+        # dort ueberlappt sie nie mit irgendwelchen Kurven, unabhaengig von
+        # deren Form.
+        ax_cut.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.16, 1.0),
+                       fontsize=legend_fontsize, borderaxespad=0.0)
+    else:
+        # Ohne Crosstalk (nur EINE Kurve, monoton) reicht die normale
+        # In-Panel-Platzierung wie bisher - keine Notwendigkeit fuer die
+        # breitere Figur/externe Legende.
+        ax_cut.legend(handles=handles, loc="best", fontsize=legend_fontsize)
+
+    _finish_fig(fig, f"{prefix}_waist_width_fit.pdf", out_dir, show, save, ask_before_save=ask_before_save)
 
 
 # ======================================================================
-# 5) Predictor + Inverse
+# 6) Predictor + Inverse
 # ======================================================================
 def make_predictor(model_name, popt):
     func, _ = MODELS[model_name]
@@ -460,23 +790,46 @@ def make_predictor(model_name, popt):
 # ======================================================================
 # main
 # ======================================================================
-def main():
-    print(f"Lade '{PKL_DATEI}' ...")
+def main(pkl_datei=None, output_prefix=None, draw_best_point=None, legend_fontsize=None,
+         ask_before_save=None, save=None, show=None, show_crosstalk=None):
+    """Alle Parameter sind optional - None faellt auf die Modul-Konfiguration
+    oben zurueck (PKL_DATEI/OUTPUT_PREFIX/DRAW_BEST_POINT/LEGEND_FONTSIZE/
+    ASK_BEFORE_SAVE/SAVE/SHOW/SHOW_CROSSTALK). Identisches Muster wie in
+    fit_central_amplitudes.py's main() - genutzt von run_all_fits.py."""
+    pkl_datei = PKL_DATEI if pkl_datei is None else pkl_datei
+    output_prefix = OUTPUT_PREFIX if output_prefix is None else output_prefix
+    draw_best_point = DRAW_BEST_POINT if draw_best_point is None else draw_best_point
+    legend_fontsize = LEGEND_FONTSIZE if legend_fontsize is None else legend_fontsize
+    ask_before_save = ASK_BEFORE_SAVE if ask_before_save is None else ask_before_save
+    save = SAVE if save is None else save
+    show = SHOW if show is None else show
+    show_crosstalk = SHOW_CROSSTALK if show_crosstalk is None else show_crosstalk
+
+    print(f"Lade '{pkl_datei}' ...")
     try:
-        results = load_amp_scan_results(PKL_DATEI)
+        results = load_amp_scan_results(pkl_datei)
     except FileNotFoundError:
         vorhandene = sorted(p.name for p in DEFAULT_RESULTS_DIR.glob("scan_data_weighted_*.pkl"))
-        print(f"'{PKL_DATEI}' wurde weder im aktuellen Ordner noch in '{DEFAULT_RESULTS_DIR}' gefunden.")
+        print(f"'{pkl_datei}' wurde weder im aktuellen Ordner noch in '{DEFAULT_RESULTS_DIR}' gefunden.")
         if vorhandene:
             print("Vorhandene Fest-Amplitude-Scan-Dateien ('scan_data_weighted_...pkl'):")
             for name in vorhandene:
                 print(f"  - {name}")
-        return
+        return None
     if "uniformity_weighted_grid" not in results:
         print("Diese Datei enthaelt kein 'uniformity_weighted_grid' - ist das wirklich ein "
               "Fest-Amplitude-Scan (scan_data_weighted_...pkl), kein Amplituden-Scan "
               "(scan_amp_data_weighted_...pkl)?")
-        return
+        return None
+
+    best_point = _find_best_point(results) if draw_best_point else None
+    if draw_best_point:
+        if best_point is not None:
+            print(f"   Bester Punkt (automatisch, aus results['best']): "
+                  f"waist_um={best_point['waist_um']:.4f}, width_mhz={best_point['width_mhz']:.4f}")
+        else:
+            print("   DRAW_BEST_POINT=True, aber kein gueltiger 'best'-Eintrag in dieser Datei - "
+                  "kein Punkt eingezeichnet.")
 
     print("\n1) Uniformity_w-Tal extrahieren (ein Punkt pro Waist-Spalte) ...")
     waist_all, width_all = extract_valley(results)
@@ -522,20 +875,29 @@ def main():
     print(f"   {param_str}")
     print(f"   R²(volle bereinigte Daten, NICHT CV, nur Sanity-Check) = {r2_fulldata:.5f}")
 
+    do_save = False
     if PLOT_FITS:
         print(f"\n4) Diagnose-Plot erzeugen (Ordner: {FIT_PLOTS_DIR}) ...")
-        save = SAVE
-        if SAVE and ASK_BEFORE_SAVE:
+        do_save = save
+        if save and ask_before_save:
             try:
                 antwort = input("Diagnose-Plot in 'Fit_Plots/um_waist' speichern? [y/N]: ").strip().lower()
-                save = antwort in ("y", "yes", "j", "ja")
-                if not save:
-                    print("-> Bild wird NICHT gespeichert (nur angezeigt, falls SHOW=True).")
+                do_save = antwort in ("y", "yes", "j", "ja")
+                if not do_save:
+                    print("-> Bild wird NICHT gespeichert (nur angezeigt, falls show=True).")
             except EOFError:
-                print(f"(ASK_BEFORE_SAVE=True, aber keine Eingabe möglich (kein Terminal) - "
-                      f"verwende SAVE={SAVE} wie konfiguriert.)")
+                print(f"(ask_before_save=True, aber keine Eingabe möglich (kein Terminal) - "
+                      f"verwende save={save} wie konfiguriert.)")
         plot_waist_width_fit(results, waist_used, width_used, waist_excl, width_excl,
-                              best_name, popt, show=SHOW, save=save)
+                              best_name, popt, prefix=output_prefix, show=show, save=do_save,
+                              best_point=best_point, legend_fontsize=legend_fontsize,
+                              show_crosstalk=show_crosstalk, ask_before_save=ask_before_save)
+
+    formula_doc = None
+    if do_save:
+        formula_doc = write_formula_doc(
+            output_prefix, best_name, popt, cv_results[best_name]["r2_mean"],
+            cv_results[best_name]["r2_std"], r2_fulldata, waist_used, waist_excl, best_point)
 
     predict_width_mhz, predict_waist_um = make_predictor(best_name, popt)
     print(f"\nFertig. Modell '{best_name}' gilt fuer waist_um in "
@@ -544,7 +906,8 @@ def main():
     return dict(model=best_name, popt=popt, cv_results=cv_results,
                 waist_used=waist_used, width_used=width_used,
                 waist_excluded=waist_excl, width_excluded=width_excl,
-                predict_width_mhz=predict_width_mhz, predict_waist_um=predict_waist_um)
+                predict_width_mhz=predict_width_mhz, predict_waist_um=predict_waist_um,
+                best_point=best_point, formula_doc=formula_doc)
 
 
 if __name__ == "__main__":

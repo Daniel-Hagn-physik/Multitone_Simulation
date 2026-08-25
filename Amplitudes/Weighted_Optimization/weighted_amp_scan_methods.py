@@ -128,6 +128,11 @@ def scan_win_width_weighted_uniformity(self, win_input_range, width_range,
         print(f"2D scan (ATOM-WEIGHTED): uniformity_weighted & eta_weighted over win_input "
               f"({n_win_input} points) x width ({n_width} points), N_x={self.N_x}, N_y={self.N_y}, "
               f"sigma_atom={self.sigma_atom * 1e9:.1f} nm")
+        if self.atom_offset_x != 0.0 or self.atom_offset_y != 0.0:
+            print(f"Atom/neighbor position offset: atom_offset_x={self.atom_offset_x * 1e6:+.3f} um "
+                  f"({self.atom_offset_x / self.pitch:+.3f} x pitch), "
+                  f"atom_offset_y={self.atom_offset_y * 1e6:+.3f} um "
+                  f"({self.atom_offset_y / self.pitch:+.3f} x pitch)")
         print("=" * 60)
 
     for i, width_val in enumerate(width_vals):
@@ -197,6 +202,7 @@ def get_scan_weighted_results(self):
         lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
         profile=self.profile,
         atom_mass=self.atom_mass, atom_temperature=self.atom_temperature, trap_freq_r=self.trap_freq_r,
+        atom_offset_x=self.atom_offset_x, atom_offset_y=self.atom_offset_y, pitch=self.pitch,
     )
     return res
 

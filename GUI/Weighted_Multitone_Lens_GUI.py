@@ -65,7 +65,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 
-from Strahlanalyse.lens_design_dialog import LensDesignDialog
+from lens_design_dialog import LensDesignDialog
 
 
 # ============================================================
@@ -416,12 +416,32 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             "atom_temperature": 17e-6,   # K  (Startwert aus der Messung)
             "atom_trap_freq": 60.4e3,    # Hz (Startwert aus der Messung, nu_r)
             "sigma_atom": None,           # wird laufend nachgerechnet (Cache)
+
+            # --- NEU: Atom-Position innerhalb des Lichtmusters ---
+            # Verschiebung des Atoms relativ zum Zentrum des Lichtflecks
+            # (r_center), unabhängig einstellbar in x und y, begrenzt auf
+            # +/- pitch/2 (weiter kann sich das Atom nicht von "seinem" Site
+            # entfernen, ohne dass ein Nachbar-Site naeher waere). Fliesst in
+            # ALLE Uniformity-/Crosstalk-Metriken (hart wie gewichtet) sowie
+            # in die Fadenkreuz-Standardposition ein - siehe _atom_center().
+            "atom_offset_x": 0.0,   # m
+            "atom_offset_y": 0.0,   # m
+
+            # --- NEU: manueller Update-Modus ---
+            # Ist "manual_update_mode" True, loesen Slider/Checkboxen/Drag&Drop
+            # etc. KEIN sofortiges Neuzeichnen mehr aus - stattdessen wird nur
+            # der interne state aktualisiert und "_pending_manual_update"
+            # gesetzt; erst ein Klick auf den "Update now"-Button (siehe
+            # on_manual_update_clicked()) fuehrt dann ein vollstaendiges
+            # full_update(force=True) aus.
+            "manual_update_mode": False,
         }
         self.state["win_in"] = conjugate_waist(self.state["win"], self.state["f1"], self.state["f2"])
         self.state["sigma_atom"] = self._current_sigma_atom()
         self.lens_dialog = None
         self.cache = {}
         self.dragging_target = None
+        self._pending_manual_update = False
 
         # Widgets, die dynamisch neu erzeugt werden (Amplituden-Panel)
         self.amp_spinboxes_x = []
@@ -470,12 +490,14 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         control_layout = QVBoxLayout(control_container)
         control_layout.setAlignment(Qt.AlignTop)
 
+        control_layout.addWidget(self._build_update_mode_group())
         control_layout.addWidget(self._build_grid_group())
         control_layout.addWidget(self._build_lens_group())
         control_layout.addWidget(self._build_param_group())
         control_layout.addWidget(self._build_profile_group())
         control_layout.addWidget(self._build_amp_group())
         control_layout.addWidget(self._build_atom_group())
+        control_layout.addWidget(self._build_atom_position_group())
         control_layout.addWidget(self._build_region_group())
         control_layout.addWidget(self._build_crosshair_group())
         control_layout.addWidget(self._build_save_group())
@@ -495,6 +517,28 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.canvas.mpl_connect("button_press_event", self.on_button_press)
         self.canvas.mpl_connect("motion_notify_event", self.on_motion)
         self.canvas.mpl_connect("button_release_event", self.on_release)
+
+    def _build_update_mode_group(self):
+        """NEU: Umschalter zwischen dem bisherigen Live-Update (GUI zeichnet
+        bei jeder Änderung sofort neu) und einem manuellen Modus, bei dem
+        Änderungen nur den internen state aktualisieren und die eigentliche
+        Neuberechnung/Neuzeichnung erst per Klick auf "Update now" passiert."""
+        box = QGroupBox("Update Mode")
+        layout = QVBoxLayout(box)
+
+        self.cb_manual_update = QCheckBox("Manual update (apply changes only via button)")
+        self.cb_manual_update.setChecked(self.state["manual_update_mode"])
+        layout.addWidget(self.cb_manual_update)
+
+        self.btn_manual_update = QPushButton("Update now")
+        self.btn_manual_update.setEnabled(self.state["manual_update_mode"])
+        layout.addWidget(self.btn_manual_update)
+
+        self.label_manual_update_status = QLabel("")
+        self.label_manual_update_status.setWordWrap(True)
+        layout.addWidget(self.label_manual_update_status)
+
+        return box
 
     def _build_grid_group(self):
         box = QGroupBox("Spot Grid")
@@ -671,6 +715,50 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self._update_atom_labels()
         return self.atom_group
 
+    def _build_atom_position_group(self):
+        """NEU: Verschiebung des Atoms relativ zum Zentrum des Lichtflecks
+        (dem Site, an dem die Falle nominell sitzt) - z.B. um eine
+        Fehljustage/einen Versatz zwischen Dipolfalle und Lichtmuster zu
+        untersuchen. Wirkt auf ALLE Uniformity-/Crosstalk-Metriken (hart wie
+        atom-gewichtet) sowie auf die Standardposition des Fadenkreuzes -
+        siehe _atom_center(). Begrenzt auf +/- pitch/2 in jeder Dimension
+        (siehe _max_atom_offset())."""
+        self.atom_pos_group = QGroupBox("Atom Position (offset from light-pattern center)")
+        layout = QGridLayout(self.atom_pos_group)
+        row = 0
+
+        max_offset_nm = int(round(self._max_atom_offset() * 1e9))
+
+        self.label_atom_offset_x = QLabel()
+        layout.addWidget(self.label_atom_offset_x, row, 0, 1, 2)
+        row += 1
+        self.slider_atom_offset_x = QSlider(Qt.Horizontal)
+        self.slider_atom_offset_x.setRange(-max_offset_nm, max_offset_nm)
+        self.slider_atom_offset_x.setValue(int(round(self.state["atom_offset_x"] * 1e9)))
+        layout.addWidget(self.slider_atom_offset_x, row, 0, 1, 2)
+        row += 1
+
+        self.label_atom_offset_y = QLabel()
+        layout.addWidget(self.label_atom_offset_y, row, 0, 1, 2)
+        row += 1
+        self.slider_atom_offset_y = QSlider(Qt.Horizontal)
+        self.slider_atom_offset_y.setRange(-max_offset_nm, max_offset_nm)
+        self.slider_atom_offset_y.setValue(int(round(self.state["atom_offset_y"] * 1e9)))
+        layout.addWidget(self.slider_atom_offset_y, row, 0, 1, 2)
+        row += 1
+
+        self.btn_center_atom = QPushButton("Center atom (Δ = 0)")
+        layout.addWidget(self.btn_center_atom, row, 0, 1, 2)
+        row += 1
+
+        note = QLabel(f"(limited to ± pitch/2 = ±{self._max_atom_offset()*1e6:.3f} µm per axis)")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addWidget(note, row, 0, 1, 2)
+
+        self._update_atom_offset_labels()
+        return self.atom_pos_group
+
     def _build_region_group(self):
         self.region_group = QGroupBox("Regions (Uniformity / Crosstalk)")
         layout = QVBoxLayout(self.region_group)
@@ -763,6 +851,23 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         omega = 2 * np.pi * self.state["atom_trap_freq"]
         return sigma_thermal(m, omega, self.state["atom_temperature"])
 
+    def _atom_center(self):
+        """Tatsächliche Position des Atoms: das Zentrum des Lichtflecks
+        (r_center, für x und y identisch, siehe compute_centers()) plus die
+        über die Slider einstellbare Verschiebung atom_offset_x/y. Diese
+        Position - NICHT mehr einfach (r_center, r_center) - ist ab jetzt
+        der maßgebliche Bezugspunkt für Uniformity-/Crosstalk-Regionen
+        (hart wie gewichtet), die sigma_atom-Konturen/-Kreise und die
+        Standard-/Reset-Position des Fadenkreuzes."""
+        r_center = self.cache.get("r_center", 0.0)
+        return r_center + self.state["atom_offset_x"], r_center + self.state["atom_offset_y"]
+
+    def _max_atom_offset(self):
+        """Maximal erlaubte Verschiebung des Atoms in jeder Dimension:
+        +/- die Hälfte des Site-Pitch (weiter entfernt läge das Atom näher
+        an einem Nachbar-Site als am eigenen)."""
+        return pitch / 2
+
     def _update_atom_labels(self):
         sigma = self._current_sigma_atom()
         self.state["sigma_atom"] = sigma
@@ -778,15 +883,46 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         else:
             self.label_sigma_atom.setText("σ_atom: ungültig (Parameter prüfen)")
 
+    def _update_atom_offset_labels(self):
+        max_offset = self._max_atom_offset()
+        dx, dy = self.state["atom_offset_x"], self.state["atom_offset_y"]
+        self.label_atom_offset_x.setText(
+            f"Δx = {dx*1e6:+.3f} µm  ({dx/max_offset*100:+.0f} % of pitch/2)"
+        )
+        self.label_atom_offset_y.setText(
+            f"Δy = {dy*1e6:+.3f} µm  ({dy/max_offset*100:+.0f} % of pitch/2)"
+        )
+
     def _update_region_controls_enabled(self):
         is_weighted = self.state["weighted_mode"]
         self.btn_uniform_to_spots.setEnabled(not is_weighted)
         self.btn_crosstalk_to_pitch.setEnabled(not is_weighted)
 
+    def _mark_pending(self):
+        """Wird von allen *_update()-Methoden aufgerufen, wenn im manuellen
+        Modus eine Neuberechnung/Neuzeichnung wegen einer Zustandsänderung
+        eigentlich fällig wäre, aber (mangels Klick auf 'Update now')
+        übersprungen wird - vermerkt das nur fürs Status-Label."""
+        self._pending_manual_update = True
+        self._update_manual_status_label()
+
+    def _update_manual_status_label(self):
+        if not self.state.get("manual_update_mode", False):
+            self.label_manual_update_status.setText("")
+            return
+        if self._pending_manual_update:
+            self.label_manual_update_status.setText("Changes pending – click 'Update now'")
+            self.label_manual_update_status.setStyleSheet("color: #b36b00; font-weight: bold; font-size: 10px;")
+        else:
+            self.label_manual_update_status.setText("Up to date")
+            self.label_manual_update_status.setStyleSheet("color: gray; font-size: 10px;")
+
     # --------------------------------------------------------
     # Signale verbinden
     # --------------------------------------------------------
     def _connect_signals(self):
+        self.cb_manual_update.stateChanged.connect(self.on_manual_mode_toggle)
+        self.btn_manual_update.clicked.connect(self.on_manual_update_clicked)
         self.spin_nx.valueChanged.connect(self.on_nx_changed)
         self.spin_ny.valueChanged.connect(self.on_ny_changed)
         self.combo_f1.currentIndexChanged.connect(self.on_f1_changed)
@@ -803,6 +939,9 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.combo_species.currentTextChanged.connect(self.on_species_changed)
         self.slider_atom_T.valueChanged.connect(self.on_atom_T_changed)
         self.slider_atom_nu.valueChanged.connect(self.on_atom_nu_changed)
+        self.slider_atom_offset_x.valueChanged.connect(self.on_atom_offset_x_changed)
+        self.slider_atom_offset_y.valueChanged.connect(self.on_atom_offset_y_changed)
+        self.btn_center_atom.clicked.connect(self.on_center_atom_clicked)
         self.btn_uniform_to_spots.clicked.connect(self.on_set_uniform_to_spots)
         self.btn_crosstalk_to_pitch.clicked.connect(self.on_set_crosstalk_to_pitch)
         self.btn_reset_crosshair.clicked.connect(self.on_reset_crosshair)
@@ -879,13 +1018,13 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         halten jeweils die AKTIVE (im Titel angezeigte) Metrik.
         """
         X, Y = self.cache["X"], self.cache["Y"]
-        r_center = self.cache["r_center"]
+        atom_cx, atom_cy = self._atom_center()
         I_ort = self.cache["I_ort"]
         I_neighbor = self.cache["I_neighbor"]
 
-        # --- harte Box-Metriken ---
-        mask_uniformity = overlap_mask_pitch(X, Y, r_center, r_center, self.state["uniformity_side_length"])
-        mask_crosstalk = overlap_mask_pitch(X, Y, r_center, r_center, self.state["crosstalk_side_length"])
+        # --- harte Box-Metriken (um die tatsächliche Atom-Position, siehe _atom_center()) ---
+        mask_uniformity = overlap_mask_pitch(X, Y, atom_cx, atom_cy, self.state["uniformity_side_length"])
+        mask_crosstalk = overlap_mask_pitch(X, Y, atom_cx, atom_cy, self.state["crosstalk_side_length"])
 
         I_inside_uniform = I_ort[mask_uniformity]
         I_inside_cross = I_ort[mask_crosstalk]
@@ -914,7 +1053,7 @@ class WeightedFlatMultiToneWindow(QMainWindow):
 
         if sigma_atom is not None and np.isfinite(sigma_atom) and sigma_atom > 0:
             xs, ys, Xs, Ys = build_local_weighted_grid(
-                r_center, r_center, sigma_atom, WEIGHTED_N_SIGMA, WEIGHTED_GRID_N
+                atom_cx, atom_cy, sigma_atom, WEIGHTED_N_SIGMA, WEIGHTED_GRID_N
             )
             I_own_raw = compute_intensity_profile(
                 Xs, Ys, centers_x, centers_y, self.state["win"], amp_spots, self.state["use_airy"]
@@ -922,7 +1061,7 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             I_neigh_raw = local_neighbor_intensity(
                 Xs, Ys, pitch, centers_x, centers_y, self.state["win"], amp_spots, self.state["use_airy"]
             )
-            W = atom_weight_2d(Xs, Ys, r_center, r_center, sigma_atom)
+            W = atom_weight_2d(Xs, Ys, atom_cx, atom_cy, sigma_atom)
 
             # uniformity_weighted/eta_weighted sind skaleninvariante Verhältnisse -
             # eine gemeinsame Normierung von I_own/I_neigh ändert den Wert nicht,
@@ -987,32 +1126,34 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             self.cache["crosstalk"] = crosstalk_hard
 
     def _local_cut_arrays(self, n_points):
-        """Feine 1D-Schnittlinien (x und y) durch r_center für den gewichteten
-        Modus, plus normierte Intensität und normierte Wahrscheinlichkeits-
-        dichte entlang jeder Linie. Ersetzt im gewichteten Modus die groben
-        Schnitte aus dem globalen GRID_N/GRID_N_HIGHRES-Gitter, das für
-        sigma_atom-Skalen (~100 nm) zu grob aufgelöst wäre."""
-        r_center = self.cache["r_center"]
+        """Feine 1D-Schnittlinien (x und y) durch die tatsächliche Atom-
+        Position (_atom_center(), i.e. r_center + Atom-Offset) für den
+        gewichteten Modus, plus normierte Intensität und normierte
+        Wahrscheinlichkeitsdichte entlang jeder Linie. Ersetzt im
+        gewichteten Modus die groben Schnitte aus dem globalen GRID_N/
+        GRID_N_HIGHRES-Gitter, das für sigma_atom-Skalen (~100 nm) zu grob
+        aufgelöst wäre."""
+        atom_cx, atom_cy = self._atom_center()
         centers_x, centers_y = self.cache["centers_x"], self.cache["centers_y"]
         amp_spots = self.current_amp_spots()
         sigma = self.state["sigma_atom"]
 
-        x_line, y_line = build_local_cut_lines(r_center, r_center, sigma, WEIGHTED_N_SIGMA, n_points)
+        x_line, y_line = build_local_cut_lines(atom_cx, atom_cy, sigma, WEIGHTED_N_SIGMA, n_points)
 
         I_x = compute_intensity_profile(
-            x_line, np.full_like(x_line, r_center), centers_x, centers_y,
+            x_line, np.full_like(x_line, atom_cy), centers_x, centers_y,
             self.state["win"], amp_spots, self.state["use_airy"]
         )
         I_y = compute_intensity_profile(
-            np.full_like(y_line, r_center), y_line, centers_x, centers_y,
+            np.full_like(y_line, atom_cx), y_line, centers_x, centers_y,
             self.state["win"], amp_spots, self.state["use_airy"]
         )
         peak = max(np.max(I_x), np.max(I_y), 1e-300)
         I_x = I_x / peak
         I_y = I_y / peak
 
-        pdf_x = np.exp(-(x_line - r_center) ** 2 / (2 * sigma ** 2))
-        pdf_y = np.exp(-(y_line - r_center) ** 2 / (2 * sigma ** 2))
+        pdf_x = np.exp(-(x_line - atom_cx) ** 2 / (2 * sigma ** 2))
+        pdf_y = np.exp(-(y_line - atom_cy) ** 2 / (2 * sigma ** 2))
         return x_line, y_line, I_x, I_y, pdf_x, pdf_y
 
     def redraw_regions(self):
@@ -1046,29 +1187,34 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.rect_crosstalk.set_visible(True)
 
         r_center_um = self.cache["r_center"] * 1e6
+        atom_cx, atom_cy = self._atom_center()
+        atom_cx_um, atom_cy_um = atom_cx * 1e6, atom_cy * 1e6
         side_u_um = self.state["uniformity_side_length"] * 1e6
         side_c_um = self.state["crosstalk_side_length"] * 1e6
         half_u = side_u_um / 2
         half_c = side_c_um / 2
 
-        self.rect_uniformity.set_xy((r_center_um - half_u, r_center_um - half_u))
+        self.rect_uniformity.set_xy((atom_cx_um - half_u, atom_cy_um - half_u))
         self.rect_uniformity.set_width(2 * half_u)
         self.rect_uniformity.set_height(2 * half_u)
         self.rect_uniformity.set_label(f"Uniformity region ({side_u_um:.3f} µm)")
 
-        self.rect_crosstalk.set_xy((r_center_um - half_c, r_center_um - half_c))
+        self.rect_crosstalk.set_xy((atom_cx_um - half_c, atom_cy_um - half_c))
         self.rect_crosstalk.set_width(2 * half_c)
         self.rect_crosstalk.set_height(2 * half_c)
         self.rect_crosstalk.set_label(f"Crosstalk region ({side_c_um:.3f} µm)")
 
-        self.handle_uniformity.set_data([r_center_um + half_u], [r_center_um + half_u])
-        self.handle_crosstalk.set_data([r_center_um + half_c], [r_center_um + half_c])
+        self.handle_uniformity.set_data([atom_cx_um + half_u], [atom_cy_um + half_u])
+        self.handle_crosstalk.set_data([atom_cx_um + half_c], [atom_cy_um + half_c])
 
         legend = self.ax_main.legend(loc="upper right", fontsize=8)
         legend.set_zorder(10)
         legend.get_frame().set_alpha(1.0)
 
-        # Nachbar-Plot: klassische "Neighbor regions"-Ansicht (fixes Pitch-Fenster)
+        # Nachbar-Plot: klassische "Neighbor regions"-Ansicht (fixes Pitch-Fenster,
+        # weiterhin um das Lichtfleck-Zentrum r_center - das zeigt die Geometrie
+        # der Nachbar-Spots; die tatsächliche Atom-Position wird zusätzlich als
+        # Marker eingezeichnet, falls sie von r_center abweicht).
         self.ax_neighbor.clear()
         extent = [self.cache["x"][0] * 1e6, self.cache["x"][-1] * 1e6,
                   self.cache["y"][0] * 1e6, self.cache["y"][-1] * 1e6]
@@ -1076,6 +1222,9 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             self.cache["I_neighbor"], origin="lower", extent=extent, aspect="equal", cmap="viridis"
         )
         configure_neighbor_view(self.ax_neighbor, r_center_um, pitch * 1e6)
+        if abs(self.state["atom_offset_x"]) > 0 or abs(self.state["atom_offset_y"]) > 0:
+            self.ax_neighbor.plot(atom_cx_um, atom_cy_um, "+", color="red", markersize=10,
+                                   markeredgewidth=1.5, zorder=6, label="Atom")
         self.ax_neighbor.set_xlabel("Position $x$ (µm)", fontsize=8)
         self.ax_neighbor.set_ylabel("Position $y$ (µm)", fontsize=8)
         self.ax_neighbor.set_title("Neighbor regions (crosstalk contribution)", fontsize=8)
@@ -1099,19 +1248,19 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                 old.remove()
 
         self.cut_x_span_crosstalk = self.ax_cut_x.axvspan(
-            r_center_um - half_c, r_center_um + half_c,
+            atom_cx_um - half_c, atom_cx_um + half_c,
             facecolor=(1, 0, 0, 0.12), edgecolor="red", linewidth=1.2, zorder=0
         )
         self.cut_x_span_uniformity = self.ax_cut_x.axvspan(
-            r_center_um - half_u, r_center_um + half_u,
+            atom_cx_um - half_u, atom_cx_um + half_u,
             facecolor=(0, 1, 1, 0.18), edgecolor="cyan", linewidth=1.2, zorder=1
         )
         self.cut_y_span_crosstalk = self.ax_cut_y.axvspan(
-            r_center_um - half_c, r_center_um + half_c,
+            atom_cy_um - half_c, atom_cy_um + half_c,
             facecolor=(1, 0, 0, 0.12), edgecolor="red", linewidth=1.2, zorder=0
         )
         self.cut_y_span_uniformity = self.ax_cut_y.axvspan(
-            r_center_um - half_u, r_center_um + half_u,
+            atom_cy_um - half_u, atom_cy_um + half_u,
             facecolor=(0, 1, 1, 0.18), edgecolor="cyan", linewidth=1.2, zorder=1
         )
         legend_x = self.ax_cut_x.legend(fontsize=7, loc="upper right") if self.ax_cut_x.get_legend_handles_labels()[0] else None
@@ -1135,20 +1284,23 @@ class WeightedFlatMultiToneWindow(QMainWindow):
 
         self._clear_weighted_artists()
 
-        r_center = self.cache["r_center"]
-        r_center_um = r_center * 1e6
+        atom_cx, atom_cy = self._atom_center()
+        atom_cx_um, atom_cy_um = atom_cx * 1e6, atom_cy * 1e6
         sigma = self.state["sigma_atom"]
         sigma_um = sigma * 1e6 if (sigma is not None and np.isfinite(sigma)) else None
 
         # Hauptplot (große Ansicht): DEZENTE 1/2/3-sigma-Ringe (keine Legende)
         # an der eigenen Site UND an den 8 pitch-verschobenen Nachbar-Sites,
-        # nur zur groben räumlichen Orientierung.
+        # nur zur groben räumlichen Orientierung. Die Ringe folgen der
+        # tatsächlichen Atom-Position (inkl. Offset) - der Offset wird als
+        # für alle Sites identisch angenommen (systematischer Versatz
+        # Atom-Falle vs. Lichtmuster).
         if sigma_um is not None and sigma_um > 0:
             pitch_um = pitch * 1e6
             for ix in (-1, 0, 1):
                 for iy in (-1, 0, 1):
-                    cx = r_center_um + ix * pitch_um
-                    cy = r_center_um + iy * pitch_um
+                    cx = atom_cx_um + ix * pitch_um
+                    cy = atom_cy_um + iy * pitch_um
                     for n in (1, 2, 3):
                         circ = Circle((cx, cy), n * sigma_um, edgecolor="white", facecolor="none",
                                        linewidth=0.6, alpha=0.35, zorder=6)
@@ -1269,9 +1421,9 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             self.ax_cut_x.set_title(f"Cut along x  (y = {y0:.3f} µm)", fontsize=8)
             self.ax_cut_y.set_title(f"Cut along y  (x = {x0:.3f} µm)", fontsize=8)
         else:
-            r_center_um = self.cache["r_center"] * 1e6
-            self.ax_cut_x.set_title(f"Cut along x through atom site (y = {r_center_um:.3f} µm)", fontsize=8)
-            self.ax_cut_y.set_title(f"Cut along y through atom site (x = {r_center_um:.3f} µm)", fontsize=8)
+            atom_cx, atom_cy = self._atom_center()
+            self.ax_cut_x.set_title(f"Cut along x through atom  (y = {atom_cy*1e6:.3f} µm)", fontsize=8)
+            self.ax_cut_y.set_title(f"Cut along y through atom  (x = {atom_cx*1e6:.3f} µm)", fontsize=8)
 
     def update_crosshair_from_event(self, xdata_um, ydata_um):
         """Bewegt das Fadenkreuz zur Mausposition und aktualisiert (im harten
@@ -1288,6 +1440,10 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         row_idx = int(np.argmin(np.abs(y - y_m)))
         self.state["cut_row_idx"] = row_idx
         self.state["cut_col_idx"] = col_idx
+
+        if self.state.get("manual_update_mode", False):
+            self._mark_pending()
+            return
 
         if not self.state["weighted_mode"]:
             I_ort = self.cache["I_ort"]
@@ -1317,9 +1473,18 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.slider_win_in.setValue(int(round(self.state["win_in"] * 1e3 * 100)))
         self.slider_win_in.blockSignals(False)
 
-    def full_update(self):
-        """Neu: Zentren, Grid, Intensitätsbilder (bei N_x, N_y, win, width, f1, f2)."""
+    def full_update(self, force=False):
+        """Neu: Zentren, Grid, Intensitätsbilder (bei N_x, N_y, win, width, f1, f2).
+
+        Wenn "manual_update_mode" aktiv ist und der Aufruf nicht explizit mit
+        force=True erzwungen wird (das tut nur on_manual_update_clicked()),
+        wird die eigentliche Neuberechnung/Neuzeichnung übersprungen und nur
+        vermerkt, dass eine Aktualisierung aussteht - siehe _mark_pending()."""
         self._sync_waists()
+
+        if self.state.get("manual_update_mode", False) and not force:
+            self._mark_pending()
+            return
 
         centers_x, centers_y, r_center = compute_centers(
             self.state["N_x"], self.state["N_y"], self.state["width"],
@@ -1338,9 +1503,15 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         I_neighbor = create_neighbourhood(X, Y, pitch, centers_x, centers_y, self.state["win"],
                                            amps=amp_spots, use_airy=self.state["use_airy"])
 
-        mid_y_idx = len(y) // 2
-        mid_x_idx = len(x) // 2
-        # Fadenkreuz bei jeder Grid-Neuberechnung wieder auf die Mitte setzen
+        # Fadenkreuz bei jeder Grid-Neuberechnung auf die tatsächliche
+        # Atom-Position setzen (r_center + Atom-Offset, siehe _atom_center()) -
+        # NICHT einfach len(...)//2, das bei einer geraden Gitterauflösung
+        # (GRID_N) um einen halben Pixel neben dem geometrischen Zentrum liegt
+        # und zusätzlich den Atom-Offset ignorieren würde.
+        atom_cx_target = r_center + self.state["atom_offset_x"]
+        atom_cy_target = r_center + self.state["atom_offset_y"]
+        mid_y_idx = int(np.argmin(np.abs(y - atom_cy_target)))
+        mid_x_idx = int(np.argmin(np.abs(x - atom_cx_target)))
         self.state["cut_row_idx"] = mid_y_idx
         self.state["cut_col_idx"] = mid_x_idx
 
@@ -1402,10 +1573,16 @@ class WeightedFlatMultiToneWindow(QMainWindow):
 
         self.canvas.draw_idle()
 
-    def medium_update(self):
-        """Nur Intensitätsbilder neu (bei Amplituden-/Profiländerung), Grid/Zentren bleiben."""
+    def medium_update(self, force=False):
+        """Nur Intensitätsbilder neu (bei Amplituden-/Profiländerung), Grid/Zentren bleiben.
+
+        Siehe full_update() zum "manual_update_mode"-Gate."""
+        if self.state.get("manual_update_mode", False) and not force:
+            self._mark_pending()
+            return
+
         if "X" not in self.cache:
-            self.full_update()
+            self.full_update(force=force)
             return
 
         X, Y = self.cache["X"], self.cache["Y"]
@@ -1434,23 +1611,39 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.update_title()
         self.canvas.draw_idle()
 
-    def fast_update(self):
-        """Nur Masken/Kennzahlen/Rechtecke neu (beim Ziehen der Regionen, nur harter Modus relevant)."""
+    def fast_update(self, force=False):
+        """Nur Masken/Kennzahlen/Rechtecke neu (beim Ziehen der Regionen, nur harter Modus relevant).
+
+        Siehe full_update() zum "manual_update_mode"-Gate."""
+        if self.state.get("manual_update_mode", False) and not force:
+            self._mark_pending()
+            return
+
         if "X" not in self.cache:
-            self.full_update()
+            self.full_update(force=force)
             return
         self.compute_masks_and_metrics()
         self.redraw_regions()
         self.update_title()
         self.canvas.draw_idle()
 
-    def atom_update(self):
+    def atom_update(self, force=False):
         """NEU: leichte Update-Stufe für Änderungen an den Atom-Parametern
         (Spezies, Temperatur, Fallenfrequenz) - Grid/Intensitätsbilder
         bleiben unverändert, nur sigma_atom und alles davon Abhängige
         (gewichtete Metriken, Konturen, lokale Nahansicht, gezoomte
-        Schnittplots) werden neu berechnet."""
+        Schnittplots) werden neu berechnet.
+
+        Die Atom-Labels (Temperatur/Fallenfrequenz/sigma_atom-Text) werden
+        immer sofort aktualisiert (billig, reine Text-Anzeige) - nur die
+        eigentliche Neuberechnung/Neuzeichnung des Plots respektiert das
+        "manual_update_mode"-Gate, siehe full_update()."""
         self._update_atom_labels()
+
+        if self.state.get("manual_update_mode", False) and not force:
+            self._mark_pending()
+            return
+
         if "X" not in self.cache:
             return
         self.compute_masks_and_metrics()
@@ -1462,6 +1655,46 @@ class WeightedFlatMultiToneWindow(QMainWindow):
     # --------------------------------------------------------
     # Callbacks: Qt-Widgets
     # --------------------------------------------------------
+    def on_manual_mode_toggle(self, checked_state):
+        self.state["manual_update_mode"] = bool(checked_state)
+        self.btn_manual_update.setEnabled(self.state["manual_update_mode"])
+        if not self.state["manual_update_mode"] and self._pending_manual_update:
+            # Zurück in den Live-Modus: eine noch ausstehende Änderung sofort anwenden.
+            self.on_manual_update_clicked()
+        else:
+            self._update_manual_status_label()
+
+    def on_manual_update_clicked(self):
+        """Führt die im manuellen Modus zurückgehaltene(n) Änderung(en) jetzt
+        vollständig aus. full_update(force=True) berechnet dabei sicherheits-
+        halber immer ALLES neu (Grid, Zentren, Intensitätsbilder, Masken/
+        Kennzahlen, Overlays) - unabhängig davon, ob z.B. nur eine Amplitude,
+        ein Atom-Parameter oder eine Region-Größe geändert wurde. Da
+        full_update() das Fadenkreuz routinemäßig auf die Mitte zurücksetzt
+        (siehe dortiger Kommentar), wird die zuletzt vom Nutzer gewählte
+        Fadenkreuz-Position hier zusätzlich gesichert und - falls weiterhin
+        gültig - wiederhergestellt."""
+        saved_row = self.state.get("cut_row_idx")
+        saved_col = self.state.get("cut_col_idx")
+
+        self.full_update(force=True)
+
+        if saved_row is not None and saved_col is not None and "x" in self.cache:
+            n_y = len(self.cache["y"])
+            n_x = len(self.cache["x"])
+            if saved_row < n_y and saved_col < n_x:
+                self.state["cut_row_idx"] = saved_row
+                self.state["cut_col_idx"] = saved_col
+                if not self.state["weighted_mode"]:
+                    I_ort = self.cache["I_ort"]
+                    self.line_cut_x.set_ydata(I_ort[saved_row, :])
+                    self.line_cut_y.set_ydata(I_ort[:, saved_col])
+                self.redraw_crosshair()
+
+        self._pending_manual_update = False
+        self._update_manual_status_label()
+        self.canvas.draw_idle()
+
     def on_nx_changed(self, value):
         self.state["N_x"] = value
         self.state["amp_x"] = np.ones(value)
@@ -1562,6 +1795,28 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.state["atom_trap_freq"] = value * 1e3
         self.atom_update()
 
+    def on_atom_offset_x_changed(self, value):
+        self.state["atom_offset_x"] = value * 1e-9
+        self._update_atom_offset_labels()
+        self.fast_update()
+
+    def on_atom_offset_y_changed(self, value):
+        self.state["atom_offset_y"] = value * 1e-9
+        self._update_atom_offset_labels()
+        self.fast_update()
+
+    def on_center_atom_clicked(self):
+        self.state["atom_offset_x"] = 0.0
+        self.state["atom_offset_y"] = 0.0
+        self.slider_atom_offset_x.blockSignals(True)
+        self.slider_atom_offset_x.setValue(0)
+        self.slider_atom_offset_x.blockSignals(False)
+        self.slider_atom_offset_y.blockSignals(True)
+        self.slider_atom_offset_y.setValue(0)
+        self.slider_atom_offset_y.blockSignals(False)
+        self._update_atom_offset_labels()
+        self.fast_update()
+
     def on_set_uniform_to_spots(self):
         if "centers_x" not in self.cache:
             return
@@ -1575,12 +1830,20 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.fast_update()
 
     def on_reset_crosshair(self):
+        """Setzt das Fadenkreuz auf die tatsächliche Atom-Position zurück
+        (r_center + Atom-Offset, siehe _atom_center()) - nicht auf den rein
+        geometrischen Gittermittelpunkt, siehe Kommentar in full_update()."""
         if "x" not in self.cache:
             return
-        row_idx = len(self.cache["y"]) // 2
-        col_idx = len(self.cache["x"]) // 2
+        atom_cx, atom_cy = self._atom_center()
+        row_idx = int(np.argmin(np.abs(self.cache["y"] - atom_cy)))
+        col_idx = int(np.argmin(np.abs(self.cache["x"] - atom_cx)))
         self.state["cut_row_idx"] = row_idx
         self.state["cut_col_idx"] = col_idx
+
+        if self.state.get("manual_update_mode", False):
+            self._mark_pending()
+            return
 
         if not self.state["weighted_mode"]:
             I_ort = self.cache["I_ort"]
@@ -1657,6 +1920,8 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             self.state["N_x"], self.state["N_y"], self.state["width"],
             self.state["f1"], self.state["f2"]
         )
+        atom_cx = r_center + self.state["atom_offset_x"]
+        atom_cy = r_center + self.state["atom_offset_y"]
         x, y, X, Y = compute_grid(
             centers_x, centers_y, self.state["win"],
             self.state["uniformity_side_length"], self.state["crosstalk_side_length"],
@@ -1675,13 +1940,13 @@ class WeightedFlatMultiToneWindow(QMainWindow):
 
         if weighted and sigma_atom is not None and np.isfinite(sigma_atom) and sigma_atom > 0:
             xs, ys, Xs, Ys = build_local_weighted_grid(
-                r_center, r_center, sigma_atom, WEIGHTED_N_SIGMA, WEIGHTED_GRID_N_HIGHRES
+                atom_cx, atom_cy, sigma_atom, WEIGHTED_N_SIGMA, WEIGHTED_GRID_N_HIGHRES
             )
             I_own_raw = compute_intensity_profile(Xs, Ys, centers_x, centers_y, self.state["win"],
                                                     amp_spots, self.state["use_airy"])
             I_neigh_raw = local_neighbor_intensity(Xs, Ys, pitch, centers_x, centers_y, self.state["win"],
                                                      amp_spots, self.state["use_airy"])
-            W = atom_weight_2d(Xs, Ys, r_center, r_center, sigma_atom)
+            W = atom_weight_2d(Xs, Ys, atom_cx, atom_cy, sigma_atom)
             uniformity = weighted_uniformity(I_own_raw, W)
             crosstalk = weighted_crosstalk(I_own_raw, I_neigh_raw, W)
             peak_local = np.max(I_own_raw)
@@ -1707,20 +1972,20 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             else:
                 crosstalk_edge = crosstalk_diag = float("nan")
 
-            x_line, y_line = build_local_cut_lines(r_center, r_center, sigma_atom, WEIGHTED_N_SIGMA,
+            x_line, y_line = build_local_cut_lines(atom_cx, atom_cy, sigma_atom, WEIGHTED_N_SIGMA,
                                                      WEIGHTED_CUT_POINTS_HIGHRES)
-            I_x_line = compute_intensity_profile(x_line, np.full_like(x_line, r_center), centers_x, centers_y,
+            I_x_line = compute_intensity_profile(x_line, np.full_like(x_line, atom_cy), centers_x, centers_y,
                                                   self.state["win"], amp_spots, self.state["use_airy"])
-            I_y_line = compute_intensity_profile(np.full_like(y_line, r_center), y_line, centers_x, centers_y,
+            I_y_line = compute_intensity_profile(np.full_like(y_line, atom_cx), y_line, centers_x, centers_y,
                                                   self.state["win"], amp_spots, self.state["use_airy"])
             peak_line = max(np.max(I_x_line), np.max(I_y_line), 1e-300)
             I_x_line /= peak_line
             I_y_line /= peak_line
-            pdf_x = np.exp(-(x_line - r_center) ** 2 / (2 * sigma_atom ** 2))
-            pdf_y = np.exp(-(y_line - r_center) ** 2 / (2 * sigma_atom ** 2))
+            pdf_x = np.exp(-(x_line - atom_cx) ** 2 / (2 * sigma_atom ** 2))
+            pdf_y = np.exp(-(y_line - atom_cy) ** 2 / (2 * sigma_atom ** 2))
         else:
-            mask_u = overlap_mask_pitch(X, Y, r_center, r_center, self.state["uniformity_side_length"])
-            mask_c = overlap_mask_pitch(X, Y, r_center, r_center, self.state["crosstalk_side_length"])
+            mask_u = overlap_mask_pitch(X, Y, atom_cx, atom_cy, self.state["uniformity_side_length"])
+            mask_c = overlap_mask_pitch(X, Y, atom_cx, atom_cy, self.state["crosstalk_side_length"])
             uniformity = np.std(I_ort[mask_u]) / np.mean(I_ort[mask_u])
             crosstalk = np.sum(I_neighbor[mask_c]) / np.sum(I_ort[mask_c])
 
@@ -1732,8 +1997,8 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             y_pos_m = self.cache["y"][self.state["cut_row_idx"]]
             x_pos_m = self.cache["x"][self.state["cut_col_idx"]]
         else:
-            y_pos_m = r_center
-            x_pos_m = r_center
+            y_pos_m = atom_cy
+            x_pos_m = atom_cx
         mid_y_idx = int(np.argmin(np.abs(y - y_pos_m)))
         mid_x_idx = int(np.argmin(np.abs(x - x_pos_m)))
         y_pos_um = y[mid_y_idx] * 1e6
@@ -1767,17 +2032,19 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         ax1.axhline(y_pos_um, color="black", linewidth=0.8, zorder=6)
         ax1.axvline(x_pos_um, color="black", linewidth=0.8, zorder=6)
         r_um = r_center * 1e6
+        atom_cx_um, atom_cy_um = atom_cx * 1e6, atom_cy * 1e6
 
         if weighted and sigma_atom is not None and np.isfinite(sigma_atom) and sigma_atom > 0:
             # große Ansicht: dezente 1/2/3-sigma-Ringe an eigener Site + 8
             # Nachbarn, keine Legende (siehe interaktive Ansicht /
-            # _redraw_weighted_overlays()).
+            # _redraw_weighted_overlays()) - zentriert auf die tatsächliche
+            # Atom-Position (inkl. Offset).
             sigma_um = sigma_atom * 1e6
             pitch_um = pitch * 1e6
             for ix in (-1, 0, 1):
                 for iy in (-1, 0, 1):
                     for n in (1, 2, 3):
-                        ax1.add_patch(Circle((r_um + ix * pitch_um, r_um + iy * pitch_um), n * sigma_um,
+                        ax1.add_patch(Circle((atom_cx_um + ix * pitch_um, atom_cy_um + iy * pitch_um), n * sigma_um,
                                               edgecolor="white", facecolor="none",
                                               linewidth=0.6, alpha=0.35, zorder=6))
         else:
@@ -1785,10 +2052,10 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             side_c_um = self.state["crosstalk_side_length"] * 1e6
             half_u = side_u_um / 2
             half_c = side_c_um / 2
-            ax1.add_patch(Rectangle((r_um - half_u, r_um - half_u), 2 * half_u, 2 * half_u,
+            ax1.add_patch(Rectangle((atom_cx_um - half_u, atom_cy_um - half_u), 2 * half_u, 2 * half_u,
                                      edgecolor="cyan", facecolor="none", linewidth=2,
                                      label=f"Uniformity region ({side_u_um:.3f} µm)"))
-            ax1.add_patch(Rectangle((r_um - half_c, r_um - half_c), 2 * half_c, 2 * half_c,
+            ax1.add_patch(Rectangle((atom_cx_um - half_c, atom_cy_um - half_c), 2 * half_c, 2 * half_c,
                                      edgecolor="red", facecolor="none", linewidth=2,
                                      label=f"Crosstalk region ({side_c_um:.3f} µm)"))
             leg1 = ax1.legend(fontsize=EXPORT_FONTSIZE_LEGEND)
@@ -1818,6 +2085,10 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         else:
             ax2.imshow(I_neighbor, origin="lower", extent=extent, aspect="equal", cmap="viridis")
             configure_neighbor_view(ax2, r_um, pitch * 1e6)
+            if abs(self.state["atom_offset_x"]) > 0 or abs(self.state["atom_offset_y"]) > 0:
+                ax2.plot(atom_cx_um, atom_cy_um, "+", color="red", markersize=10,
+                         markeredgewidth=1.5, zorder=6, label="Atom")
+                ax2.legend(fontsize=EXPORT_FONTSIZE_LEGEND * 0.8, loc="upper right")
             ax2.set_title("Neighbor regions", fontsize=EXPORT_FONTSIZE_TITLE)
         ax2.set_xlabel("Position $x$ (µm)", fontsize=EXPORT_FONTSIZE_LABEL)
         ax2.set_ylabel("Position $y$ (µm)", fontsize=EXPORT_FONTSIZE_LABEL)
@@ -1828,13 +2099,13 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             ax3.fill_between(x_line * 1e6, 0, pdf_x, color="magenta", alpha=0.25, zorder=0,
                               label="Atom probability density (norm.)")
             ax3.legend(fontsize=EXPORT_FONTSIZE_LEGEND * 0.7, loc="upper right")
-            ax3.set_title(f"Cut along x through atom site  (y = {r_um:.3f} µm)", fontsize=EXPORT_FONTSIZE_TITLE)
+            ax3.set_title(f"Cut along x through atom  (y = {atom_cy_um:.3f} µm)", fontsize=EXPORT_FONTSIZE_TITLE)
 
             ax4.plot(y_line * 1e6, I_y_line, "g-", linewidth=2, label="Intensity", zorder=3)
             ax4.fill_between(y_line * 1e6, 0, pdf_y, color="magenta", alpha=0.25, zorder=0,
                               label="Atom probability density (norm.)")
             ax4.legend(fontsize=EXPORT_FONTSIZE_LEGEND * 0.7, loc="upper right")
-            ax4.set_title(f"Cut along y through atom site  (x = {r_um:.3f} µm)", fontsize=EXPORT_FONTSIZE_TITLE)
+            ax4.set_title(f"Cut along y through atom  (x = {atom_cx_um:.3f} µm)", fontsize=EXPORT_FONTSIZE_TITLE)
         else:
             ax3.plot(x * 1e6, I_ort[mid_y_idx, :], "b-", linewidth=2)
             ax3.set_title(f"Cut along x  (y = {y_pos_um:.3f} µm)", fontsize=EXPORT_FONTSIZE_TITLE)
@@ -1910,9 +2181,9 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             # ohnehin nie erreicht werden, ist hier nur als Sicherheitsnetz.
             return
 
-        r_center_um = self.cache["r_center"] * 1e6
-        dx = event.xdata - r_center_um
-        dy = event.ydata - r_center_um
+        atom_cx, atom_cy = self._atom_center()
+        dx = event.xdata - atom_cx * 1e6
+        dy = event.ydata - atom_cy * 1e6
         half_um = max(abs(dx), abs(dy))
         half_um = float(np.clip(half_um, 0.02, 25.0))
         side_m = 2 * half_um * 1e-6

@@ -485,6 +485,17 @@ class MultitoneFlatTopOptimizer:
         weighted_metrics_enabled=False,  # per-_evaluate() Default; explizit per Aufruf ueberschreibbar
         weighted_n_sigma=6,         # Ausdehnung des lokalen Sub-Grids in Einheiten von sigma_atom
         weighted_n_grid=241,        # Punkte pro Achse im lokalen Sub-Grid
+
+        # Deterministischer Versatz des Atoms UND der (relativ zu ihm über
+        # self.pitch platzierten) Nachbar-Sites, angewendet auf das lokale
+        # Sub-Grid + die Atom-Gewichtung der atom-gewichteten Metriken (siehe
+        # _evaluate_weighted_metrics()/weighted_crosstalk_breakdown()) - NICHT
+        # auf die harten Masken-Metriken. Meter, Default (0, 0) = Atom exakt
+        # auf der Site zentriert (bisheriges Verhalten). Sinnvoller Bereich:
+        # +/- 0.5 * pitch in jeder Achse (siehe "Atom/Neighbor Offset" im
+        # Startdialog, dort als Bruchteil von pitch eingegeben).
+        atom_offset_x=0.0,
+        atom_offset_y=0.0,
     )
 
     def __init__(self, out_dir=None, **params):
@@ -815,18 +826,30 @@ class MultitoneFlatTopOptimizer:
         Gibt ein dict mit 'uniformity_weighted', 'eta_weighted',
         'sigma_atom' zurueck, oder None falls das nicht auswertbar ist
         (z.B. sigma_atom <= 0 oder norm_factor == 0).
+
+        self.atom_offset_x/self.atom_offset_y (Meter, Default 0): verschiebt
+        das Atom - und damit sowohl das lokale Sub-Grid als auch die
+        Atom-Gewichtung W - relativ zur Site-Mitte (r_center, r_center).
+        Die Site-Zentren selbst (centers_x/centers_y, inkl. der daraus per
+        self.pitch abgeleiteten Nachbar-Kopien in _local_neighbor_intensity())
+        bleiben unveraendert, sodass I_own_sub/I_neighbor_sub auf dem
+        verschobenen Sub-Grid effektiv die Sicht eines relativ zu seiner Site
+        (und damit auch relativ zu allen 8 Nachbar-Sites gleichermassen)
+        versetzten Atoms abbilden - "Atom und seine Nachbarn verschieben".
         """
         if not np.isfinite(self.sigma_atom) or self.sigma_atom <= 0 or norm_factor == 0:
             return None
 
-        Xs, Ys = self._build_local_weighted_grid(r_center, r_center)
+        atom_x = r_center + self.atom_offset_x
+        atom_y = r_center + self.atom_offset_y
+        Xs, Ys = self._build_local_weighted_grid(atom_x, atom_y)
 
         I_own_sub = profile_func(Xs, Ys, centers_x, centers_y, scale, amp_spots) / norm_factor
         I_neighbor_sub = self._local_neighbor_intensity(
             Xs, Ys, centers_x, centers_y, scale, amp_spots, profile_func
         ) / norm_factor
 
-        W = atom_weight_2d(Xs, Ys, r_center, r_center, self.sigma_atom)
+        W = atom_weight_2d(Xs, Ys, atom_x, atom_y, self.sigma_atom)
 
         return dict(
             uniformity_weighted=weighted_uniformity(I_own_sub, W),
@@ -912,9 +935,13 @@ class MultitoneFlatTopOptimizer:
         if not np.isfinite(self.sigma_atom) or self.sigma_atom <= 0:
             return None
 
-        Xs, Ys = self._build_local_weighted_grid(r_center, r_center)
+        # Gleicher Atom-/Nachbar-Versatz wie in _evaluate_weighted_metrics(),
+        # siehe dortiger Docstring.
+        atom_x = r_center + self.atom_offset_x
+        atom_y = r_center + self.atom_offset_y
+        Xs, Ys = self._build_local_weighted_grid(atom_x, atom_y)
         I_own = profile_func(Xs, Ys, centers_x, centers_y, scale, amp_spots)
-        W = atom_weight_2d(Xs, Ys, r_center, r_center, self.sigma_atom)
+        W = atom_weight_2d(Xs, Ys, atom_x, atom_y, self.sigma_atom)
         denom = np.sum(I_own * W)
         if denom == 0:
             return None
