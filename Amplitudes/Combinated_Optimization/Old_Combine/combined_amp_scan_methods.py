@@ -731,13 +731,26 @@ def get_scan_amp_results_combined(self):
     return dict(self.results['scan2d_amp_combined'])
 
 
-def save_scan_amp_results_combined(self, filepath=None):
+def save_scan_amp_results_combined(self, filepath=None, overwrite=False):
     """Wie save_scan_amp_results()/save_scan_amp_results_weighted(), aber
     fuer get_scan_amp_results_combined(). Default-Dateiname bei
     filepath=None: "scan_amp_data_combined_N{N_x}x{N_y}_{n_win}x{n_width}pts_
     {Airy|Gauss}.pkl" - im SELBEN Results-Ordner wie
     scan_data_combined_...pkl (combined_scan_methods.py), da beide
-    Combinated_Optimization/Results als DEFAULT_RESULTS_DIR teilen."""
+    Combinated_Optimization/Results als DEFAULT_RESULTS_DIR teilen.
+
+    overwrite (NEU, 2026-08-27, siehe Chat "Amplituden Abhängigkeit" - analoger
+    Fix zu save_scan_weighted_results()/save_scan_amp_results_weighted() in
+    weighted_amp_scan_methods.py, Nachtrag 23 - dort urspruenglich versaeumt,
+    auf Combinated_Optimization zu uebertragen): bei filepath!=None und
+    overwrite=True wird eine bereits vorhandene Datei unter GENAU diesem Pfad
+    direkt ueberschrieben statt (wie sonst ueber _resolve_pickle_path()) einen
+    freien "_2"-Namen zu waehlen. Noetig, weil combined_winwidthampscan_
+    startdialog.py denselben Pfad zuvor schon als checkpoint_path an den Scan
+    uebergeben hat - dort liegt unter diesem Pfad bereits eine (mit
+    '_checkpoint': True markierte) Zwischenstand-Datei, die hier ganz bewusst
+    durch den sauberen Endstand ERSETZT werden soll, statt daneben eine
+    verwirrende Doppel-Datei zu erzeugen."""
     if filepath is None:
         res = self.results.get('scan2d_amp_combined', {})
         n_win = len(res.get('win_input_vals', []))
@@ -747,7 +760,7 @@ def save_scan_amp_results_combined(self, filepath=None):
         filepath = _resolve_pickle_path(DEFAULT_RESULTS_DIR, filename)
     else:
         filepath = FilePath(filepath)
-        if filepath.exists():
+        if filepath.exists() and not overwrite:
             filepath = _resolve_pickle_path(filepath.parent, filepath.name)
 
     with open(filepath, 'wb') as f:

@@ -164,7 +164,7 @@ FIXED_PKL_DATEI = r"C:\Users\Legion\PycharmProjects\Lern-repo\Niklas_Optimierung
 # von r_x/r_y (Teil 1). Das physikalische Modell UND der Waist-Width-Fit
 # (Teil 2) rechnen davon unabhängig immer mit dem effektiven Waist an der
 # Fokusebene in µm, da dort die eigentliche Strahlphysik lebt.
-WIN_AXIS = "before_lens"
+WIN_AXIS = "after_lens"
 
 # Ausreißer (siehe beispiel_amp_scan_ergebnisse_replotten.py) VOR dem Fit
 # aus dem Amplituden-Scan entfernen? Ein r=0/r=2-Ausreißer an einem

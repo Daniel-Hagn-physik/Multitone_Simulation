@@ -40,6 +40,17 @@ linear, quadratisch, kubisch, Potenzgesetz (w=a*waist^p), reziprok
 (w=a/waist+b) und eine affine+reziproke Korrektur (w=a*waist+b+c/waist) -
 und waehlt automatisch die beste.
 
+NEU (2026-08-27, auf User-Wunsch): "ich möchte lineare Funktionen an meine
+Datensätze. Bei einem scan über konstante Amplituden sollen das lineare
+Funktionen sein, keine Quadratischen" - fuer GENAU diesen Fit (Fest-
+Amplitude-Scan) wird das Modell jetzt standardmaessig auf "linear"
+ERZWUNGEN statt es automatisch per Block-CV auswaehlen zu lassen (siehe
+FORCE_MODEL weiter unten). Die Block-CV laeuft trotzdem weiter und wird
+im Konsolen-Log angezeigt (informativ, z.B. um zu sehen, wie gut linear
+im Vergleich zu den anderen Kandidaten abschneidet) - sie entscheidet nur
+nicht mehr ueber das tatsaechlich verwendete Modell. FORCE_MODEL=None
+(bzw. "auto") reaktiviert die alte automatische Modellwahl.
+
 Physikalische Zusatzueberlegung fuer den reziproken Kandidaten: der
 effektive Waist an der Fokusebene ist selbst umgekehrt proportional zum
 VOR der Linse gescannten win_input (waist_um = C/win_input, siehe
@@ -138,6 +149,23 @@ CV_BLOCKS = 5
 # Kandidaten-Funktionen fuer width_mhz(waist_um) - siehe MODELS unten fuer
 # die tatsaechlichen Definitionen/Startwerte.
 CANDIDATE_MODELS = ("linear", "quadratic", "cubic", "power", "reciprocal", "affine_reciprocal")
+
+# Modell-Erzwingung (NEU, 2026-08-27, auf User-Wunsch): bei einem Fest-
+# Amplitude-Scan soll der Zusammenhang width(waist) IMMER als lineare
+# Funktion gefittet werden - nicht ueber die automatische Block-CV-
+# Modellwahl (cv_compare_models() + Occam's-Razor-Tie-Break, siehe main())
+# potenziell ein quadratisches/kubisches/etc. Modell waehlen koennen, was
+# v.a. bei verrauschten/kleinen Datensaetzen (z.B. mit Atom-Offset, wenige
+# Talpunkte) passieren kann, obwohl der physikalisch erwartete Zusammenhang
+# linear ist (siehe Docstring oben).
+# - "linear" (Default): width(waist) wird immer linear gefittet. Die
+#   Block-CV ueber alle CANDIDATE_MODELS laeuft trotzdem (nur zu
+#   Informationszwecken, im Konsolen-Log sichtbar).
+# - None oder "auto": alte automatische Modellwahl reaktivieren (bestes
+#   Modell per Block-CV + Occam's-Razor-Tie-Break, wie vor diesem Update).
+# - einer der anderen CANDIDATE_MODELS-Namen: erzwingt stattdessen DIESES
+#   Modell (z.B. fuer gezielte Vergleiche).
+FORCE_MODEL = "linear"
 
 PLOT_FITS = True
 SHOW = False
@@ -542,19 +570,25 @@ def cut_along_fit(results, model_name, popt, waist_lo, waist_hi, n=CUT_N_POINTS)
 
 def write_formula_doc(prefix, model_name, popt, r2_cv, r2_cv_std, r2_fulldata,
                        waist_used, waist_excluded, best_point,
-                       n_boundary=0, out_dir=FIT_RESULTS_DIR):
+                       n_boundary=0, out_dir=FIT_RESULTS_DIR, forced=False):
     """Schreibt AUTOMATISCH ein Formel-Dokument (Markdown) mit dem gerade
     gewaehlten Modell/Parametern/R² - analog zu fit_central_amplitudes.py's
-    write_formula_doc(), bei jedem Lauf frisch generiert."""
+    write_formula_doc(), bei jedem Lauf frisch generiert.
+
+    forced (NEU, 2026-08-27): True, wenn model_name ueber FORCE_MODEL
+    erzwungen wurde statt automatisch per Block-CV gewaehlt - wird im
+    Dokument entsprechend vermerkt, damit spaeter nachvollziehbar bleibt,
+    warum genau dieses Modell verwendet wurde."""
     func, formula_str = MODELS[model_name]
     param_names = "abcdefgh"[:len(popt)]
     param_lines = "\n".join(f"{n} = {v:.8g}" for n, v in zip(param_names, popt))
+    auswahl_text = f"ERZWUNGEN, FORCE_MODEL='{model_name}'" if forced else "Block-CV + Occam's-Razor-Tie-Break"
     lines = [
         f"# {prefix} — Waist-Width-Fit (Fest-Amplitude-Scan)",
         "",
         f"Automatisch generiert von `fit_waist_width_relation.py` am {date.today().isoformat()}.",
         "",
-        f"- Gewaehltes Modell (Block-CV + Occam's-Razor-Tie-Break): **{model_name}**",
+        f"- Gewaehltes Modell ({auswahl_text}): **{model_name}**",
         f"- Formel: `{formula_str}`",
         f"- R²(Block-CV): {r2_cv:.4f} +/- {r2_cv_std:.4f}",
         f"- R²(volle bereinigte Daten, NICHT CV, nur Sanity-Check): {r2_fulldata:.5f}",
@@ -802,11 +836,16 @@ def make_predictor(model_name, popt):
 # main
 # ======================================================================
 def main(pkl_datei=None, output_prefix=None, draw_best_point=None, legend_fontsize=None,
-         ask_before_save=None, save=None, show=None, show_crosstalk=None):
+         ask_before_save=None, save=None, show=None, show_crosstalk=None, force_model=None):
     """Alle Parameter sind optional - None faellt auf die Modul-Konfiguration
     oben zurueck (PKL_DATEI/OUTPUT_PREFIX/DRAW_BEST_POINT/LEGEND_FONTSIZE/
-    ASK_BEFORE_SAVE/SAVE/SHOW/SHOW_CROSSTALK). Identisches Muster wie in
-    fit_central_amplitudes.py's main() - genutzt von run_all_fits.py."""
+    ASK_BEFORE_SAVE/SAVE/SHOW/SHOW_CROSSTALK/FORCE_MODEL). Identisches Muster
+    wie in fit_central_amplitudes.py's main() - genutzt von run_all_fits.py.
+
+    force_model (NEU, 2026-08-27): None faellt auf FORCE_MODEL zurueck
+    (Default "linear" - siehe dortiger Kommentar). Zum expliziten
+    Reaktivieren der automatischen Modellwahl "auto" uebergeben (nicht
+    None, das wuerde nur den Modul-Default uebernehmen)."""
     pkl_datei = PKL_DATEI if pkl_datei is None else pkl_datei
     output_prefix = OUTPUT_PREFIX if output_prefix is None else output_prefix
     draw_best_point = DRAW_BEST_POINT if draw_best_point is None else draw_best_point
@@ -815,6 +854,12 @@ def main(pkl_datei=None, output_prefix=None, draw_best_point=None, legend_fontsi
     save = SAVE if save is None else save
     show = SHOW if show is None else show
     show_crosstalk = SHOW_CROSSTALK if show_crosstalk is None else show_crosstalk
+    force_model = FORCE_MODEL if force_model is None else force_model
+    if isinstance(force_model, str) and force_model.lower() == "auto":
+        force_model = None
+    if force_model is not None and force_model not in MODELS:
+        raise ValueError(f"force_model='{force_model}' ist kein bekanntes Modell "
+                          f"(bekannt: {', '.join(MODELS)}, oder None/'auto' fuer automatische Wahl).")
 
     print(f"Lade '{pkl_datei}' ...")
     try:
@@ -876,35 +921,49 @@ def main(pkl_datei=None, output_prefix=None, draw_best_point=None, legend_fontsi
     print(f"\n2) Block-Kreuzvalidierung ueber {len(CANDIDATE_MODELS)} Kandidaten-Modelle ...")
     cv_results = cv_compare_models(waist_used, width_used)
     valid = [n for n in cv_results if np.isfinite(cv_results[n]["r2_mean"])]
-    best_name_raw = max(valid, key=lambda n: cv_results[n]["r2_mean"])
-    best_r2 = cv_results[best_name_raw]["r2_mean"]
-    # Occam's razor: bei (annaehernd) gleich gutem Block-CV-R^2 gewinnt das
-    # Modell mit den WENIGSTEN freien Parametern, nicht einfach das rein
-    # numerische Maximum - siehe PARAM_COUNT weiter oben. Die Toleranz dafuer
-    # ("annaehernd gleich gut") war frueher ein FESTER Wert (1e-3) - das
-    # ignoriert, wie verrauscht die Block-CV selbst ist (nur n_blocks=5
-    # Stichproben fuer r2_std). Bei sehr sauberen Datensaetzen (r2_std ~
-    # 1e-4) ist 1e-3 eine sinnvolle Toleranz; bei verrauschteren Datensaetzen
-    # (r2_std ~ 0.06, z.B. mit Atom-Offset) lag der feste 1e-3-Wert WEIT
-    # innerhalb der CV-Streuung und liess die Modellwahl faktisch vom
-    # CV-Stichprobenrauschen entscheiden - zwei kaum unterscheidbare Modelle
-    # (hier: linear vs. power mit Exponent ~1.0) konnten dadurch je nach
-    # Datensatz unterschiedlich "gewinnen", obwohl der Unterschied statistisch
-    # nicht signifikant war. Fix: 1-Standardfehler-Regel (Standard in der
-    # CV-Modellwahl, z.B. LASSO/Elastic-Net) - als "gleich gut" gilt jetzt
-    # alles innerhalb des Standardfehlers des besten Modells
-    # (r2_std / sqrt(n_folds_ok)), zusaetzlich zum alten 1e-3-Boden fuer den
-    # Fall extrem kleiner Streuung.
-    best_folds = max(cv_results[best_name_raw]["n_folds_ok"], 1)
-    se_best = cv_results[best_name_raw]["r2_std"] / np.sqrt(best_folds)
-    tol = max(1e-3, se_best)
-    tied = [n for n in valid if best_r2 - cv_results[n]["r2_mean"] <= tol]
-    best_name = min(tied, key=lambda n: (PARAM_COUNT[n], CANDIDATE_MODELS.index(n)))
-    if len(tied) > 1:
-        print(f"   ({len(tied)} Modelle praktisch gleichauf (R² innerhalb {tol}): "
-              f"{', '.join(tied)} -> einfachstes (wenigste Parameter) gewaehlt.)")
-    print(f"   -> bestes Modell: {best_name}  (R²(Block-CV) = "
-          f"{cv_results[best_name]['r2_mean']:.4f} +/- {cv_results[best_name]['r2_std']:.4f})")
+
+    if force_model is not None:
+        # NEU (2026-08-27, auf User-Wunsch): Modell erzwungen statt
+        # automatisch gewaehlt - die Block-CV oben laeuft trotzdem (rein
+        # informativ, im Log sichtbar), entscheidet hier aber nicht mehr.
+        best_name = force_model
+        if best_name in cv_results and np.isfinite(cv_results[best_name]["r2_mean"]):
+            print(f"   -> Modell ERZWUNGEN (force_model='{best_name}'): R²(Block-CV) = "
+                  f"{cv_results[best_name]['r2_mean']:.4f} +/- {cv_results[best_name]['r2_std']:.4f} "
+                  f"(automatische Modellwahl oben nur zu Informationszwecken - siehe FORCE_MODEL).")
+        else:
+            print(f"   -> Modell ERZWUNGEN (force_model='{best_name}') - Block-CV fuer dieses "
+                  f"Modell hier nicht auswertbar (zu wenige Punkte pro Block?), wird trotzdem verwendet.")
+    else:
+        best_name_raw = max(valid, key=lambda n: cv_results[n]["r2_mean"])
+        best_r2 = cv_results[best_name_raw]["r2_mean"]
+        # Occam's razor: bei (annaehernd) gleich gutem Block-CV-R^2 gewinnt das
+        # Modell mit den WENIGSTEN freien Parametern, nicht einfach das rein
+        # numerische Maximum - siehe PARAM_COUNT weiter oben. Die Toleranz dafuer
+        # ("annaehernd gleich gut") war frueher ein FESTER Wert (1e-3) - das
+        # ignoriert, wie verrauscht die Block-CV selbst ist (nur n_blocks=5
+        # Stichproben fuer r2_std). Bei sehr sauberen Datensaetzen (r2_std ~
+        # 1e-4) ist 1e-3 eine sinnvolle Toleranz; bei verrauschteren Datensaetzen
+        # (r2_std ~ 0.06, z.B. mit Atom-Offset) lag der feste 1e-3-Wert WEIT
+        # innerhalb der CV-Streuung und liess die Modellwahl faktisch vom
+        # CV-Stichprobenrauschen entscheiden - zwei kaum unterscheidbare Modelle
+        # (hier: linear vs. power mit Exponent ~1.0) konnten dadurch je nach
+        # Datensatz unterschiedlich "gewinnen", obwohl der Unterschied statistisch
+        # nicht signifikant war. Fix: 1-Standardfehler-Regel (Standard in der
+        # CV-Modellwahl, z.B. LASSO/Elastic-Net) - als "gleich gut" gilt jetzt
+        # alles innerhalb des Standardfehlers des besten Modells
+        # (r2_std / sqrt(n_folds_ok)), zusaetzlich zum alten 1e-3-Boden fuer den
+        # Fall extrem kleiner Streuung.
+        best_folds = max(cv_results[best_name_raw]["n_folds_ok"], 1)
+        se_best = cv_results[best_name_raw]["r2_std"] / np.sqrt(best_folds)
+        tol = max(1e-3, se_best)
+        tied = [n for n in valid if best_r2 - cv_results[n]["r2_mean"] <= tol]
+        best_name = min(tied, key=lambda n: (PARAM_COUNT[n], CANDIDATE_MODELS.index(n)))
+        if len(tied) > 1:
+            print(f"   ({len(tied)} Modelle praktisch gleichauf (R² innerhalb {tol}): "
+                  f"{', '.join(tied)} -> einfachstes (wenigste Parameter) gewaehlt.)")
+        print(f"   -> bestes Modell: {best_name}  (R²(Block-CV) = "
+              f"{cv_results[best_name]['r2_mean']:.4f} +/- {cv_results[best_name]['r2_std']:.4f})")
 
     print(f"\n3) Finaler Fit ({best_name}) auf allen {len(waist_used)} bereinigten Talpunkten ...")
     popt = _fit_model(best_name, waist_used, width_used)
@@ -940,7 +999,7 @@ def main(pkl_datei=None, output_prefix=None, draw_best_point=None, legend_fontsi
         formula_doc = write_formula_doc(
             output_prefix, best_name, popt, cv_results[best_name]["r2_mean"],
             cv_results[best_name]["r2_std"], r2_fulldata, waist_used, waist_excl, best_point,
-            n_boundary=n_boundary)
+            n_boundary=n_boundary, forced=(force_model is not None))
 
     predict_width_mhz, predict_waist_um = make_predictor(best_name, popt)
     print(f"\nFertig. Modell '{best_name}' gilt fuer waist_um in "
@@ -951,7 +1010,8 @@ def main(pkl_datei=None, output_prefix=None, draw_best_point=None, legend_fontsi
                 waist_excluded=waist_excl, width_excluded=width_excl,
                 n_boundary=n_boundary,
                 predict_width_mhz=predict_width_mhz, predict_waist_um=predict_waist_um,
-                best_point=best_point, formula_doc=formula_doc)
+                best_point=best_point, formula_doc=formula_doc,
+                forced_model=force_model)
 
 
 if __name__ == "__main__":

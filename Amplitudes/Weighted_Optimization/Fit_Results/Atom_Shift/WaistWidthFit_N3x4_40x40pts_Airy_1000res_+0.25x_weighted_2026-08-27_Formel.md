@@ -1,6 +1,6 @@
-# WaistWidthFit_N3x4_40x40pts_Airy_1000res_+0.25x_weighted_2026-08-26 — Waist-Width-Fit (Fest-Amplitude-Scan)
+# WaistWidthFit_N3x4_40x40pts_Airy_1000res_+0.25x_weighted_2026-08-27 — Waist-Width-Fit (Fest-Amplitude-Scan)
 
-Automatisch generiert von `fit_waist_width_relation.py` am 2026-08-26.
+Automatisch generiert von `fit_waist_width_relation.py` am 2026-08-27.
 
 - Gewaehltes Modell (Block-CV + Occam's-Razor-Tie-Break): **linear**
 - Formel: `width = a*waist + b`

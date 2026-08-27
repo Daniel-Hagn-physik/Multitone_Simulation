@@ -570,7 +570,7 @@ def main():
     # finale, kombinierte Endstand, der denselben Pfad überschreibt. Kein
     # erneuter Dateidialog mehr nötig.
     if save_path:
-        opt.save_scan_amp_results_combined(save_path)
+        opt.save_scan_amp_results_combined(save_path, overwrite=True)
     else:
         opt.save_scan_amp_results_combined()
 

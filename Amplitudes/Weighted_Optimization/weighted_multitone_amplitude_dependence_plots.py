@@ -883,16 +883,36 @@ class AmplitudeScanPlotter:
             x_mark = self._win_axis_single_value(win_input_vals[j_mark], win_axis)
             y_mark = width_vals[i_mark] * 1e-6
 
+        # Interaktive Fenster duerfen nicht linear mit der Panel-Zahl wachsen:
+        # bei 6 Panels (3 Zeilen - Uniformity/Crosstalk hart+gewichtet PLUS
+        # r_x/r_y, z.B. beim kombinierten Amplituden-Scan) wurde das Fenster
+        # bisher >19 Zoll hoch und ragte auf normalen Bildschirmen weit unten
+        # heraus (siehe Chat "Amplituden Abhängigkeit": "die Box mit den
+        # Parametern kann ich nicht sehen, weil sie zu weit unten ist").
+        # Zeilenhoehe daher ab 3 Zeilen kappen, statt linear weiterwachsen zu
+        # lassen. Ausserdem: constrained_layout statt manuellem hspace/
+        # subplots_adjust - reserviert automatisch genug Platz fuer Titel/
+        # Colorbars/Achsenbeschriftungen und verhindert damit zuverlaessig
+        # ueberlappende Ueberschriften, unabhaengig von der Panel-Zahl.
+        row_h = 5.9 if nrows <= 2 else 3.7
+        info_h = 1.1 if nrows <= 2 else 0.9
+        title_fs = 17 if nrows <= 2 else 13
+
         with plt.rc_context(self.SCAN2D_RC):
             if interactive:
-                fig = plt.figure(figsize=(7.5 * ncols, 5.9 * nrows + 1.3))
-                gs = fig.add_gridspec(nrows + 1, ncols,
-                                       height_ratios=[3] * nrows + [1.3], hspace=0.4, wspace=0.3)
-                axes = [fig.add_subplot(gs[k // ncols, k % ncols]) for k in range(n_panels)]
-                info_ax = fig.add_subplot(gs[nrows, :])
+                fig = plt.figure(figsize=(7.5 * ncols, row_h * nrows + info_h),
+                                  constrained_layout=True)
+                gs = fig.add_gridspec(nrows + 1, ncols, height_ratios=[info_h] + [row_h] * nrows)
+                # Parameter-Box bewusst als ERSTE (statt bisher letzte) Zeile:
+                # bei einem zu grossen Fenster schneiden die meisten
+                # Fensterverwaltungen den UNTEREN Rand ab, nicht den oberen -
+                # so bleibt die Box beim Oeffnen immer sofort sichtbar.
+                info_ax = fig.add_subplot(gs[0, :])
                 info_ax.axis('off')
+                axes = [fig.add_subplot(gs[1 + k // ncols, k % ncols]) for k in range(n_panels)]
             else:
-                fig, axes2d = plt.subplots(nrows, ncols, figsize=(7.0 * ncols, 5.5 * nrows))
+                fig, axes2d = plt.subplots(nrows, ncols, figsize=(7.0 * ncols, 5.5 * nrows),
+                                            constrained_layout=True)
                 axes = list(np.atleast_1d(axes2d).ravel())[:n_panels]
                 for extra_ax in list(np.atleast_1d(axes2d).ravel())[n_panels:]:
                     extra_ax.axis('off')
@@ -910,7 +930,7 @@ class AmplitudeScanPlotter:
                 fig.colorbar(im, ax=ax, label=cbar_label)
                 ax.set_xlabel(x_label)
                 ax.set_ylabel("width (MHz)")
-                ax.set_title(title)
+                ax.set_title(title, fontsize=title_fs)
 
                 if mark is not None:
                     ax.plot(x_mark, y_mark, linestyle="none", **self.BEST_POINT_STYLE)
@@ -923,10 +943,7 @@ class AmplitudeScanPlotter:
                     selection_rects.append(rect)
 
             if not interactive:
-                fig.tight_layout()
                 return fig
-
-            fig.subplots_adjust(left=0.06, right=0.96, top=0.95, bottom=0.04)
 
             info_text = info_ax.text(
                 0.0, 1.0, "Click on a point in any heatmap to show all parameters "
@@ -1000,7 +1017,11 @@ class AmplitudeScanPlotter:
         legend_kwargs = {} if legend_fontsize is None else {"fontsize": legend_fontsize}
 
         with plt.rc_context(self.SCAN2D_RC):
-            fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(14, 5.5))
+            # constrained_layout statt tight_layout(): tight_layout() reserviert
+            # nach einem fig.suptitle() (siehe unten) nicht zuverlaessig genug
+            # Platz, wodurch der Suptitel mit den Panel-Ueberschriften
+            # ueberlappen konnte (siehe Chat "Amplituden Abhängigkeit").
+            fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(14, 5.5), constrained_layout=True)
 
             ax_left.plot(x_win, RX[i_fixed, :], 'o-', label=r"$r_x$ ($N_x$=%d)" % r['N_x'])
             ax_left.plot(x_win, RY[i_fixed, :], 's-', label=r"$r_y$ ($N_y$=%d)" % r['N_y'])
@@ -1034,7 +1055,6 @@ class AmplitudeScanPlotter:
 
             fig.suptitle(f"Amplitude-ratio dependence on waist and width (α={alpha:.2f})",
                          fontsize=15, fontweight='bold')
-            fig.tight_layout()
 
             tag = self._filetag()
             self._finish_figure(fig, f"FlatMultiTone_AmpScan_DependenceCuts_{tag}.png", show, save)

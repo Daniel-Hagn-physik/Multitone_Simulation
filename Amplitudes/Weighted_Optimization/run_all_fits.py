@@ -51,6 +51,17 @@ fit_waist_width_relation.py) auszuwerten, ohne dass dafuer zwingend auch
 eine scan_amp_data_weighted_...pkl (Amplituden-optimierter Scan, fuer
 Schritt 1 UND 3) vorhanden sein oder neu berechnet werden muss.
 
+NEU (2026-08-27, auf User-Wunsch): "ich möchte lineare Funktionen an meine
+Datensätze. Bei einem scan über konstante Amplituden sollen das lineare
+Funktionen sein, keine Quadratischen" - Schritt 2 (fit_waist_width_relation.py,
+Fest-Amplitude-Scan) waehlt das Modell fuer width(waist) jetzt per Default
+NICHT mehr automatisch per Block-Kreuzvalidierung, sondern erzwingt "linear"
+(siehe FORCE_WAIST_WIDTH_MODEL unten und FORCE_MODEL in
+fit_waist_width_relation.py) - die automatische Modellwahl lief zuvor bei
+manchen (v.a. verrauschten) Datensaetzen auch mal auf ein quadratisches/
+kubisches Modell hinaus, obwohl der physikalisch erwartete Zusammenhang
+linear ist.
+
 NEU (2026-08-26): automatisch abgeleiteter output_prefix statt der in
 fit_central_amplitudes.py/fit_waist_width_relation.py fest einprogrammierten
 OUTPUT_PREFIX-Konstanten. GRUND: beide Konstanten tragen ein STEHENGEBLIEBENES
@@ -91,7 +102,7 @@ from weighted_multitone_amplitude_dependence_plots import DEFAULT_RESULTS_DIR
 # Dateien gibt. Die Auto-Erkennung (_resolve_pkl() unten) greift NUR als
 # Fallback, wenn die eingetragene Datei nicht (mehr) existiert.
 AMP_SCAN_PKL = "scan_amp_data_weighted_N3x4_151x151pts_Airy_2500res.pkl"  # Amplituden-optimierter Scan (r_x_grid/r_y_grid)
-FIXED_AMP_SCAN_PKL = "scan_data_weighted_N3x4_40x40pts_Airy_1000res_-0.25y.pkl"  # Fest-Amplitude-Scan (uniformity_weighted_grid)
+FIXED_AMP_SCAN_PKL = "scan_data_weighted_N3x4_40x40pts_Airy_1000res_+0.25x_+0.25y.pkl"  # Fest-Amplitude-Scan (uniformity_weighted_grid)
 
 # Welche Schritte sollen laufen? Schritt 1 und 3 brauchen AMP_SCAN_PKL (den
 # Amplituden-optimierten Scan mit r_x_grid/r_y_grid), Schritt 2 braucht
@@ -111,6 +122,16 @@ DRAW_BEST_POINT = True
 # einer zweiten y-Achse - auf User-Wunsch. fit_central_amplitudes.py kennt
 # diesen Parameter nicht (kein Schnitt-Panel dort).
 SHOW_CROSSTALK = True
+
+# NEU (2026-08-27, auf User-Wunsch), nur fuer fit_waist_width_relation.py
+# (Schritt 2, Fest-Amplitude-Scan): erzwingt das Modell fuer width(waist)
+# statt es automatisch per Block-Kreuzvalidierung waehlen zu lassen -
+# "linear" (Default, wie gewuenscht: "Bei einem scan über konstante
+# Amplituden sollen das lineare Funktionen sein, keine Quadratischen").
+# None oder "auto" reaktiviert die automatische Modellwahl dort. Siehe
+# FORCE_MODEL in fit_waist_width_relation.py fuer Details (die
+# Block-CV laeuft bei "linear" trotzdem weiter, nur informativ im Log).
+FORCE_WAIST_WIDTH_MODEL = "linear"
 
 # Nur fuer fit_central_amplitudes.py (Amplituden-optimierter Scan): VOR den
 # eigentlichen Fits eine 2x2-Uebersicht des GESAMTEN Scan-Gitters erzeugen
@@ -247,7 +268,8 @@ def main():
         print("=" * 70)
         try:
             width_result = fww.main(pkl_datei=fixed_pkl, output_prefix=fixed_output_prefix,
-                                     show_crosstalk=SHOW_CROSSTALK, **common_kwargs)
+                                     show_crosstalk=SHOW_CROSSTALK, force_model=FORCE_WAIST_WIDTH_MODEL,
+                                     **common_kwargs)
         except Exception as exc:
             print(f"FEHLER beim Waist-Width-Fit: {exc!r}")
             width_result = None
@@ -311,7 +333,9 @@ def main():
     elif width_result is not None:
         print(f"\nWaist-Width-Fit (um-Waist nach der Linse) - OK")
         print(f"  Datensatz: {fixed_pkl}")
-        print(f"  Modell: {width_result['model']}")
+        modell_suffix = (f" (erzwungen, FORCE_WAIST_WIDTH_MODEL='{width_result['forced_model']}')"
+                          if width_result.get("forced_model") else " (automatisch per Block-CV gewaehlt)")
+        print(f"  Modell: {width_result['model']}{modell_suffix}")
         print(f"  Formel-Dokument: {width_result['formula_doc']}")
         print(f"  Plot: {fww.FIT_PLOTS_DIR}/{fixed_output_prefix}_waist_width_fit.pdf")
         if width_result["best_point"] is not None:
