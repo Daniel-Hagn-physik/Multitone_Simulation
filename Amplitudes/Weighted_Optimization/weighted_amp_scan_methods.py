@@ -75,6 +75,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 from scipy.optimize import minimize
 
+import scan_checkpoint
 from weighted_multitone_flattop_optimizer import (
     MultitoneFlatTopOptimizer,
     amps_from_ratios,
@@ -90,7 +91,9 @@ from weighted_multitone_flattop_optimizer import (
 def scan_win_width_weighted_uniformity(self, win_input_range, width_range,
                                         n_win_input=40, n_width=40,
                                         amps=None, alpha=0.9, verbose=True,
-                                        progress_callback=None):
+                                        progress_callback=None,
+                                        checkpoint_path=None,
+                                        checkpoint_interval_s=scan_checkpoint.CHECKPOINT_INTERVAL_S):
     """
     Wie scan_win_width_uniformity(), aber mit den ATOM-GEWICHTETEN Metriken
     (uniformity_weighted, eta_weighted - siehe _evaluate_weighted_only() in
@@ -109,6 +112,12 @@ def scan_win_width_weighted_uniformity(self, win_input_range, width_range,
     progress_callback: wie im Original, optionales Callable(done, total)
     -> bool|None; explizites False bricht kooperativ ab.
 
+    checkpoint_path / checkpoint_interval_s: wie bei scan_win_width_
+    uniformity() im Original - siehe scan_checkpoint.py. Speichert
+    stündlich (Default) den Zwischenstand unter checkpoint_path und setzt
+    einen dort bereits vorhandenen, zu diesem Scan (Gitter/N_x/N_y/amps/
+    alpha) passenden Zwischenstand automatisch fort.
+
     Speichert das Ergebnis in self.results['scan2d_weighted'] und gibt
     (win_input_vals, width_vals, uniformity_weighted_grid, eta_weighted_grid)
     zurück. NaN-Einträge bedeuten ungültige/nicht auswertbare bzw. (bei
@@ -117,11 +126,40 @@ def scan_win_width_weighted_uniformity(self, win_input_range, width_range,
     win_input_vals = np.linspace(win_input_range[0], win_input_range[1], n_win_input)
     width_vals = np.linspace(width_range[0], width_range[1], n_width)
 
-    uniformity_weighted_grid = np.full((n_width, n_win_input), np.nan)
-    eta_weighted_grid = np.full((n_width, n_win_input), np.nan)
+    resumed = scan_checkpoint.load_resumable(
+        checkpoint_path, win_input_range, width_range, n_win_input, n_width,
+        self.N_x, self.N_y, extra_match=dict(amps=amps, alpha=alpha), verbose=verbose,
+    )
+    if resumed is not None:
+        uniformity_weighted_grid = np.asarray(resumed['uniformity_weighted_grid'], dtype=float).copy()
+        eta_weighted_grid = np.asarray(resumed['eta_weighted_grid'], dtype=float).copy()
+        n_done_before = scan_checkpoint.count_done(uniformity_weighted_grid)
+        if verbose:
+            print(f"[Checkpoint] Setze Scan fort: {n_done_before}/{uniformity_weighted_grid.size} "
+                  f"Punkte bereits vorhanden ({checkpoint_path}).")
+    else:
+        uniformity_weighted_grid = np.full((n_width, n_win_input), np.nan)
+        eta_weighted_grid = np.full((n_width, n_win_input), np.nan)
+    ckpt = scan_checkpoint.CheckpointWriter(checkpoint_path, checkpoint_interval_s, verbose=verbose)
+
     total = n_width * n_win_input
     done = 0
     cancelled = False
+
+    def _current_results():
+        return dict(
+            win_input_vals=win_input_vals, width_vals=width_vals,
+            uniformity_weighted_grid=uniformity_weighted_grid, eta_weighted_grid=eta_weighted_grid,
+            amps=amps, alpha=alpha,
+            best=scan_checkpoint.best_point(uniformity_weighted_grid, eta_weighted_grid, win_input_vals,
+                                             width_vals, alpha, "uniformity_weighted", "eta_weighted"),
+            sigma_atom=self.sigma_atom,
+            N_x=self.N_x, N_y=self.N_y, f1=self.f1, f2=self.f2, fLO=self.fLO,
+            lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
+            profile=self.profile,
+            atom_mass=self.atom_mass, atom_temperature=self.atom_temperature, trap_freq_r=self.trap_freq_r,
+            atom_offset_x=self.atom_offset_x, atom_offset_y=self.atom_offset_y, pitch=self.pitch,
+        )
 
     if verbose:
         print("\n" + "=" * 60)
@@ -139,23 +177,30 @@ def scan_win_width_weighted_uniformity(self, win_input_range, width_range,
         if cancelled:
             break
         for j, win_input_val in enumerate(win_input_vals):
-            try:
-                win_eff = self.win_input_to_win(win_input_val)
-            except ValueError:
-                win_eff = None
-            if win_eff is not None:
-                details = self._evaluate_weighted_only(win_eff, width_val, amps=amps)
-                if details is not None:
-                    uniformity_weighted_grid[i, j] = details['uniformity_weighted']
-                    eta_weighted_grid[i, j] = details['eta_weighted']
+            if np.isfinite(uniformity_weighted_grid[i, j]):
+                pass  # bereits aus Checkpoint vorhanden - nicht neu berechnen
+            else:
+                try:
+                    win_eff = self.win_input_to_win(win_input_val)
+                except ValueError:
+                    win_eff = None
+                if win_eff is not None:
+                    details = self._evaluate_weighted_only(win_eff, width_val, amps=amps)
+                    if details is not None:
+                        uniformity_weighted_grid[i, j] = details['uniformity_weighted']
+                        eta_weighted_grid[i, j] = details['eta_weighted']
 
             done += 1
             if progress_callback is not None:
                 if progress_callback(done, total) is False:
                     cancelled = True
                     break
+            ckpt.maybe_save(_current_results, done=done, total=total)
         if verbose and n_width >= 10 and (i % max(1, n_width // 10) == 0):
             print(f"  ... width row {i + 1}/{n_width}")
+
+    if ckpt.active:
+        ckpt.maybe_save(_current_results, done=done, total=total, force=True)
 
     combined_grid = alpha * uniformity_weighted_grid + (1 - alpha) * eta_weighted_grid
 
@@ -207,7 +252,7 @@ def get_scan_weighted_results(self):
     return res
 
 
-def save_scan_weighted_results(self, filepath=None):
+def save_scan_weighted_results(self, filepath=None, overwrite=False):
     """
     Wie save_scan_results(), aber für get_scan_weighted_results(). Default-
     Dateiname bei filepath=None: "scan_data_weighted_N{N_x}x{N_y}_
@@ -216,6 +261,16 @@ def save_scan_weighted_results(self, filepath=None):
     _resolve_pickle_path()/DEFAULT_RESULTS_DIR aus der Optimizer-Datei
     zurückgreifen) - der "_weighted"-Zusatz im Namen verhindert Kollisionen
     mit den unveränderten scan_data_...pkl-Dateien.
+
+    overwrite (NEU, 2026-08-26): bei filepath!=None und overwrite=True wird
+    eine bereits vorhandene Datei unter GENAU diesem Pfad direkt überschrieben
+    statt (wie sonst über _resolve_pickle_path()) einen freien "_2"-Namen zu
+    waehlen. Gebraucht von den GUI-Start-Dialogen, die denselben Pfad zuvor
+    schon als checkpoint_path an den Scan uebergeben haben (siehe
+    scan_checkpoint.py) - dort liegt unter diesem Pfad bereits eine (mit
+    '_checkpoint': True markierte) Zwischenstand-Datei, die hier ganz
+    bewusst durch den sauberen Endstand ERSETZT werden soll, statt
+    daneben eine verwirrende Doppel-Datei zu erzeugen.
     """
     if filepath is None:
         res = self.results.get('scan2d_weighted', {})
@@ -226,7 +281,7 @@ def save_scan_weighted_results(self, filepath=None):
         filepath = _resolve_pickle_path(DEFAULT_RESULTS_DIR, filename)
     else:
         filepath = FilePath(filepath)
-        if filepath.exists():
+        if filepath.exists() and not overwrite:
             filepath = _resolve_pickle_path(filepath.parent, filepath.name)
 
     with open(filepath, 'wb') as f:
@@ -244,7 +299,9 @@ def scan_win_width_amplitude_dependence_weighted(self, win_input_range, width_ra
                                                    alpha=0.7, r_bounds=(0.0, 2.0), r0=(1.0, 1.0),
                                                    warm_start=True, verbose=True,
                                                    progress_callback=None, n_jobs=1,
-                                                   pool_initializer=None, pool_initargs=()):
+                                                   pool_initializer=None, pool_initargs=(),
+                                                   checkpoint_path=None,
+                                                   checkpoint_interval_s=scan_checkpoint.CHECKPOINT_INTERVAL_S):
     """
     Wie scan_win_width_amplitude_dependence(), aber die pro Gitterpunkt
     optimierten Amplitudenverhältnisse (r_x, r_y) minimieren hier
@@ -286,6 +343,14 @@ def scan_win_width_amplitude_dependence_weighted(self, win_input_range, width_ra
         n_jobs>1 MUSS innerhalb eines `if __name__ == "__main__":`-Blocks
         erfolgen.
 
+    checkpoint_path / checkpoint_interval_s: wie bei scan_win_width_
+    amplitude_dependence() im Original - siehe scan_checkpoint.py.
+    Speichert stündlich (Default) den Zwischenstand (alle 4 Grids) unter
+    checkpoint_path und setzt einen dort bereits vorhandenen, zu diesem
+    Scan (Gitter/N_x/N_y/alpha/r_bounds) passenden Zwischenstand
+    automatisch fort; last_r wird beim Fortsetzen vom letzten bereits
+    berechneten Gitterpunkt übernommen (statt wieder bei r0 zu beginnen).
+
     Speichert das Ergebnis in self.results['scan2d_amp_weighted'] und gibt
     (win_input_vals, width_vals, uniformity_weighted_grid, eta_weighted_grid,
     r_x_grid, r_y_grid) zurück.
@@ -293,15 +358,48 @@ def scan_win_width_amplitude_dependence_weighted(self, win_input_range, width_ra
     win_input_vals = np.linspace(win_input_range[0], win_input_range[1], n_win_input)
     width_vals = np.linspace(width_range[0], width_range[1], n_width)
 
-    uniformity_weighted_grid = np.full((n_width, n_win_input), np.nan)
-    eta_weighted_grid = np.full((n_width, n_win_input), np.nan)
-    r_x_grid = np.full((n_width, n_win_input), np.nan)
-    r_y_grid = np.full((n_width, n_win_input), np.nan)
+    resumed = scan_checkpoint.load_resumable(
+        checkpoint_path, win_input_range, width_range, n_win_input, n_width,
+        self.N_x, self.N_y, extra_match=dict(alpha=alpha, r_bounds=r_bounds), verbose=verbose,
+    )
+    if resumed is not None:
+        uniformity_weighted_grid = np.asarray(resumed['uniformity_weighted_grid'], dtype=float).copy()
+        eta_weighted_grid = np.asarray(resumed['eta_weighted_grid'], dtype=float).copy()
+        r_x_grid = np.asarray(resumed['r_x_grid'], dtype=float).copy()
+        r_y_grid = np.asarray(resumed['r_y_grid'], dtype=float).copy()
+        n_done_before = scan_checkpoint.count_done(uniformity_weighted_grid)
+        if verbose:
+            print(f"[Checkpoint] Setze Scan fort: {n_done_before}/{uniformity_weighted_grid.size} "
+                  f"Punkte bereits vorhanden ({checkpoint_path}).")
+    else:
+        uniformity_weighted_grid = np.full((n_width, n_win_input), np.nan)
+        eta_weighted_grid = np.full((n_width, n_win_input), np.nan)
+        r_x_grid = np.full((n_width, n_win_input), np.nan)
+        r_y_grid = np.full((n_width, n_win_input), np.nan)
+        n_done_before = 0
+    ckpt = scan_checkpoint.CheckpointWriter(checkpoint_path, checkpoint_interval_s, verbose=verbose)
+
+    def _current_results():
+        return dict(
+            win_input_vals=win_input_vals, width_vals=width_vals,
+            uniformity_weighted_grid=uniformity_weighted_grid, eta_weighted_grid=eta_weighted_grid,
+            r_x_grid=r_x_grid, r_y_grid=r_y_grid,
+            alpha=alpha, r_bounds=r_bounds, sigma_atom=self.sigma_atom,
+            N_x=self.N_x, N_y=self.N_y, f1=self.f1, f2=self.f2, fLO=self.fLO,
+            lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
+            profile=self.profile,
+            atom_mass=self.atom_mass, atom_temperature=self.atom_temperature, trap_freq_r=self.trap_freq_r,
+        )
 
     total = n_width * n_win_input
     done = 0
     cancelled = False
     last_r = [float(r0[0]), float(r0[1])]
+    finite_mask = np.isfinite(r_x_grid) & np.isfinite(r_y_grid)
+    if np.any(finite_mask):
+        flat_idx = np.flatnonzero(finite_mask.ravel())[-1]
+        i_last, j_last = np.unravel_index(flat_idx, r_x_grid.shape)
+        last_r = [float(r_x_grid[i_last, j_last]), float(r_y_grid[i_last, j_last])]
 
     n_jobs_resolved = 1 if n_jobs in (None, 0) else n_jobs
     if n_jobs_resolved == -1:
@@ -322,42 +420,49 @@ def scan_win_width_amplitude_dependence_weighted(self, win_input_range, width_ra
             if cancelled:
                 break
             for j, win_input_val in enumerate(win_input_vals):
-                try:
-                    win_eff = self.win_input_to_win(win_input_val)
-                except ValueError:
-                    win_eff = None
+                if np.isfinite(uniformity_weighted_grid[i, j]) and np.isfinite(r_x_grid[i, j]) and np.isfinite(r_y_grid[i, j]):
+                    # bereits aus Checkpoint vorhanden - nicht neu berechnen, aber
+                    # last_r fuer warm_start konsistent mitfuehren
+                    if warm_start:
+                        last_r = [float(r_x_grid[i, j]), float(r_y_grid[i, j])]
+                else:
+                    try:
+                        win_eff = self.win_input_to_win(win_input_val)
+                    except ValueError:
+                        win_eff = None
 
-                if win_eff is not None:
-                    def objective(p, win_eff=win_eff, width_val=width_val):
-                        amps = amps_from_ratios(p[0], p[1], self.N_x, self.N_y)
-                        val = self._evaluate_weighted_only(win_eff, width_val, amps=amps)
-                        if val is None:
-                            return 1e10
-                        return alpha * val['uniformity_weighted'] + (1 - alpha) * val['eta_weighted']
+                    if win_eff is not None:
+                        def objective(p, win_eff=win_eff, width_val=width_val):
+                            amps = amps_from_ratios(p[0], p[1], self.N_x, self.N_y)
+                            val = self._evaluate_weighted_only(win_eff, width_val, amps=amps)
+                            if val is None:
+                                return 1e10
+                            return alpha * val['uniformity_weighted'] + (1 - alpha) * val['eta_weighted']
 
-                    x0 = last_r if warm_start else [float(r0[0]), float(r0[1])]
-                    result = minimize(
-                        objective, x0=x0, method='Nelder-Mead',
-                        bounds=[r_bounds, r_bounds],
-                        options={'xatol': 1e-6, 'fatol': 1e-9, 'maxiter': 300},
-                    )
-                    r_opt = result.x
-                    amps_opt = amps_from_ratios(r_opt[0], r_opt[1], self.N_x, self.N_y)
-                    details = self._evaluate_weighted_only(win_eff, width_val, amps=amps_opt)
+                        x0 = last_r if warm_start else [float(r0[0]), float(r0[1])]
+                        result = minimize(
+                            objective, x0=x0, method='Nelder-Mead',
+                            bounds=[r_bounds, r_bounds],
+                            options={'xatol': 1e-6, 'fatol': 1e-9, 'maxiter': 300},
+                        )
+                        r_opt = result.x
+                        amps_opt = amps_from_ratios(r_opt[0], r_opt[1], self.N_x, self.N_y)
+                        details = self._evaluate_weighted_only(win_eff, width_val, amps=amps_opt)
 
-                    if details is not None:
-                        uniformity_weighted_grid[i, j] = details['uniformity_weighted']
-                        eta_weighted_grid[i, j] = details['eta_weighted']
-                        r_x_grid[i, j] = r_opt[0]
-                        r_y_grid[i, j] = r_opt[1]
-                        if warm_start:
-                            last_r = [float(r_opt[0]), float(r_opt[1])]
+                        if details is not None:
+                            uniformity_weighted_grid[i, j] = details['uniformity_weighted']
+                            eta_weighted_grid[i, j] = details['eta_weighted']
+                            r_x_grid[i, j] = r_opt[0]
+                            r_y_grid[i, j] = r_opt[1]
+                            if warm_start:
+                                last_r = [float(r_opt[0]), float(r_opt[1])]
 
                 done += 1
                 if progress_callback is not None:
                     if progress_callback(done, total) is False:
                         cancelled = True
                         break
+                ckpt.maybe_save(_current_results, done=done, total=total)
             if verbose and n_width >= 10 and (i % max(1, n_width // 10) == 0):
                 print(f"  ... width row {i + 1}/{n_width}")
 
@@ -371,38 +476,51 @@ def scan_win_width_amplitude_dependence_weighted(self, win_input_range, width_ra
             (i, j, win_input_val, width_val, list(r0), r_bounds, alpha, optimizer_kwargs)
             for i, width_val in enumerate(width_vals)
             for j, win_input_val in enumerate(win_input_vals)
+            if not (np.isfinite(uniformity_weighted_grid[i, j]) and np.isfinite(r_x_grid[i, j])
+                    and np.isfinite(r_y_grid[i, j]))
         ]
+        done = n_done_before
 
         if verbose:
-            print(f"Verteile {len(tasks)} Punkte auf {n_jobs_resolved} Prozesse "
+            skipped = total - len(tasks)
+            skip_msg = f" ({skipped} bereits aus Checkpoint vorhanden)" if skipped else ""
+            print(f"Verteile {len(tasks)} Punkte auf {n_jobs_resolved} Prozesse{skip_msg} "
                   f"(warm_start wird bei n_jobs>1 ignoriert)...")
 
-        with ProcessPoolExecutor(max_workers=n_jobs_resolved,
-                                  initializer=pool_initializer,
-                                  initargs=pool_initargs) as executor:
-            futures = {executor.submit(_amp_dependence_worker_weighted, task): task for task in tasks}
-            for future in as_completed(futures):
-                try:
-                    i, j, uniformity_w, eta_w, r_x, r_y = future.result()
-                except Exception:
-                    task = futures[future]
-                    i, j = task[0], task[1]
-                    uniformity_w = eta_w = r_x = r_y = None
+        if not tasks:
+            if verbose:
+                print("  Alle Punkte bereits vorhanden - nichts zu tun.")
+        else:
+            with ProcessPoolExecutor(max_workers=n_jobs_resolved,
+                                      initializer=pool_initializer,
+                                      initargs=pool_initargs) as executor:
+                futures = {executor.submit(_amp_dependence_worker_weighted, task): task for task in tasks}
+                for future in as_completed(futures):
+                    try:
+                        i, j, uniformity_w, eta_w, r_x, r_y = future.result()
+                    except Exception:
+                        task = futures[future]
+                        i, j = task[0], task[1]
+                        uniformity_w = eta_w = r_x = r_y = None
 
-                if uniformity_w is not None:
-                    uniformity_weighted_grid[i, j] = uniformity_w
-                    eta_weighted_grid[i, j] = eta_w
-                    r_x_grid[i, j] = r_x
-                    r_y_grid[i, j] = r_y
+                    if uniformity_w is not None:
+                        uniformity_weighted_grid[i, j] = uniformity_w
+                        eta_weighted_grid[i, j] = eta_w
+                        r_x_grid[i, j] = r_x
+                        r_y_grid[i, j] = r_y
 
-                done += 1
-                if progress_callback is not None and not cancelled:
-                    if progress_callback(done, total) is False:
-                        cancelled = True
-                        for f in futures:
-                            f.cancel()
-                if verbose and total >= 10 and done % max(1, total // 10) == 0:
-                    print(f"  ... {done}/{total} Punkte fertig")
+                    done += 1
+                    if progress_callback is not None and not cancelled:
+                        if progress_callback(done, total) is False:
+                            cancelled = True
+                            for f in futures:
+                                f.cancel()
+                    ckpt.maybe_save(_current_results, done=done, total=total)
+                    if verbose and total >= 10 and done % max(1, total // 10) == 0:
+                        print(f"  ... {done}/{total} Punkte fertig")
+
+    if ckpt.active:
+        ckpt.maybe_save(_current_results, done=done, total=total, force=True)
 
     self.results['scan2d_amp_weighted'] = dict(
         win_input_vals=win_input_vals, width_vals=width_vals,
@@ -474,11 +592,15 @@ def get_scan_amp_results_weighted(self):
     return res
 
 
-def save_scan_amp_results_weighted(self, filepath=None):
+def save_scan_amp_results_weighted(self, filepath=None, overwrite=False):
     """
     Wie save_scan_amp_results(), aber für get_scan_amp_results_weighted().
     Default-Dateiname: "scan_amp_data_weighted_N{N_x}x{N_y}_{n_win}x{n_width}
     pts_{Airy|Gauss}.pkl" in DEFAULT_RESULTS_DIR.
+
+    overwrite: siehe save_scan_weighted_results() oben - identische
+    Begründung/Verwendung (checkpoint_path == finaler Speicherpfad in den
+    GUI-Start-Dialogen).
     """
     if filepath is None:
         res = self.results.get('scan2d_amp_weighted', {})
@@ -489,7 +611,7 @@ def save_scan_amp_results_weighted(self, filepath=None):
         filepath = _resolve_pickle_path(DEFAULT_RESULTS_DIR, filename)
     else:
         filepath = FilePath(filepath)
-        if filepath.exists():
+        if filepath.exists() and not overwrite:
             filepath = _resolve_pickle_path(filepath.parent, filepath.name)
 
     with open(filepath, 'wb') as f:

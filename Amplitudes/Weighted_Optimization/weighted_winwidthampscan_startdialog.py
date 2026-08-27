@@ -54,10 +54,11 @@ Nutzung:
 
 import os
 import sys
+from pathlib import Path
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QFormLayout, QVBoxLayout, QHBoxLayout,
     QLabel, QSpinBox, QDoubleSpinBox, QPushButton, QGroupBox, QMessageBox,
-    QProgressDialog, QFileDialog, QCheckBox,
+    QProgressDialog, QFileDialog, QCheckBox, QLineEdit,
 )
 from PyQt5.QtCore import Qt
 
@@ -67,6 +68,7 @@ from weighted_multitone_flattop_optimizer import (
 import weighted_amp_scan_methods  # nur Import noetig - patcht die neuen Scan-Methoden auf die Klasse
 from weighted_multitone_amplitude_dependence_plots import AmplitudeScanPlotter
 import perf_log
+import scan_checkpoint
 
 
 N_X_FIXED = 3
@@ -260,6 +262,36 @@ class StartParametersDialog(QDialog):
         gpu_group.setLayout(gpu_layout)
         main_layout.addWidget(gpu_group)
 
+        # -- save location (asked UP FRONT, before the scan starts - see
+        # Chat "Amplituden Abhängigkeit": dieser Scan kann besonders lange
+        # laufen (pro Punkt eine volle Nelder-Mead-Optimierung), daher wird
+        # stündlich unter GENAU diesem Pfad zwischengespeichert; ein
+        # abgebrochener Scan wird beim erneuten Start automatisch an dieser
+        # Stelle fortgesetzt (siehe main()/scan_checkpoint.py) --
+        self._save_path_auto = True
+        save_group = QGroupBox("Save Location (Zwischenspeicherung + Endergebnis)")
+        save_layout = QHBoxLayout()
+        self.save_path_edit = QLineEdit()
+        self.save_path_edit.textEdited.connect(self._on_save_path_edited)
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self._on_browse_save_path)
+        save_layout.addWidget(self.save_path_edit)
+        save_layout.addWidget(browse_btn)
+        save_group.setLayout(save_layout)
+        main_layout.addWidget(save_group)
+        save_info = QLabel(
+            "Der Scan wird unter diesem Pfad stündlich zwischengespeichert. Sollte der "
+            "Prozess abbrechen, wird ein erneuter Start mit denselben Parametern und "
+            "demselben Pfad automatisch an der Stelle fortgesetzt, an der er stehen "
+            "geblieben ist."
+        )
+        save_info.setWordWrap(True)
+        save_info.setStyleSheet("font-style: italic; color: gray;")
+        main_layout.addWidget(save_info)
+
+        self.n_points.valueChanged.connect(self._update_default_save_path)
+        self._update_default_save_path()
+
         # -- buttons --
         btn_layout = QHBoxLayout()
         ok_btn = QPushButton("Start Scan")
@@ -279,6 +311,25 @@ class StartParametersDialog(QDialog):
         box.setValue(value)
         return box
 
+    def _default_save_filename(self):
+        n = self.n_points.value()
+        return f"scan_amp_data_weighted_N{N_X_FIXED}x{N_Y_FIXED}_{n}x{n}pts_Airy.pkl"
+
+    def _update_default_save_path(self):
+        if self._save_path_auto:
+            self.save_path_edit.setText(str(DEFAULT_RESULTS_DIR / self._default_save_filename()))
+
+    def _on_save_path_edited(self, _text):
+        self._save_path_auto = False
+
+    def _on_browse_save_path(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Speicherort wählen", self.save_path_edit.text(), "Pickle files (*.pkl)"
+        )
+        if path:
+            self.save_path_edit.setText(path)
+            self._save_path_auto = False
+
     def _on_accept(self):
         if self.win_input_min.value() >= self.win_input_max.value():
             QMessageBox.warning(self, "Invalid Range",
@@ -291,6 +342,10 @@ class StartParametersDialog(QDialog):
         if self.r_min.value() >= self.r_max.value():
             QMessageBox.warning(self, "Invalid Range",
                                  "r_x/r_y min must be smaller than r_x/r_y max.")
+            return
+        if not self.save_path_edit.text().strip():
+            QMessageBox.warning(self, "Invalid Save Location",
+                                 "Bitte einen Speicherort für die Zwischen-/Endergebnisse angeben.")
             return
         self.accept()
 
@@ -309,6 +364,7 @@ class StartParametersDialog(QDialog):
             n_jobs=self.n_jobs.value(),
             force_cpu=self.force_cpu.isChecked(),
             enable_perf_log=self.enable_perf_log.isChecked(),
+            save_path=self.save_path_edit.text().strip(),
         )
 
 
@@ -365,6 +421,38 @@ def main():
         weighted_n_grid=params["weighted_n_grid"],
     )
 
+    save_path = params["save_path"]
+
+    # Vor dem (potenziell tagelangen) Scan pruefen, ob unter dem gewaehlten
+    # Speicherort bereits ein zu diesen Parametern passender Zwischenstand
+    # liegt (z.B. von einem abgebrochenen vorherigen Lauf) - und den
+    # Nutzer informieren, ob automatisch fortgesetzt oder neu gestartet wird.
+    if save_path and Path(save_path).exists():
+        resumable = scan_checkpoint.load_resumable(
+            save_path, params["win_input_range"], params["width_range"],
+            params["n_points"], params["n_points"], N_X_FIXED, N_Y_FIXED,
+            extra_match=dict(alpha=params["alpha"], r_bounds=params["r_bounds"]), verbose=False,
+        )
+        if resumable is not None:
+            n_done = scan_checkpoint.count_done(resumable["uniformity_weighted_grid"])
+            total_pts = params["n_points"] * params["n_points"]
+            QMessageBox.information(
+                None, "Zwischenstand gefunden",
+                f"Unter '{Path(save_path).name}' wurde ein zu diesen Scan-Parametern "
+                f"passender Zwischenstand mit {n_done}/{total_pts} bereits berechneten "
+                f"Punkten gefunden.\n\nDer Scan wird automatisch an dieser Stelle "
+                f"fortgesetzt.",
+            )
+        else:
+            QMessageBox.information(
+                None, "Vorhandene Datei passt nicht",
+                f"Die Datei '{Path(save_path).name}' existiert bereits, passt aber nicht "
+                f"zu den aktuell gewählten Scan-Parametern (anderes Gitter/alpha/"
+                f"r_bounds) oder konnte nicht gelesen werden.\n\nDer Scan startet "
+                f"komplett neu und überschreibt die Datei beim nächsten "
+                f"Zwischenspeichern.",
+            )
+
     total_points = params["n_points"] * params["n_points"]
     progress = QProgressDialog("Computing weighted amplitude-dependence scan...", "Cancel", 0, total_points)
     progress.setWindowTitle("Weighted Amplitude-Dependence Scan Running")
@@ -396,6 +484,7 @@ def main():
         progress_callback=on_progress,
         n_jobs=n_jobs,
         pool_initializer=pool_initializer,
+        checkpoint_path=save_path or None,
     )
 
     duration = perf_measure.stop()
@@ -403,23 +492,20 @@ def main():
 
     progress.setValue(total_points)
 
-    # Persist the raw results so this exact (usually slow) scan never has to
-    # be re-run just to change plot styling later. Filename encodes tone
-    # count, grid resolution AND the active beam profile (Airy/Gauss), plus
-    # the "_weighted" tag so it never collides with the un-weighted files.
-    profile_tag = "Airy" if opt.profile == "airy" else "Gauss" if opt.profile == "gaussian" else opt.profile
-    default_scan_data_path = str(
-        DEFAULT_RESULTS_DIR / f"scan_amp_data_weighted_N{N_X_FIXED}x{N_Y_FIXED}_"
-                               f"{params['n_points']}x{params['n_points']}pts_{profile_tag}.pkl"
-    )
-    scan_data_path = QFileDialog.getSaveFileName(
-        None, "Save weighted amplitude-dependence scan data (for re-plotting later)",
-        default_scan_data_path, "Pickle files (*.pkl)"
-    )[0]
-    if scan_data_path:
-        opt.save_scan_amp_results_weighted(scan_data_path)
+    # Der Speicherort wurde bereits VOR dem Scan festgelegt (s.o.) und diente
+    # dort bereits als checkpoint_path (stündliche Zwischenspeicherung) - hier
+    # nur noch der finale, "saubere" Endstand (ohne Checkpoint-Markerfelder),
+    # der denselben Pfad überschreibt. Kein erneuter Dateidialog mehr nötig.
+    if save_path:
+        # overwrite=True (Fix 2026-08-26, siehe Chat "Amplituden Abhängigkeit"):
+        # unter save_path liegt bereits der (checkpoint_path-)Zwischenstand aus
+        # dem Scan-Aufruf oben - der soll hier durch den sauberen Endstand
+        # ERSETZT werden, nicht daneben eine verwirrende "_2"-Datei erzeugen
+        # (vorher fehlte overwrite=True hier komplett - siehe overwrite-
+        # Docstring von save_scan_amp_results_weighted()).
+        opt.save_scan_amp_results_weighted(save_path, overwrite=True)
     else:
-        opt.save_scan_amp_results_weighted()  # user cancelled the dialog -> fall back to the Results-folder default
+        opt.save_scan_amp_results_weighted()  # kein Pfad angegeben -> Results-Ordner-Default
 
     def qt_confirm_overwrite(existing_path):
         answer = QMessageBox.question(

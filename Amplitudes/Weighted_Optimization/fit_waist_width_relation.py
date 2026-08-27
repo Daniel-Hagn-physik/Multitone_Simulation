@@ -258,7 +258,7 @@ def extract_valley(results):
               f"gescannten width-Bereichs [{width_mhz.min():.2f}, {width_mhz.max():.2f}] MHz - "
               f"dort wurde das wahre Minimum vom Scan-Fenster abgeschnitten.)")
 
-    return np.array(valley_waist), np.array(valley_width)
+    return np.array(valley_waist), np.array(valley_width), n_boundary
 
 
 def drop_disconnected_branch(x, y, jump_factor=6.0):
@@ -287,9 +287,19 @@ def drop_disconnected_branch(x, y, jump_factor=6.0):
         return x_sorted, y_sorted, np.array([]), np.array([])
 
     steps = np.abs(np.diff(y_sorted))
-    mad = np.median(np.abs(steps - np.median(steps)))
+    median_step = np.median(steps)
+    mad = np.median(np.abs(steps - median_step))
     scale = 1.4826 * mad
-    floor = 0.05 * (np.max(y_sorted) - np.min(y_sorted) + 1e-12)
+    # Numerischer Sicherheits-Boden (falls MAD==0, z.B. bei exakt aequidistanten
+    # Schritten): an den TYPISCHEN Schrittabstand gekoppelt, NICHT an die
+    # gesamte y-Spannweite. Ein an y-range gekoppelter Boden (frueher:
+    # 0.05*y-range) haengt von der Anzahl Scanpunkte ab, waehrend der
+    # physikalische Sprung selbst (zweiter Uniformity_w-Nebenzweig) eine
+    # nahezu feste absolute Groesse hat - bei grober Aufloesung (wenige
+    # Scanpunkte, z.B. 40x40) uebertraf der alte, y-range-gekoppelte Boden den
+    # echten Sprung knapp und verhinderte so dessen Erkennung (siehe Nachtrag
+    # in status.md).
+    floor = 0.1 * max(median_step, 1e-9)
     threshold = jump_factor * max(scale, floor)
 
     jump_idx = np.where(steps > threshold)[0]  # Sprung zwischen i und i+1
@@ -532,7 +542,7 @@ def cut_along_fit(results, model_name, popt, waist_lo, waist_hi, n=CUT_N_POINTS)
 
 def write_formula_doc(prefix, model_name, popt, r2_cv, r2_cv_std, r2_fulldata,
                        waist_used, waist_excluded, best_point,
-                       out_dir=FIT_RESULTS_DIR):
+                       n_boundary=0, out_dir=FIT_RESULTS_DIR):
     """Schreibt AUTOMATISCH ein Formel-Dokument (Markdown) mit dem gerade
     gewaehlten Modell/Parametern/R² - analog zu fit_central_amplitudes.py's
     write_formula_doc(), bei jedem Lauf frisch generiert."""
@@ -550,7 +560,8 @@ def write_formula_doc(prefix, model_name, popt, r2_cv, r2_cv_std, r2_fulldata,
         f"- R²(volle bereinigte Daten, NICHT CV, nur Sanity-Check): {r2_fulldata:.5f}",
         f"- Gueltigkeitsbereich (zuverlaessiger Talbereich): "
         f"waist_um ∈ [{waist_used.min():.4f}, {waist_used.max():.4f}]",
-        f"- Davon ausgeschlossene Talpunkte (Scan-Fenster-Artefakte/Nebenzweig): {len(waist_excluded)}",
+        f"- Davon ausgeschlossene Talpunkte: {n_boundary + len(waist_excluded)} "
+        f"({n_boundary} Scan-Fenster-Artefakte (Rand) + {len(waist_excluded)} Nebenzweig/Rand-Kink-Punkte)",
         "",
         "```",
         param_lines,
@@ -832,7 +843,21 @@ def main(pkl_datei=None, output_prefix=None, draw_best_point=None, legend_fontsi
                   "kein Punkt eingezeichnet.")
 
     print("\n1) Uniformity_w-Tal extrahieren (ein Punkt pro Waist-Spalte) ...")
-    waist_all, width_all = extract_valley(results)
+    waist_all, width_all, n_boundary = extract_valley(results)
+    if len(waist_all) == 0:
+        width_vals = results["width_vals"]
+        print(f"   FEHLER: Alle {n_boundary} Spalten (win_input-Werte) wurden als "
+              f"Scan-Fenster-Artefakt verworfen - es bleibt KEIN einziger Talpunkt "
+              f"uebrig, ein Fit ist damit nicht moeglich.\n"
+              f"   Das bedeutet: das Uniformity_w-Minimum liegt in JEDER Spalte am "
+              f"Rand des gescannten width-Fensters [{width_vals.min()*1e-6:.2f}, "
+              f"{width_vals.max()*1e-6:.2f}] MHz - das wahre Optimum liegt fuer "
+              f"diesen Datensatz komplett AUSSERHALB des gescannten width-Bereichs "
+              f"(z.B. bei einem Atom-Offset, der die optimale width-Spannweite stark "
+              f"nach oben oder unten verschiebt). Abhilfe: den Scan fuer diesen "
+              f"Offset mit einem breiteren width-Bereich wiederholen, bis das echte "
+              f"Minimum innerhalb des Fensters liegt.")
+        return None
     print(f"   {len(waist_all)} Talpunkte gefunden "
           f"(waist_um {waist_all.min():.2f}-{waist_all.max():.2f}).")
 
@@ -851,11 +876,28 @@ def main(pkl_datei=None, output_prefix=None, draw_best_point=None, legend_fontsi
     print(f"\n2) Block-Kreuzvalidierung ueber {len(CANDIDATE_MODELS)} Kandidaten-Modelle ...")
     cv_results = cv_compare_models(waist_used, width_used)
     valid = [n for n in cv_results if np.isfinite(cv_results[n]["r2_mean"])]
-    best_r2 = max(cv_results[n]["r2_mean"] for n in valid)
-    # Occam's razor: bei (annaehernd) gleich gutem Block-CV-R^2 (Toleranz
-    # 1e-3) gewinnt das Modell mit den WENIGSTEN freien Parametern, nicht
-    # einfach das rein numerische Maximum - siehe PARAM_COUNT weiter oben.
-    tol = 1e-3
+    best_name_raw = max(valid, key=lambda n: cv_results[n]["r2_mean"])
+    best_r2 = cv_results[best_name_raw]["r2_mean"]
+    # Occam's razor: bei (annaehernd) gleich gutem Block-CV-R^2 gewinnt das
+    # Modell mit den WENIGSTEN freien Parametern, nicht einfach das rein
+    # numerische Maximum - siehe PARAM_COUNT weiter oben. Die Toleranz dafuer
+    # ("annaehernd gleich gut") war frueher ein FESTER Wert (1e-3) - das
+    # ignoriert, wie verrauscht die Block-CV selbst ist (nur n_blocks=5
+    # Stichproben fuer r2_std). Bei sehr sauberen Datensaetzen (r2_std ~
+    # 1e-4) ist 1e-3 eine sinnvolle Toleranz; bei verrauschteren Datensaetzen
+    # (r2_std ~ 0.06, z.B. mit Atom-Offset) lag der feste 1e-3-Wert WEIT
+    # innerhalb der CV-Streuung und liess die Modellwahl faktisch vom
+    # CV-Stichprobenrauschen entscheiden - zwei kaum unterscheidbare Modelle
+    # (hier: linear vs. power mit Exponent ~1.0) konnten dadurch je nach
+    # Datensatz unterschiedlich "gewinnen", obwohl der Unterschied statistisch
+    # nicht signifikant war. Fix: 1-Standardfehler-Regel (Standard in der
+    # CV-Modellwahl, z.B. LASSO/Elastic-Net) - als "gleich gut" gilt jetzt
+    # alles innerhalb des Standardfehlers des besten Modells
+    # (r2_std / sqrt(n_folds_ok)), zusaetzlich zum alten 1e-3-Boden fuer den
+    # Fall extrem kleiner Streuung.
+    best_folds = max(cv_results[best_name_raw]["n_folds_ok"], 1)
+    se_best = cv_results[best_name_raw]["r2_std"] / np.sqrt(best_folds)
+    tol = max(1e-3, se_best)
     tied = [n for n in valid if best_r2 - cv_results[n]["r2_mean"] <= tol]
     best_name = min(tied, key=lambda n: (PARAM_COUNT[n], CANDIDATE_MODELS.index(n)))
     if len(tied) > 1:
@@ -897,7 +939,8 @@ def main(pkl_datei=None, output_prefix=None, draw_best_point=None, legend_fontsi
     if do_save:
         formula_doc = write_formula_doc(
             output_prefix, best_name, popt, cv_results[best_name]["r2_mean"],
-            cv_results[best_name]["r2_std"], r2_fulldata, waist_used, waist_excl, best_point)
+            cv_results[best_name]["r2_std"], r2_fulldata, waist_used, waist_excl, best_point,
+            n_boundary=n_boundary)
 
     predict_width_mhz, predict_waist_um = make_predictor(best_name, popt)
     print(f"\nFertig. Modell '{best_name}' gilt fuer waist_um in "
@@ -906,6 +949,7 @@ def main(pkl_datei=None, output_prefix=None, draw_best_point=None, legend_fontsi
     return dict(model=best_name, popt=popt, cv_results=cv_results,
                 waist_used=waist_used, width_used=width_used,
                 waist_excluded=waist_excl, width_excluded=width_excl,
+                n_boundary=n_boundary,
                 predict_width_mhz=predict_width_mhz, predict_waist_um=predict_waist_um,
                 best_point=best_point, formula_doc=formula_doc)
 

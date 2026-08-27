@@ -22,17 +22,19 @@ Usage:
 """
 
 import sys
+from pathlib import Path
 import numpy as np
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QFormLayout, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QSpinBox, QDoubleSpinBox, QPushButton, QGroupBox, QMessageBox,
-    QProgressDialog, QFileDialog, QComboBox,
+    QProgressDialog, QFileDialog, QComboBox, QLineEdit,
 )
 from PyQt5.QtCore import Qt
 
 from multitone_flattop_optimizer import MultitoneFlatTopOptimizer, DEFAULT_RESULTS_DIR
 from multitone_flattop_scan_plots import ScanPlotter, win_input_to_win
 import perf_log
+import scan_checkpoint
 
 # Feste Optik-Parameter für die Umrechnung win_input (vor der Linse) <->
 # win_eff (nach der Linse/am Fokus) in diesem Dialog. f1/f2 sind wie überall
@@ -140,6 +142,37 @@ class StartParametersDialog(QDialog):
         scan_group.setLayout(scan_layout)
         main_layout.addWidget(scan_group)
 
+        # -- save location (asked UP FRONT, before the scan starts - see
+        # Chat "Amplituden Abhängigkeit": Scans können Tage dauern, daher
+        # wird stündlich unter GENAU diesem Pfad zwischengespeichert; ein
+        # abgebrochener Scan wird beim erneuten Start automatisch an dieser
+        # Stelle fortgesetzt (siehe main()/scan_checkpoint.py) --
+        self._save_path_auto = True
+        save_group = QGroupBox("Save Location (Zwischenspeicherung + Endergebnis)")
+        save_layout = QHBoxLayout()
+        self.save_path_edit = QLineEdit()
+        self.save_path_edit.textEdited.connect(self._on_save_path_edited)
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self._on_browse_save_path)
+        save_layout.addWidget(self.save_path_edit)
+        save_layout.addWidget(browse_btn)
+        save_group.setLayout(save_layout)
+        main_layout.addWidget(save_group)
+        save_info = QLabel(
+            "Der Scan wird unter diesem Pfad stündlich zwischengespeichert. Sollte der "
+            "Prozess abbrechen, wird ein erneuter Start mit denselben Parametern und "
+            "demselben Pfad automatisch an der Stelle fortgesetzt, an der er stehen "
+            "geblieben ist."
+        )
+        save_info.setWordWrap(True)
+        save_info.setStyleSheet("font-style: italic; color: gray;")
+        main_layout.addWidget(save_info)
+
+        self.nx_spin.valueChanged.connect(self._update_default_save_path)
+        self.ny_spin.valueChanged.connect(self._update_default_save_path)
+        self.n_points.valueChanged.connect(self._update_default_save_path)
+        self._update_default_save_path()
+
         # -- buttons --
         btn_layout = QHBoxLayout()
         ok_btn = QPushButton("Start Scan")
@@ -215,6 +248,25 @@ class StartParametersDialog(QDialog):
             self.amp_layout.addWidget(box, 1, i + 1)
             self.amp_y_boxes.append(box)
 
+    def _default_save_filename(self):
+        n = self.n_points.value()
+        return f"scan_data_N{self.nx_spin.value()}x{self.ny_spin.value()}_{n}x{n}pts.pkl"
+
+    def _update_default_save_path(self):
+        if self._save_path_auto:
+            self.save_path_edit.setText(str(DEFAULT_RESULTS_DIR / self._default_save_filename()))
+
+    def _on_save_path_edited(self, _text):
+        self._save_path_auto = False
+
+    def _on_browse_save_path(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Speicherort wählen", self.save_path_edit.text(), "Pickle files (*.pkl)"
+        )
+        if path:
+            self.save_path_edit.setText(path)
+            self._save_path_auto = False
+
     def _on_accept(self):
         if self.win_input_min.value() >= self.win_input_max.value():
             QMessageBox.warning(self, "Invalid Range",
@@ -223,6 +275,10 @@ class StartParametersDialog(QDialog):
         if self.width_min.value() >= self.width_max.value():
             QMessageBox.warning(self, "Invalid Range",
                                  "width min must be smaller than width max.")
+            return
+        if not self.save_path_edit.text().strip():
+            QMessageBox.warning(self, "Invalid Save Location",
+                                 "Bitte einen Speicherort für die Zwischen-/Endergebnisse angeben.")
             return
         self.accept()
 
@@ -263,6 +319,7 @@ class StartParametersDialog(QDialog):
             # werden soll (siehe ScanPlotter.plot_scan2d_combined(x_axis=...)) -
             # standardmäßig dieselbe, auf die sich der Scan-Bereich hier bezog
             waist_mode=self._current_waist_mode,
+            save_path=self.save_path_edit.text().strip(),
         )
 
 
@@ -291,6 +348,7 @@ def main():
 
     params = dialog.get_values()
     amps = np.concatenate([params["amp_x"], params["amp_y"]])
+    save_path = params["save_path"]
 
     opt = MultitoneFlatTopOptimizer(
         out_dir=".",
@@ -300,6 +358,36 @@ def main():
         N_y=params["N_y"],
         n_grid=params["n_grid"],
     )
+
+    # Vor dem (potenziell tagelangen) Scan prüfen, ob unter dem gewählten
+    # Speicherort bereits ein zu diesen Parametern passender Zwischenstand
+    # liegt (z.B. von einem abgebrochenen vorherigen Lauf) - und den
+    # Nutzer informieren, ob automatisch fortgesetzt oder neu gestartet wird.
+    if save_path and Path(save_path).exists():
+        resumable = scan_checkpoint.load_resumable(
+            save_path, params["win_input_range"], params["width_range"],
+            params["n_points"], params["n_points"], params["N_x"], params["N_y"],
+            extra_match=dict(amps=amps, alpha=0.9), verbose=False,
+        )
+        if resumable is not None:
+            n_done = scan_checkpoint.count_done(resumable["uniformity_grid"])
+            total_pts = params["n_points"] * params["n_points"]
+            QMessageBox.information(
+                None, "Zwischenstand gefunden",
+                f"Unter '{Path(save_path).name}' wurde ein zu diesen Scan-Parametern "
+                f"passender Zwischenstand mit {n_done}/{total_pts} bereits berechneten "
+                f"Punkten gefunden.\n\nDer Scan wird automatisch an dieser Stelle "
+                f"fortgesetzt.",
+            )
+        else:
+            QMessageBox.information(
+                None, "Vorhandene Datei passt nicht",
+                f"Die Datei '{Path(save_path).name}' existiert bereits, passt aber nicht "
+                f"zu den aktuell gewählten Scan-Parametern (anderes Gitter/Tonzahl/"
+                f"Amplituden) oder konnte nicht gelesen werden.\n\nDer Scan startet "
+                f"komplett neu und überschreibt die Datei beim nächsten "
+                f"Zwischenspeichern.",
+            )
 
     total_points = params["n_points"] * params["n_points"]
     progress = QProgressDialog("Computing uniformity & crosstalk scan...", "Cancel", 0, total_points)
@@ -329,6 +417,7 @@ def main():
         n_width=params["n_points"],
         amps=amps,
         progress_callback=on_progress,
+        checkpoint_path=save_path or None,
     )
 
     duration = perf_measure.stop()
@@ -336,18 +425,14 @@ def main():
 
     progress.setValue(total_points)
 
-    # Persist the raw results so this exact scan never has to be re-run
-    # just to change plot styling later. Defaults to DEFAULT_RESULTS_DIR
-    # (.../AOD_Simulation/Results) with an auto-generated name; the user
-    # can still pick a different location/name in the dialog.
-    default_scan_data_path = str(DEFAULT_RESULTS_DIR / f"scan_data_N{params['N_x']}x{params['N_y']}_{params['n_points']}x{params['n_points']}.pkl")
-    scan_data_path = QFileDialog.getSaveFileName(
-        None, "Save scan data (for re-plotting later)", default_scan_data_path, "Pickle files (*.pkl)"
-    )[0]
-    if scan_data_path:
-        opt.save_scan_results(scan_data_path)
+    # Der Speicherort wurde bereits VOR dem Scan festgelegt (s.o.) und diente
+    # dort bereits als checkpoint_path (stündliche Zwischenspeicherung) - hier
+    # nur noch der finale, "saubere" Endstand (ohne Checkpoint-Markerfelder),
+    # der denselben Pfad überschreibt. Kein erneuter Dateidialog mehr nötig.
+    if save_path:
+        opt.save_scan_results(save_path)
     else:
-        opt.save_scan_results()  # user cancelled the dialog -> fall back to the Results-folder default
+        opt.save_scan_results()  # kein Pfad angegeben -> Results-Ordner-Default
 
     def qt_confirm_overwrite(existing_path):
         answer = QMessageBox.question(

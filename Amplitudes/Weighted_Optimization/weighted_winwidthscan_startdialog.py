@@ -33,16 +33,27 @@ siehe scan_win_width_weighted_uniformity()). Alles andere (Tonanzahl,
 Amplituden pro Ton, Scan-Bereiche, Waist-Eingabemodus
 vor/nach der Linse, n_grid) ist 1:1 identisch zum Original uebernommen.
 
-NEU (2026-08-25): zusaetzlich zwei Felder "Atom offset x/y" (jeweils als
-Bruchteil von pitch, dem raeumlichen Tonabstand, -0.5..0.5) in derselben
-"Atom Weighting"-Gruppe. Damit laesst sich das Atom - und die 8 relativ zu
-ihm ueber pitch platzierten Nachbar-Sites, die in die atom-gewichtete
-Crosstalk-Metrik eingehen - VOR der Berechnung des Datensatzes um bis zu
-einem halben Tonabstand in x UND y aus der Site-Mitte verschieben (0/0 =
-bisheriges Verhalten, Atom exakt zentriert). Wird als atom_offset_x/
-atom_offset_y (Meter) an den Optimizer durchgereicht - siehe
-_evaluate_weighted_metrics() in weighted_multitone_flattop_optimizer.py fuer
-die Details der Verschiebung.
+NEU (2026-08-25, angepasst 2026-08-26): zusaetzlich zwei Felder "Atom offset
+x/y" (jeweils als Bruchteil der ECHTEN Gesamtspannweite des jeweils
+gewaehlten Toenearrays, -0.25..0.25) in derselben "Atom Weighting"-Gruppe.
+Damit laesst sich das Atom - und die 8 relativ zu ihm ueber pitch
+platzierten Nachbar-Sites, die in die atom-gewichtete Crosstalk-Metrik
+eingehen - VOR der Berechnung des Datensatzes um bis zu einem Viertel der
+Gesamtspannweite des Toenearrays in x UND y aus der Site-Mitte verschieben
+(0/0 = bisheriges Verhalten, Atom exakt zentriert). WICHTIG: bewusst NICHT
+relativ zu pitch (dem festen, gemessenen Fallen-Array-Abstand), sondern
+relativ zur tatsaechlichen Gesamtspannweite (aeusserster bis aeusserster
+Ton) des gerade konfigurierten N_x x N_y-Toenearrays (_tone_array_span_m(),
+unten - dieselbe Geometrie-Kette multitone_frequencies ->
+angle_from_frequency -> radius_from_angle wie _compute_centers_for_width()
+im Optimizer, ausgewertet bei der Mitte des eingestellten
+width-Scanbereichs). Ein Viertel der Gesamtspannweite entspricht bei N_x=3
+genau dem halben Ton-zu-Ton-Abstand (2 Luecken zwischen 3 Toenen); bei
+groesserem N (mehr Luecken) ist der Bezug zur Gesamtspannweite bewusst
+gleich gehalten (fest ein Viertel davon), NICHT mehr an "halber
+Ton-zu-Ton-Abstand" gekoppelt. Wird als atom_offset_x/atom_offset_y (Meter)
+an den Optimizer durchgereicht - siehe _evaluate_weighted_metrics() in
+weighted_multitone_flattop_optimizer.py fuer die Details der Verschiebung.
 
 GPU-Beschleunigung: wie bei den anderen Weighted_Optimization-Skripten
 automatisch versucht (kein Zwang), aber ueber `weighted_use_torch.py` statt
@@ -65,25 +76,47 @@ weighted_multitone_amplitude_dependence_plots.WeightedFixedScanPlotter
 uebergeben, der die Uniformity_w/Crosstalk_w-Heatmaps nebeneinander
 zeichnet.
 
+NEU (2026-08-26, auf User-Wunsch - siehe Chat "Amplituden Abhängigkeit"):
+1. Zwischenspeicherung (scan_checkpoint.py) jetzt auch HIER verdrahtet - der
+   Speicherort wird wie bei weighted_winwidthampscan_startdialog.py VOR dem
+   Scan-Start abgefragt (Gruppe "Save Location" unten) und dient sowohl als
+   stuendlicher Checkpoint-Pfad als auch als Endergebnis-Pfad. Ein
+   abgebrochener Lauf wird bei erneutem Start mit denselben Parametern und
+   demselben Pfad automatisch fortgesetzt (kein separater Speichern-Dialog
+   mehr am Ende - der fehlte hier bisher komplett, obwohl
+   scan_win_width_weighted_uniformity() den checkpoint_path-Parameter schon
+   laenger unterstuetzt).
+2. Der vorgeschlagene Dateiname enthaelt jetzt automatisch den Atom-Offset
+   (falls ungleich 0), damit er nicht mehr von Hand nachgetragen werden muss
+   - siehe _default_save_filename() (Format identisch zur bisherigen
+   Handschreibweise: "_0.25x"/"_-0.25x" fuer den x-Bruchteil, "_0.25y" fuer
+   den y-Bruchteil).
+3. Der finale Plot verwendet jetzt IMMER die µm-Achse (win_axis="after_lens",
+   effektiver Waist nach der Linse) - unabhaengig davon, in welchem Modus
+   (win_input/mm oder win_eff/µm) der Scan-Bereich oben eingegeben wurde.
+
 Nutzung:
     python weighted_winwidthscan_startdialog.py
 """
 
 import sys
+from pathlib import Path
 import numpy as np
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QFormLayout, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QSpinBox, QDoubleSpinBox, QPushButton, QGroupBox, QMessageBox,
-    QProgressDialog, QFileDialog, QComboBox, QCheckBox,
+    QProgressDialog, QFileDialog, QComboBox, QCheckBox, QLineEdit,
 )
 from PyQt5.QtCore import Qt
 
 from weighted_multitone_flattop_optimizer import (
     MultitoneFlatTopOptimizer, DEFAULT_RESULTS_DIR, DEFAULT_IMAGES_DIR,
+    multitone_frequencies, angle_from_frequency, radius_from_angle,
 )
 import weighted_amp_scan_methods  # nur Import noetig - patcht scan_win_width_weighted_uniformity() etc. auf die Klasse
 from weighted_multitone_amplitude_dependence_plots import WeightedFixedScanPlotter, win_input_to_win
 import perf_log
+import scan_checkpoint
 
 # Feste Optik-Parameter fuer die Umrechnung win_input (vor der Linse) <->
 # win_eff (nach der Linse/am Fokus) in diesem Dialog - identisch zum
@@ -94,18 +127,37 @@ _F1 = 75e-3
 _F2 = 750e-3
 _FLO = MultitoneFlatTopOptimizer.DEFAULTS['fLO']
 _LAMBDA_OPT = MultitoneFlatTopOptimizer.DEFAULTS['lambda_opt']
-# pitch = raeumlicher Tonabstand (Periodizitaet der Nachbar-Sites, siehe
-# self.pitch/create_neighbourhood() in der Optimizer-Datei) - gebraucht, um
-# den unten abgefragten Atom/Nachbar-Versatz als Bruchteil von pitch in
-# Meter umzurechnen.
-_PITCH = MultitoneFlatTopOptimizer.DEFAULTS['pitch']
+# Weitere feste Optik-/Frequenz-Parameter, NICHT vom Dialog abgefragt (bleiben
+# beim Erzeugen des Optimizers in main() unveraendert auf ihrem Default) -
+# gebraucht, um unten (_tone_array_span_m()) exakt dieselbe Geometrie-Kette
+# wie MultitoneFlatTopOptimizer._compute_centers_for_width() nachzubilden,
+# ohne dafuer schon eine Optimizer-Instanz zu brauchen.
+_OFFSET = MultitoneFlatTopOptimizer.DEFAULTS['offset']
+_THETA_MAX = MultitoneFlatTopOptimizer.DEFAULTS['theta_max']
+_F_BAND = MultitoneFlatTopOptimizer.DEFAULTS['f_band']
 
-# Mapping zwischen dem waist_mode-Wert dieses Dialogs ("win_input"/"win_eff",
-# identisch zum Original) und dem win_axis-Argument von
-# WeightedFixedScanPlotter.plot_scan2d_weighted_combined()
-# ("before_lens"/"after_lens", andere Konvention als beim Original-ScanPlotter).
-_WAIST_MODE_TO_WIN_AXIS = {"win_input": "before_lens", "win_eff": "after_lens"}
 
+def _tone_array_span_m(n_tones, width_hz):
+    """
+    Reale Gesamtspannweite (aeusserster bis aeusserster Ton, Meter) eines
+    Arrays aus `n_tones` Toenen, die zusammen den Frequenzbereich `width_hz`
+    (Hz) aufspannen (width = Gesamt-Bandbreite des Toenekamms, wie ueberall
+    sonst in diesem Projekt - siehe multitone_frequencies()).
+
+    Baut dieselbe Kette multitone_frequencies() -> angle_from_frequency() ->
+    radius_from_angle() nach, mit der auch
+    MultitoneFlatTopOptimizer._compute_centers_for_width() die tatsaechlichen
+    Site-Positionen berechnet (offset/theta_max/f_band/f1/f2/fLO wie dort,
+    hier als Modulkonstanten, da der Dialog vor dem Start noch keine
+    Optimizer-Instanz hat). Bei n_tones<=1 (kein Array, nur ein Ton) wird 0.0
+    zurueckgegeben.
+    """
+    if n_tones <= 1:
+        return 0.0
+    freqs = multitone_frequencies(n_tones, _OFFSET, width_hz)
+    thetas = angle_from_frequency(freqs, _OFFSET, _THETA_MAX, _F_BAND)
+    radii = radius_from_angle(thetas, _F1, _F2, _FLO)
+    return float(radii[-1] - radii[0])
 
 class StartParametersDialog(QDialog):
     """Fragt Tonanzahl, feste Amplituden pro Ton, Scan-Bereiche (win_input/
@@ -255,35 +307,41 @@ class StartParametersDialog(QDialog):
         )
         atom_layout.addRow("weighted_n_grid:", self.weighted_n_grid)
 
-        offset_info = QLabel(
-            f"Optional: shifts the atom - and with it the local sub-grid used\n"
-            f"for uniformity_weighted/eta_weighted, i.e. the atom AND the 8\n"
-            f"neighbor-site images it sees - away from the exact site center,\n"
-            f"before the dataset is computed. Given as a fraction of the tone\n"
-            f"spacing pitch (currently {_PITCH * 1e6:.3f} um); 0 = atom exactly on\n"
-            f"the site (previous/default behavior)."
-        )
-        offset_info.setStyleSheet("font-style: italic;")
-        atom_layout.addRow(offset_info)
+        self.offset_info = QLabel()
+        self.offset_info.setStyleSheet("font-style: italic;")
+        atom_layout.addRow(self.offset_info)
 
-        self.atom_offset_frac_x = self._make_spin(0.0, -0.5, 0.5, 0.05)
+        self.atom_offset_frac_x = self._make_spin(0.0, -0.25, 0.25, 0.05)
         self.atom_offset_frac_x.setToolTip(
-            "Atom/neighbor offset in x, as a fraction of the tone spacing\n"
-            "(pitch). Range +/- 0.5 = up to half a tone spacing in either\n"
-            "direction. Applied to atom_offset_x (meters) on the optimizer."
+            "Atom/neighbor offset in x, as a fraction of the REAL total span\n"
+            "of the current N_x tone array (outermost to outermost tone, NOT\n"
+            "the fixed trap pitch) - see the info text above. Range +/- 0.25 =\n"
+            "up to a quarter of the total array span in either direction.\n"
+            "Applied to atom_offset_x (meters) on the optimizer."
         )
-        atom_layout.addRow("Atom offset x (x pitch, -0.5..0.5):", self.atom_offset_frac_x)
+        atom_layout.addRow("Atom offset x (x total array span, -0.25..0.25):", self.atom_offset_frac_x)
 
-        self.atom_offset_frac_y = self._make_spin(0.0, -0.5, 0.5, 0.05)
+        self.atom_offset_frac_y = self._make_spin(0.0, -0.25, 0.25, 0.05)
         self.atom_offset_frac_y.setToolTip(
-            "Atom/neighbor offset in y, as a fraction of the tone spacing\n"
-            "(pitch). Range +/- 0.5 = up to half a tone spacing in either\n"
-            "direction. Applied to atom_offset_y (meters) on the optimizer."
+            "Atom/neighbor offset in y, as a fraction of the REAL total span\n"
+            "of the current N_y tone array (outermost to outermost tone, NOT\n"
+            "the fixed trap pitch) - see the info text above. Range +/- 0.25 =\n"
+            "up to a quarter of the total array span in either direction.\n"
+            "Applied to atom_offset_y (meters) on the optimizer."
         )
-        atom_layout.addRow("Atom offset y (x pitch, -0.5..0.5):", self.atom_offset_frac_y)
+        atom_layout.addRow("Atom offset y (x total array span, -0.25..0.25):", self.atom_offset_frac_y)
 
         atom_group.setLayout(atom_layout)
         main_layout.addWidget(atom_group)
+
+        # Haelt den Info-Text (echter Ton-zu-Ton-Abstand in x/y, aus N_x/N_y
+        # und der Mitte des aktuell eingetragenen width-Scanbereichs) live
+        # synchron - initial sowie bei jeder Aenderung von N_x/N_y/width.
+        self.nx_spin.valueChanged.connect(self._update_offset_info)
+        self.ny_spin.valueChanged.connect(self._update_offset_info)
+        self.width_min.valueChanged.connect(self._update_offset_info)
+        self.width_max.valueChanged.connect(self._update_offset_info)
+        self._update_offset_info()
 
         # -- GPU acceleration / logging (monkey-patch, see weighted_use_torch.py) --
         gpu_group = QGroupBox("GPU Acceleration")
@@ -318,6 +376,40 @@ class StartParametersDialog(QDialog):
         gpu_group.setLayout(gpu_layout)
         main_layout.addWidget(gpu_group)
 
+        # -- save location (asked UP FRONT, before the scan starts - siehe
+        # Chat "Amplituden Abhängigkeit": identisches Muster wie bei
+        # weighted_winwidthampscan_startdialog.py. Dient sowohl als
+        # stuendlicher Checkpoint-Pfad (scan_checkpoint.py) als auch als
+        # Endergebnis-Pfad - kein separater Speichern-Dialog mehr am Ende. --
+        self._save_path_auto = True
+        save_group = QGroupBox("Save Location (Zwischenspeicherung + Endergebnis)")
+        save_layout = QHBoxLayout()
+        self.save_path_edit = QLineEdit()
+        self.save_path_edit.textEdited.connect(self._on_save_path_edited)
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self._on_browse_save_path)
+        save_layout.addWidget(self.save_path_edit)
+        save_layout.addWidget(browse_btn)
+        save_group.setLayout(save_layout)
+        main_layout.addWidget(save_group)
+        save_info = QLabel(
+            "Der Scan wird unter diesem Pfad stündlich zwischengespeichert. Sollte der "
+            "Prozess abbrechen, wird ein erneuter Start mit denselben Parametern und "
+            "demselben Pfad automatisch an der Stelle fortgesetzt, an der er stehen "
+            "geblieben ist. Der Dateiname enthält automatisch den Atom-Offset (falls "
+            "ungleich 0)."
+        )
+        save_info.setWordWrap(True)
+        save_info.setStyleSheet("font-style: italic; color: gray;")
+        main_layout.addWidget(save_info)
+
+        self.nx_spin.valueChanged.connect(self._update_default_save_path)
+        self.ny_spin.valueChanged.connect(self._update_default_save_path)
+        self.n_points.valueChanged.connect(self._update_default_save_path)
+        self.atom_offset_frac_x.valueChanged.connect(self._update_default_save_path)
+        self.atom_offset_frac_y.valueChanged.connect(self._update_default_save_path)
+        self._update_default_save_path()
+
         # -- buttons --
         btn_layout = QHBoxLayout()
         ok_btn = QPushButton("Start Scan")
@@ -336,6 +428,46 @@ class StartParametersDialog(QDialog):
         box.setSingleStep(step)
         box.setValue(value)
         return box
+
+    def _default_save_filename(self):
+        """Vorgeschlagener Dateiname - wie save_scan_weighted_results()
+        (scan_data_weighted_N{Nx}x{Ny}_{n}x{n}pts_{Profil}.pkl), ZUSAETZLICH
+        mit dem Atom-Offset im Namen (falls ungleich 0), damit er nicht mehr
+        von Hand nachgetragen werden muss. Format identisch zur bisherigen
+        Handschreibweise in diesem Projekt (siehe status.md, z.B. Nachtrag
+        17/20: "..._+0.25x.pkl"): "_+0.25x"/"_-0.25x" fuer den x-Bruchteil
+        (Vorzeichen IMMER explizit, auch bei positiven Werten - {:+g} statt
+        {:g} - damit auf einen Blick klar ist, dass es sich um ein
+        Vorzeichen und nicht z.B. einen fehlenden Bruchteil handelt),
+        "_+0.25y"/"_-0.25y" fuer den y-Bruchteil.
+        """
+        n = self.n_points.value()
+        n_x = self.nx_spin.value()
+        n_y = self.ny_spin.value()
+        profile_tag = "Airy" if MultitoneFlatTopOptimizer.DEFAULTS['profile'] == "airy" else "Gauss"
+        name = f"scan_data_weighted_N{n_x}x{n_y}_{n}x{n}pts_{profile_tag}"
+        frac_x = self.atom_offset_frac_x.value()
+        frac_y = self.atom_offset_frac_y.value()
+        if frac_x != 0.0:
+            name += f"_{frac_x:+g}x"
+        if frac_y != 0.0:
+            name += f"_{frac_y:+g}y"
+        return name + ".pkl"
+
+    def _update_default_save_path(self):
+        if self._save_path_auto:
+            self.save_path_edit.setText(str(DEFAULT_RESULTS_DIR / self._default_save_filename()))
+
+    def _on_save_path_edited(self, _text):
+        self._save_path_auto = False
+
+    def _on_browse_save_path(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Speicherort wählen", self.save_path_edit.text(), "Pickle files (*.pkl)"
+        )
+        if path:
+            self.save_path_edit.setText(path)
+            self._save_path_auto = False
 
     def _on_waist_mode_changed(self):
         """Wie im Original: wechselt die Beschriftung der win_input-min/max-
@@ -391,6 +523,42 @@ class StartParametersDialog(QDialog):
             self.amp_layout.addWidget(box, 1, i + 1)
             self.amp_y_boxes.append(box)
 
+    def _current_tone_array_spans_m(self):
+        """
+        Reale Gesamtspannweite (Meter, aeusserster bis aeusserster Ton) in x/y
+        fuer die aktuell im Dialog eingetragenen N_x/N_y, ausgewertet bei der
+        Mitte des eingetragenen width-Scanbereichs (width_min/width_max, MHz)
+        - derselbe Referenzwert, der auch in get_values() fuer die
+        Meter-Umrechnung des Atom-Offsets verwendet wird. Die reale
+        Gesamtspannweite haengt zwar leicht vom jeweils aktuellen
+        width-Scanpunkt ab (siehe _tone_array_span_m()), aber der Atom-Offset
+        ist EIN fester Wert fuer den ganzen Scan - die Mitte des Scanbereichs
+        ist dafuer der sinnvollste einzelne Referenzpunkt.
+        """
+        width_ref_hz = 0.5 * (self.width_min.value() + self.width_max.value()) * 1e6
+        return (
+            _tone_array_span_m(self.nx_spin.value(), width_ref_hz),
+            _tone_array_span_m(self.ny_spin.value(), width_ref_hz),
+        )
+
+    def _update_offset_info(self):
+        """Aktualisiert den Info-Text ueber den beiden Atom-Offset-Feldern mit
+        der aktuell tatsaechlich zugrunde liegenden Toenearray-Gesamtspannweite
+        (x/y, in um) - live nachgefuehrt bei jeder Aenderung von N_x/N_y/width."""
+        span_x, span_y = self._current_tone_array_spans_m()
+        self.offset_info.setText(
+            "Optional: shifts the atom - and with it the local sub-grid used\n"
+            "for uniformity_weighted/eta_weighted, i.e. the atom AND the 8\n"
+            "neighbor-site images it sees - away from the exact site center,\n"
+            "before the dataset is computed. Given as a fraction of the REAL\n"
+            "total span of the current tone array (outermost to outermost\n"
+            "tone, NOT the fixed trap pitch), evaluated at the center of the\n"
+            "width range below:\n"
+            f"currently {span_x * 1e6:.3f} um (x, N_x={self.nx_spin.value()}) / "
+            f"{span_y * 1e6:.3f} um (y, N_y={self.ny_spin.value()}).\n"
+            "0 = atom exactly on the site (previous/default behavior)."
+        )
+
     def _on_accept(self):
         if self.win_input_min.value() >= self.win_input_max.value():
             QMessageBox.warning(self, "Invalid Range",
@@ -399,6 +567,10 @@ class StartParametersDialog(QDialog):
         if self.width_min.value() >= self.width_max.value():
             QMessageBox.warning(self, "Invalid Range",
                                  "width min must be smaller than width max.")
+            return
+        if not self.save_path_edit.text().strip():
+            QMessageBox.warning(self, "Invalid Save Location",
+                                 "Bitte einen Speicherort für die Zwischen-/Endergebnisse angeben.")
             return
         self.accept()
 
@@ -423,6 +595,11 @@ class StartParametersDialog(QDialog):
         else:
             win_input_range = (raw_min * 1e-3, raw_max * 1e-3)
 
+        # Reale Toenearray-Gesamtspannweite (siehe _current_tone_array_spans_m())
+        # - Referenzgroesse fuer die Bruchteil->Meter-Umrechnung des
+        # Atom-Offsets direkt unterhalb.
+        span_x, span_y = self._current_tone_array_spans_m()
+
         return dict(
             N_x=self.nx_spin.value(),
             N_y=self.ny_spin.value(),
@@ -436,14 +613,16 @@ class StartParametersDialog(QDialog):
             atom_temperature=self.atom_temperature_uK.value() * 1e-6,
             trap_freq_r=self.trap_freq_r_kHz.value() * 1e3,
             weighted_n_grid=self.weighted_n_grid.value(),
-            atom_offset_x=self.atom_offset_frac_x.value() * _PITCH,
-            atom_offset_y=self.atom_offset_frac_y.value() * _PITCH,
+            atom_offset_x=self.atom_offset_frac_x.value() * span_x,
+            atom_offset_y=self.atom_offset_frac_y.value() * span_y,
             force_cpu=self.force_cpu.isChecked(),
             enable_perf_log=self.enable_perf_log.isChecked(),
-            # welche Achse beim direkten Plotten am Ende von main() genutzt
-            # werden soll - standardmaessig dieselbe, auf die sich der
-            # Scan-Bereich hier bezog
+            # waist_mode wird nur noch fuer die Umrechnung von win_input_range
+            # oben gebraucht (mm vs. µm-Eingabe) - der finale Plot am Ende von
+            # main() nutzt seit 2026-08-26 IMMER die µm-Achse, unabhaengig
+            # vom hier gewaehlten Eingabemodus (siehe Docstring).
             waist_mode=self._current_waist_mode,
+            save_path=self.save_path_edit.text().strip(),
         )
 
 
@@ -499,6 +678,38 @@ def main():
         atom_offset_y=params["atom_offset_y"],
     )
 
+    save_path = params["save_path"]
+
+    # Vor dem (potenziell langen) Scan pruefen, ob unter dem gewaehlten
+    # Speicherort bereits ein zu diesen Parametern passender Zwischenstand
+    # liegt (z.B. von einem abgebrochenen vorherigen Lauf) - und den Nutzer
+    # informieren, ob automatisch fortgesetzt oder neu gestartet wird.
+    # Identisches Muster wie weighted_winwidthampscan_startdialog.py.
+    if save_path and Path(save_path).exists():
+        resumable = scan_checkpoint.load_resumable(
+            save_path, params["win_input_range"], params["width_range"],
+            params["n_points"], params["n_points"], params["N_x"], params["N_y"],
+            extra_match=dict(amps=amps, alpha=params["alpha"]), verbose=False,
+        )
+        if resumable is not None:
+            n_done = scan_checkpoint.count_done(resumable["uniformity_weighted_grid"])
+            total_pts = params["n_points"] * params["n_points"]
+            QMessageBox.information(
+                None, "Zwischenstand gefunden",
+                f"Unter '{Path(save_path).name}' wurde ein zu diesen Scan-Parametern "
+                f"passender Zwischenstand mit {n_done}/{total_pts} bereits berechneten "
+                f"Punkten gefunden.\n\nDer Scan wird automatisch an dieser Stelle "
+                f"fortgesetzt.",
+            )
+        else:
+            QMessageBox.information(
+                None, "Vorhandene Datei passt nicht",
+                f"Die Datei '{Path(save_path).name}' existiert bereits, passt aber nicht "
+                f"zu den aktuell gewählten Scan-Parametern (anderes Gitter/N_x/N_y/amps/"
+                f"alpha) oder konnte nicht gelesen werden.\n\nDer Scan startet komplett "
+                f"neu und überschreibt die Datei beim nächsten Zwischenspeichern.",
+            )
+
     total_points = params["n_points"] * params["n_points"]
     progress = QProgressDialog("Computing weighted uniformity & crosstalk scan...", "Cancel", 0, total_points)
     progress.setWindowTitle("Weighted Fixed-Amplitude 2D Scan Running")
@@ -528,6 +739,7 @@ def main():
         amps=amps,
         alpha=params["alpha"],
         progress_callback=on_progress,
+        checkpoint_path=save_path or None,
     )
 
     duration = perf_measure.stop()
@@ -535,22 +747,19 @@ def main():
 
     progress.setValue(total_points)
 
-    # Persist the raw results so this exact scan never has to be re-run
-    # just to change plot styling later. Defaults to DEFAULT_RESULTS_DIR mit
-    # auto-generiertem Namen (siehe save_scan_weighted_results()); der Nutzer
-    # kann in der Dialogbox weiterhin einen anderen Ort/Namen waehlen.
-    profile_tag = "Airy" if opt.profile == "airy" else "Gauss" if opt.profile == "gaussian" else opt.profile
-    default_scan_data_path = str(
-        DEFAULT_RESULTS_DIR / f"scan_data_weighted_N{params['N_x']}x{params['N_y']}_"
-                               f"{params['n_points']}x{params['n_points']}pts_{profile_tag}.pkl"
-    )
-    scan_data_path = QFileDialog.getSaveFileName(
-        None, "Save weighted scan data (for re-plotting later)", default_scan_data_path, "Pickle files (*.pkl)"
-    )[0]
-    if scan_data_path:
-        opt.save_scan_weighted_results(scan_data_path)
+    # Der Speicherort wurde bereits VOR dem Scan festgelegt (s.o.) und diente
+    # dort bereits als checkpoint_path (stündliche Zwischenspeicherung) - hier
+    # nur noch der finale, "saubere" Endstand (ohne Checkpoint-Markerfelder),
+    # der denselben Pfad überschreibt. Kein separater Speichern-Dialog mehr
+    # noetig (identisches Muster wie weighted_winwidthampscan_startdialog.py).
+    if save_path:
+        # overwrite=True: unter save_path liegt bereits der (checkpoint_path-)
+        # Zwischenstand aus dem Scan-Aufruf oben - der soll hier durch den
+        # sauberen Endstand ERSETZT werden, nicht daneben eine "_2"-Datei
+        # erzeugen (siehe overwrite-Docstring von save_scan_weighted_results()).
+        opt.save_scan_weighted_results(save_path, overwrite=True)
     else:
-        opt.save_scan_weighted_results()  # user cancelled the dialog -> fall back to the Results-folder default
+        opt.save_scan_weighted_results()  # kein Pfad angegeben -> Results-Ordner-Default
 
     def qt_confirm_overwrite(existing_path):
         answer = QMessageBox.question(
@@ -564,9 +773,11 @@ def main():
     # automatisch in seinen eigenen DEFAULT_IMAGES_DIR (den "Bilder"-Ordner
     # neben weighted_multitone_amplitude_dependence_plots.py).
     plotter = WeightedFixedScanPlotter(opt.get_scan_weighted_results(), confirm_overwrite=qt_confirm_overwrite)
-    plotter.plot_scan2d_weighted_combined(
-        show=True, save=True, win_axis=_WAIST_MODE_TO_WIN_AXIS[params["waist_mode"]],
-    )
+    # win_axis fest auf "after_lens" (µm, effektiver Waist nach der Linse) -
+    # NEU (2026-08-26, auf User-Wunsch): der Plot soll immer in µm sein,
+    # unabhaengig vom oben fuer den Scan-Bereich gewaehlten Eingabemodus
+    # (win_input/mm oder win_eff/µm, params["waist_mode"]).
+    plotter.plot_scan2d_weighted_combined(show=True, save=True, win_axis="after_lens")
 
 
 if __name__ == "__main__":

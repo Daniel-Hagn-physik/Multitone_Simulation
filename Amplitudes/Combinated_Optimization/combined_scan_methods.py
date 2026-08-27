@@ -83,6 +83,31 @@ from weighted_multitone_flattop_optimizer import (  # noqa: E402
 import weighted_amp_scan_methods  # noqa: E402,F401  # Import-Nebeneffekt: patcht
 # scan_win_width_weighted_uniformity()/get_scan_weighted_results()/
 # save_scan_weighted_results() auf MultitoneFlatTopOptimizer.
+import scan_checkpoint  # noqa: E402  # liegt (identische Kopie) in Weighted_Optimization,
+# ueber denselben sys.path-Eintrag oben erreichbar.
+
+
+def _derive_checkpoint_paths(checkpoint_path, tag_hard="hart", tag_weighted="weighted"):
+    """Leitet aus EINEM vom Nutzer gewaehlten checkpoint_path ZWEI eigene
+    Zwischenspeicher-Pfade ab - je einen fuer den harten und den
+    gewichteten Teilscan (siehe scan_win_width_combined_uniformity()/
+    scan_win_width_amplitude_dependence_combined() in combined_amp_scan_
+    methods.py). Beide Teilscans speichern damit unabhaengig voneinander
+    stuendlich ihren eigenen Zwischenstand; beim Fortsetzen wird jeder
+    Teilscan automatisch an GENAU der Stelle wieder aufgenommen, an der er
+    (unabhaengig vom jeweils anderen Teilscan) stehen geblieben ist - z.B.
+    ist der harte Teilscan evtl. schon fertig (wird dann sofort komplett
+    geladen) waehrend der gewichtete Teilscan noch weiterlaufen muss.
+    checkpoint_path=None ergibt (None, None) - Zwischenspeicherung bleibt
+    dann komplett deaktiviert, wie bei den Einzel-Scans."""
+    if checkpoint_path is None:
+        return None, None
+    checkpoint_path = FilePath(checkpoint_path)
+    hard_path = checkpoint_path.with_name(
+        f"{checkpoint_path.stem}_{tag_hard}_checkpoint{checkpoint_path.suffix}")
+    weighted_path = checkpoint_path.with_name(
+        f"{checkpoint_path.stem}_{tag_weighted}_checkpoint{checkpoint_path.suffix}")
+    return hard_path, weighted_path
 
 
 # ======================================================================
@@ -296,7 +321,9 @@ def scan_win_width_combined_uniformity(self, win_input_range, width_range,
                                         n_win_input=40, n_width=40,
                                         amps=None, alpha=0.9,
                                         combo_lambda=0.75, combo_percentile=25.0,
-                                        verbose=True, progress_callback=None):
+                                        verbose=True, progress_callback=None,
+                                        checkpoint_path=None,
+                                        checkpoint_interval_s=scan_checkpoint.CHECKPOINT_INTERVAL_S):
     """
     Fuehrt NACHEINANDER die unveraenderte harte scan_win_width_uniformity()
     und die atom-gewichtete scan_win_width_weighted_uniformity() mit
@@ -320,11 +347,24 @@ def scan_win_width_combined_uniformity(self, win_input_range, width_range,
     umgerechnet, damit z.B. eine QProgressDialog durchgehend laeuft statt
     zweimal bei 0 neu zu starten.
 
+    checkpoint_path / checkpoint_interval_s: EIN vom Nutzer gewaehlter Pfad
+    fuer den GESAMTEN kombinierten Scan - wird intern in ZWEI eigene Pfade
+    fuer den harten und den gewichteten Teilscan aufgeteilt (siehe
+    _derive_checkpoint_paths(), z.B. "meine_datei_hart_checkpoint.pkl" /
+    "meine_datei_weighted_checkpoint.pkl" neben dem gewaehlten Pfad), die
+    beide unabhaengig voneinander stuendlich (Default) ihren Zwischenstand
+    sichern. Bei einem Neustart wird JEDER Teilscan automatisch an der
+    Stelle fortgesetzt, an der er zuletzt stehen geblieben ist (z.B. der
+    harte Teilscan schon fertig -> sofort geladen, gewichteter Teilscan
+    setzt fort) - siehe scan_win_width_uniformity()/scan_win_width_
+    weighted_uniformity() fuer die Fortsetzungslogik selbst.
+
     Speichert das Ergebnis in self.results['scan2d_combined'] (zusaetzlich
     zu den ohnehin von den Einzel-Scans gesetzten self.results['scan2d']/
     self.results['scan2d_weighted']) und gibt es zurueck.
     """
     total_each = n_win_input * n_width
+    ckpt_hard, ckpt_weighted = _derive_checkpoint_paths(checkpoint_path)
 
     def hard_progress(done, total):
         if progress_callback is None:
@@ -345,6 +385,7 @@ def scan_win_width_combined_uniformity(self, win_input_range, width_range,
         win_input_range=win_input_range, width_range=width_range,
         n_win_input=n_win_input, n_width=n_width, amps=amps, alpha=alpha,
         verbose=verbose, progress_callback=hard_progress,
+        checkpoint_path=ckpt_hard, checkpoint_interval_s=checkpoint_interval_s,
     )
 
     if verbose:
@@ -356,6 +397,7 @@ def scan_win_width_combined_uniformity(self, win_input_range, width_range,
         win_input_range=win_input_range, width_range=width_range,
         n_win_input=n_win_input, n_width=n_width, amps=amps, alpha=alpha,
         verbose=verbose, progress_callback=weighted_progress,
+        checkpoint_path=ckpt_weighted, checkpoint_interval_s=checkpoint_interval_s,
     )
 
     hard = self.get_scan_results()

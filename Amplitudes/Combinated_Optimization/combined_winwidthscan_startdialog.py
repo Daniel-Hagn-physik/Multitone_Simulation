@@ -35,7 +35,7 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QFormLayout, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QSpinBox, QDoubleSpinBox, QPushButton, QGroupBox, QMessageBox,
-    QProgressDialog, QFileDialog, QComboBox, QCheckBox,
+    QProgressDialog, QFileDialog, QComboBox, QCheckBox, QLineEdit,
 )
 from PyQt5.QtCore import Qt
 
@@ -46,8 +46,11 @@ if str(_WEIGHTED_DIR) not in sys.path:
 from weighted_multitone_flattop_optimizer import MultitoneFlatTopOptimizer  # noqa: E402
 from weighted_multitone_amplitude_dependence_plots import win_input_to_win  # noqa: E402
 import perf_log  # noqa: E402  (aus Weighted_Optimization, per sys.path - reine Utility, keine Kopplung)
+import scan_checkpoint  # noqa: E402  (identische Kopie, ebenfalls aus Weighted_Optimization erreichbar)
 
-from combined_scan_methods import DEFAULT_RESULTS_DIR, DEFAULT_IMAGES_DIR  # noqa: E402,F401
+from combined_scan_methods import (  # noqa: E402,F401
+    DEFAULT_RESULTS_DIR, DEFAULT_IMAGES_DIR, _derive_checkpoint_paths,
+)
 import combined_scan_methods  # noqa: E402,F401  # Import-Nebeneffekt: patcht scan_win_width_combined_uniformity() etc.
 from combined_scan_plots import CombinedFixedScanPlotter  # noqa: E402
 
@@ -266,6 +269,42 @@ class StartParametersDialog(QDialog):
         gpu_group.setLayout(gpu_layout)
         main_layout.addWidget(gpu_group)
 
+        # -- save location (asked UP FRONT, before the scan starts - see
+        # Chat "Amplituden Abhängigkeit": der kombinierte Scan fuehrt ZWEI
+        # Teilscans nacheinander aus und kann daher besonders lange laufen;
+        # der hier gewaehlte EINE Pfad wird intern in zwei eigene
+        # Zwischenspeicher-Pfade fuer den harten und den gewichteten
+        # Teilscan aufgeteilt (siehe _derive_checkpoint_paths() in
+        # combined_scan_methods.py), die unabhaengig voneinander stuendlich
+        # sichern und beim erneuten Start automatisch je an ihrer Stelle
+        # fortsetzen --
+        self._save_path_auto = True
+        save_group = QGroupBox("Save Location (Zwischenspeicherung + Endergebnis)")
+        save_layout = QHBoxLayout()
+        self.save_path_edit = QLineEdit()
+        self.save_path_edit.textEdited.connect(self._on_save_path_edited)
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self._on_browse_save_path)
+        save_layout.addWidget(self.save_path_edit)
+        save_layout.addWidget(browse_btn)
+        save_group.setLayout(save_layout)
+        main_layout.addWidget(save_group)
+        save_info = QLabel(
+            "Der Scan wird unter diesem Pfad stündlich zwischengespeichert (intern "
+            "aufgeteilt in einen harten und einen gewichteten Teilscan-Zwischenstand). "
+            "Sollte der Prozess abbrechen, wird ein erneuter Start mit denselben "
+            "Parametern und demselben Pfad automatisch an der Stelle fortgesetzt, an "
+            "der er stehen geblieben ist."
+        )
+        save_info.setWordWrap(True)
+        save_info.setStyleSheet("font-style: italic; color: gray;")
+        main_layout.addWidget(save_info)
+
+        self.nx_spin.valueChanged.connect(self._update_default_save_path)
+        self.ny_spin.valueChanged.connect(self._update_default_save_path)
+        self.n_points.valueChanged.connect(self._update_default_save_path)
+        self._update_default_save_path()
+
         # -- buttons --
         btn_layout = QHBoxLayout()
         ok_btn = QPushButton("Start Combined Scan")
@@ -333,6 +372,25 @@ class StartParametersDialog(QDialog):
             self.amp_layout.addWidget(box, 1, i + 1)
             self.amp_y_boxes.append(box)
 
+    def _default_save_filename(self):
+        n = self.n_points.value()
+        return f"scan_data_combined_N{self.nx_spin.value()}x{self.ny_spin.value()}_{n}x{n}pts.pkl"
+
+    def _update_default_save_path(self):
+        if self._save_path_auto:
+            self.save_path_edit.setText(str(DEFAULT_RESULTS_DIR / self._default_save_filename()))
+
+    def _on_save_path_edited(self, _text):
+        self._save_path_auto = False
+
+    def _on_browse_save_path(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Speicherort wählen", self.save_path_edit.text(), "Pickle files (*.pkl)"
+        )
+        if path:
+            self.save_path_edit.setText(path)
+            self._save_path_auto = False
+
     def _on_accept(self):
         if self.win_input_min.value() >= self.win_input_max.value():
             QMessageBox.warning(self, "Invalid Range",
@@ -341,6 +399,10 @@ class StartParametersDialog(QDialog):
         if self.width_min.value() >= self.width_max.value():
             QMessageBox.warning(self, "Invalid Range",
                                  "width min must be smaller than width max.")
+            return
+        if not self.save_path_edit.text().strip():
+            QMessageBox.warning(self, "Invalid Save Location",
+                                 "Bitte einen Speicherort für die Zwischen-/Endergebnisse angeben.")
             return
         self.accept()
 
@@ -378,6 +440,7 @@ class StartParametersDialog(QDialog):
             force_cpu=self.force_cpu.isChecked(),
             enable_perf_log=self.enable_perf_log.isChecked(),
             waist_mode=self._current_waist_mode,
+            save_path=self.save_path_edit.text().strip(),
         )
 
 
@@ -425,6 +488,42 @@ def main():
         atom_offset_y=params["atom_offset_y"],
     )
 
+    save_path = params["save_path"]
+
+    # Vor dem (potenziell tagelangen) kombinierten Scan pruefen, ob unter
+    # den beiden ABGELEITETEN Teilscan-Pfaden (siehe _derive_checkpoint_
+    # paths()) bereits zu diesen Parametern passende Zwischenstaende
+    # liegen - und den Nutzer informieren, welcher Teilscan (falls
+    # ueberhaupt) fortgesetzt wird.
+    if save_path:
+        ckpt_hard, ckpt_weighted = _derive_checkpoint_paths(save_path)
+        status_lines = []
+        for label, ckpt_path, grid_key, extra in (
+            ("harten", ckpt_hard, "uniformity_grid", dict(amps=amps, alpha=params["alpha"])),
+            ("gewichteten", ckpt_weighted, "uniformity_weighted_grid", dict(amps=amps, alpha=params["alpha"])),
+        ):
+            if not FilePath(ckpt_path).exists():
+                continue
+            resumable = scan_checkpoint.load_resumable(
+                ckpt_path, params["win_input_range"], params["width_range"],
+                params["n_points"], params["n_points"], params["N_x"], params["N_y"],
+                extra_match=extra, verbose=False,
+            )
+            total_pts = params["n_points"] * params["n_points"]
+            if resumable is not None:
+                n_done = scan_checkpoint.count_done(resumable[grid_key])
+                status_lines.append(f"- {label.capitalize()} Teilscan: {n_done}/{total_pts} Punkte "
+                                     f"bereits vorhanden, wird fortgesetzt.")
+            else:
+                status_lines.append(f"- {label.capitalize()} Teilscan: vorhandene Datei passt nicht zu "
+                                     f"den aktuellen Parametern, startet neu.")
+        if status_lines:
+            QMessageBox.information(
+                None, "Zwischenstand gefunden",
+                "Zu diesem kombinierten Scan wurden bereits Zwischenstaende gefunden:\n\n"
+                + "\n".join(status_lines),
+            )
+
     total_points = 2 * params["n_points"] * params["n_points"]
     progress = QProgressDialog("Computing combined (hard + weighted) uniformity & crosstalk scan...",
                                 "Cancel", 0, total_points)
@@ -453,6 +552,7 @@ def main():
         combo_lambda=params["combo_lambda"],
         combo_percentile=params["combo_percentile"],
         progress_callback=on_progress,
+        checkpoint_path=save_path or None,
     )
 
     duration = perf_measure.stop()
@@ -460,17 +560,13 @@ def main():
 
     progress.setValue(total_points)
 
-    profile_tag = "Airy" if opt.profile == "airy" else "Gauss" if opt.profile == "gaussian" else opt.profile
-    default_scan_data_path = str(
-        DEFAULT_RESULTS_DIR / f"scan_data_combined_N{params['N_x']}x{params['N_y']}_"
-                               f"{params['n_points']}x{params['n_points']}pts_{profile_tag}.pkl"
-    )
-    scan_data_path = QFileDialog.getSaveFileName(
-        None, "Save combined scan data (for re-plotting/re-fitting later)",
-        default_scan_data_path, "Pickle files (*.pkl)"
-    )[0]
-    if scan_data_path:
-        opt.save_scan_combined_results(scan_data_path)
+    # Der Speicherort wurde bereits VOR dem Scan festgelegt (s.o.) und diente
+    # dort bereits als checkpoint_path (stündliche Zwischenspeicherung der
+    # beiden abgeleiteten Teilscan-Zwischenstaende) - hier nur noch der
+    # finale, kombinierte Endstand, der denselben Pfad überschreibt. Kein
+    # erneuter Dateidialog mehr nötig.
+    if save_path:
+        opt.save_scan_combined_results(save_path)
     else:
         opt.save_scan_combined_results()
 

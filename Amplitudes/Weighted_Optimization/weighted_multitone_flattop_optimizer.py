@@ -79,6 +79,8 @@ from scipy.constants import hbar, k as kB, atomic_mass
 from matplotlib.patches import Rectangle
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+import scan_checkpoint
+
 
 # ======================================================================
 # Default-Ordner für Zwischenergebnisse (gepickelte Scan-Rohdaten aus
@@ -1492,7 +1494,9 @@ class MultitoneFlatTopOptimizer:
     def scan_win_width_uniformity(self, win_input_range, width_range,
                                    n_win_input=40, n_width=40,
                                    amps=None, alpha=0.9, verbose=True,
-                                   progress_callback=None):
+                                   progress_callback=None,
+                                   checkpoint_path=None,
+                                   checkpoint_interval_s=scan_checkpoint.CHECKPOINT_INTERVAL_S):
         """
         Scans BOTH the uniformity and the crosstalk in the spot square over
         two axes at fixed tone count (N_x, N_y):
@@ -1543,6 +1547,18 @@ class MultitoneFlatTopOptimizer:
         (e.g. on "Cancel" in a dialog) - the grid computed so far (with NaN
         for the remaining points) is still returned.
 
+        checkpoint_path / checkpoint_interval_s: falls checkpoint_path
+        gesetzt ist, wird alle checkpoint_interval_s Sekunden (Default 1h,
+        siehe scan_checkpoint.py) der bisherige Fortschritt unter genau
+        diesem Pfad gespeichert - dieselbe Art dict, die auch
+        get_scan_results() liefert (mit NaN fuer noch nicht berechnete
+        Punkte). Existiert unter checkpoint_path bereits eine zu diesem
+        Scan (identisches Gitter/N_x/N_y/amps/alpha) passende (Teil-)Datei,
+        wird sie beim Start automatisch geladen und NUR die darin noch
+        fehlenden Punkte werden neu berechnet - so laesst sich ein
+        abgebrochener/abgestuerzter Scan an der Stelle fortsetzen, an der
+        er stehen geblieben ist, statt komplett neu zu beginnen.
+
         Stores the result in self.results['scan2d'] and returns
         (win_input_vals, width_vals, uniformity_grid, crosstalk_grid). NaN
         entries in the grids mean invalid/non-evaluable or not-yet-computed
@@ -1551,11 +1567,37 @@ class MultitoneFlatTopOptimizer:
         win_input_vals = np.linspace(win_input_range[0], win_input_range[1], n_win_input)
         width_vals = np.linspace(width_range[0], width_range[1], n_width)
 
-        uniformity_grid = np.full((n_width, n_win_input), np.nan)
-        crosstalk_grid = np.full((n_width, n_win_input), np.nan)
+        resumed = scan_checkpoint.load_resumable(
+            checkpoint_path, win_input_range, width_range, n_win_input, n_width,
+            self.N_x, self.N_y, extra_match=dict(amps=amps, alpha=alpha), verbose=verbose,
+        )
+        if resumed is not None:
+            uniformity_grid = np.asarray(resumed['uniformity_grid'], dtype=float).copy()
+            crosstalk_grid = np.asarray(resumed['crosstalk_grid'], dtype=float).copy()
+            n_done_before = scan_checkpoint.count_done(uniformity_grid)
+            if verbose:
+                print(f"[Checkpoint] Setze Scan fort: {n_done_before}/{uniformity_grid.size} "
+                      f"Punkte bereits vorhanden ({checkpoint_path}).")
+        else:
+            uniformity_grid = np.full((n_width, n_win_input), np.nan)
+            crosstalk_grid = np.full((n_width, n_win_input), np.nan)
+        ckpt = scan_checkpoint.CheckpointWriter(checkpoint_path, checkpoint_interval_s, verbose=verbose)
+
         total = n_width * n_win_input
         done = 0
         cancelled = False
+
+        def _current_results():
+            return dict(
+                win_input_vals=win_input_vals, width_vals=width_vals,
+                uniformity_grid=uniformity_grid, crosstalk_grid=crosstalk_grid,
+                amps=amps, alpha=alpha,
+                best=scan_checkpoint.best_point(uniformity_grid, crosstalk_grid, win_input_vals,
+                                                 width_vals, alpha, "uniformity", "crosstalk"),
+                N_x=self.N_x, N_y=self.N_y, f1=self.f1, f2=self.f2, fLO=self.fLO,
+                lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
+                profile=self.profile,
+            )
 
         if verbose:
             print("\n" + "=" * 60)
@@ -1567,24 +1609,31 @@ class MultitoneFlatTopOptimizer:
             if cancelled:
                 break
             for j, win_input_val in enumerate(win_input_vals):
-                try:
-                    win_eff = self.win_input_to_win(win_input_val)
-                except ValueError:
-                    win_eff = None
-                if win_eff is not None:
-                    point_grid = self._build_dynamic_grid(win_eff, width_val)
-                    details = self._evaluate(win_eff, width_val, amps=amps, grid=point_grid)
-                    if details is not None:
-                        uniformity_grid[i, j] = details['uniformity']
-                        crosstalk_grid[i, j] = details['eta']
+                if np.isfinite(uniformity_grid[i, j]):
+                    pass  # bereits aus Checkpoint vorhanden - nicht neu berechnen
+                else:
+                    try:
+                        win_eff = self.win_input_to_win(win_input_val)
+                    except ValueError:
+                        win_eff = None
+                    if win_eff is not None:
+                        point_grid = self._build_dynamic_grid(win_eff, width_val)
+                        details = self._evaluate(win_eff, width_val, amps=amps, grid=point_grid)
+                        if details is not None:
+                            uniformity_grid[i, j] = details['uniformity']
+                            crosstalk_grid[i, j] = details['eta']
 
                 done += 1
                 if progress_callback is not None:
                     if progress_callback(done, total) is False:
                         cancelled = True
                         break
+                ckpt.maybe_save(_current_results, done=done, total=total)
             if verbose and n_width >= 10 and (i % max(1, n_width // 10) == 0):
                 print(f"  ... width row {i + 1}/{n_width}")
+
+        if ckpt.active:
+            ckpt.maybe_save(_current_results, done=done, total=total, force=True)
 
         combined_grid = alpha * uniformity_grid + (1 - alpha) * crosstalk_grid
 
@@ -1688,7 +1737,9 @@ class MultitoneFlatTopOptimizer:
                                              alpha=0.7, r_bounds=(0.0, 2.0), r0=(1.0, 1.0),
                                              warm_start=True, verbose=True,
                                              progress_callback=None, n_jobs=1,
-                                             pool_initializer=None, pool_initargs=()):
+                                             pool_initializer=None, pool_initargs=(),
+                                             checkpoint_path=None,
+                                             checkpoint_interval_s=scan_checkpoint.CHECKPOINT_INTERVAL_S):
         """
         Findet für jeden Punkt eines (win_input, width)-Gitters die
         Amplituden-Verhältnisse (r_x, r_y) - äußere/innere Amplitude,
@@ -1783,6 +1834,21 @@ class MultitoneFlatTopOptimizer:
         WinWidthAmpScan_StartDialog.py bereits der Fall), sonst startet
         jeder Kindprozess das Skript erneut von vorne.
 
+        checkpoint_path / checkpoint_interval_s: wie bei
+        scan_win_width_uniformity() - falls checkpoint_path gesetzt ist,
+        wird alle checkpoint_interval_s Sekunden (Default 1h) der bisherige
+        Fortschritt (alle 4 Grids: uniformity, crosstalk, r_x, r_y) unter
+        genau diesem Pfad gespeichert. Existiert dort bereits eine zum
+        aktuellen Scan (identisches Gitter/N_x/N_y/alpha/r_bounds)
+        passende (Teil-)Datei, wird sie beim Start automatisch geladen und
+        NUR die darin noch fehlenden Punkte werden neu berechnet - so
+        lässt sich ein abgebrochener/abgestürzter Scan (der hier wegen der
+        pro-Punkt-Optimierung besonders lange dauern kann) an der Stelle
+        fortsetzen, an der er stehen geblieben ist. Bei warm_start=True
+        wird last_r beim Fortsetzen sinnvoll vom letzten bereits
+        berechneten Gitterpunkt (in Scan-Reihenfolge) übernommen statt
+        wieder bei r0 zu beginnen.
+
         Speichert das Ergebnis in self.results['scan2d_amp'] und gibt
         (win_input_vals, width_vals, uniformity_grid, crosstalk_grid,
         r_x_grid, r_y_grid) zurück. NaN-Einträge bedeuten ungültige/nicht
@@ -1791,15 +1857,47 @@ class MultitoneFlatTopOptimizer:
         win_input_vals = np.linspace(win_input_range[0], win_input_range[1], n_win_input)
         width_vals = np.linspace(width_range[0], width_range[1], n_width)
 
-        uniformity_grid = np.full((n_width, n_win_input), np.nan)
-        crosstalk_grid = np.full((n_width, n_win_input), np.nan)
-        r_x_grid = np.full((n_width, n_win_input), np.nan)
-        r_y_grid = np.full((n_width, n_win_input), np.nan)
+        resumed = scan_checkpoint.load_resumable(
+            checkpoint_path, win_input_range, width_range, n_win_input, n_width,
+            self.N_x, self.N_y, extra_match=dict(alpha=alpha, r_bounds=r_bounds), verbose=verbose,
+        )
+        if resumed is not None:
+            uniformity_grid = np.asarray(resumed['uniformity_grid'], dtype=float).copy()
+            crosstalk_grid = np.asarray(resumed['crosstalk_grid'], dtype=float).copy()
+            r_x_grid = np.asarray(resumed['r_x_grid'], dtype=float).copy()
+            r_y_grid = np.asarray(resumed['r_y_grid'], dtype=float).copy()
+            n_done_before = scan_checkpoint.count_done(uniformity_grid)
+            if verbose:
+                print(f"[Checkpoint] Setze Scan fort: {n_done_before}/{uniformity_grid.size} "
+                      f"Punkte bereits vorhanden ({checkpoint_path}).")
+        else:
+            uniformity_grid = np.full((n_width, n_win_input), np.nan)
+            crosstalk_grid = np.full((n_width, n_win_input), np.nan)
+            r_x_grid = np.full((n_width, n_win_input), np.nan)
+            r_y_grid = np.full((n_width, n_win_input), np.nan)
+            n_done_before = 0
+        ckpt = scan_checkpoint.CheckpointWriter(checkpoint_path, checkpoint_interval_s, verbose=verbose)
+
+        def _current_results_amp():
+            return dict(
+                win_input_vals=win_input_vals, width_vals=width_vals,
+                uniformity_grid=uniformity_grid, crosstalk_grid=crosstalk_grid,
+                r_x_grid=r_x_grid, r_y_grid=r_y_grid,
+                alpha=alpha, r_bounds=r_bounds,
+                N_x=self.N_x, N_y=self.N_y, f1=self.f1, f2=self.f2, fLO=self.fLO,
+                lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
+                profile=self.profile,
+            )
 
         total = n_width * n_win_input
         done = 0
         cancelled = False
         last_r = [float(r0[0]), float(r0[1])]
+        finite_mask = np.isfinite(r_x_grid) & np.isfinite(r_y_grid)
+        if np.any(finite_mask):
+            flat_idx = np.flatnonzero(finite_mask.ravel())[-1]
+            i_last, j_last = np.unravel_index(flat_idx, r_x_grid.shape)
+            last_r = [float(r_x_grid[i_last, j_last]), float(r_y_grid[i_last, j_last])]
 
         n_jobs_resolved = 1 if n_jobs in (None, 0) else n_jobs
         if n_jobs_resolved == -1:
@@ -1820,44 +1918,51 @@ class MultitoneFlatTopOptimizer:
                 if cancelled:
                     break
                 for j, win_input_val in enumerate(win_input_vals):
-                    try:
-                        win_eff = self.win_input_to_win(win_input_val)
-                    except ValueError:
-                        win_eff = None
+                    if np.isfinite(uniformity_grid[i, j]) and np.isfinite(r_x_grid[i, j]) and np.isfinite(r_y_grid[i, j]):
+                        # bereits aus Checkpoint vorhanden - nicht neu berechnen, aber
+                        # last_r fuer warm_start konsistent mitfuehren
+                        if warm_start:
+                            last_r = [float(r_x_grid[i, j]), float(r_y_grid[i, j])]
+                    else:
+                        try:
+                            win_eff = self.win_input_to_win(win_input_val)
+                        except ValueError:
+                            win_eff = None
 
-                    if win_eff is not None:
-                        point_grid = self._build_dynamic_grid(win_eff, width_val)
+                        if win_eff is not None:
+                            point_grid = self._build_dynamic_grid(win_eff, width_val)
 
-                        def objective(p, win_eff=win_eff, width_val=width_val, point_grid=point_grid):
-                            amps = amps_from_ratios(p[0], p[1], self.N_x, self.N_y)
-                            val = self._evaluate(win_eff, width_val, amps=amps, grid=point_grid)
-                            if val is None:
-                                return 1e10
-                            return alpha * val['uniformity'] + (1 - alpha) * val['eta']
+                            def objective(p, win_eff=win_eff, width_val=width_val, point_grid=point_grid):
+                                amps = amps_from_ratios(p[0], p[1], self.N_x, self.N_y)
+                                val = self._evaluate(win_eff, width_val, amps=amps, grid=point_grid)
+                                if val is None:
+                                    return 1e10
+                                return alpha * val['uniformity'] + (1 - alpha) * val['eta']
 
-                        x0 = last_r if warm_start else [float(r0[0]), float(r0[1])]
-                        result = minimize(
-                            objective, x0=x0, method='Nelder-Mead',
-                            bounds=[r_bounds, r_bounds],
-                            options={'xatol': 1e-6, 'fatol': 1e-9, 'maxiter': 300},
-                        )
-                        r_opt = result.x
-                        amps_opt = amps_from_ratios(r_opt[0], r_opt[1], self.N_x, self.N_y)
-                        details = self._evaluate(win_eff, width_val, amps=amps_opt, grid=point_grid)
+                            x0 = last_r if warm_start else [float(r0[0]), float(r0[1])]
+                            result = minimize(
+                                objective, x0=x0, method='Nelder-Mead',
+                                bounds=[r_bounds, r_bounds],
+                                options={'xatol': 1e-6, 'fatol': 1e-9, 'maxiter': 300},
+                            )
+                            r_opt = result.x
+                            amps_opt = amps_from_ratios(r_opt[0], r_opt[1], self.N_x, self.N_y)
+                            details = self._evaluate(win_eff, width_val, amps=amps_opt, grid=point_grid)
 
-                        if details is not None:
-                            uniformity_grid[i, j] = details['uniformity']
-                            crosstalk_grid[i, j] = details['eta']
-                            r_x_grid[i, j] = r_opt[0]
-                            r_y_grid[i, j] = r_opt[1]
-                            if warm_start:
-                                last_r = [float(r_opt[0]), float(r_opt[1])]
+                            if details is not None:
+                                uniformity_grid[i, j] = details['uniformity']
+                                crosstalk_grid[i, j] = details['eta']
+                                r_x_grid[i, j] = r_opt[0]
+                                r_y_grid[i, j] = r_opt[1]
+                                if warm_start:
+                                    last_r = [float(r_opt[0]), float(r_opt[1])]
 
                     done += 1
                     if progress_callback is not None:
                         if progress_callback(done, total) is False:
                             cancelled = True
                             break
+                    ckpt.maybe_save(_current_results_amp, done=done, total=total)
                 if verbose and n_width >= 10 and (i % max(1, n_width // 10) == 0):
                     print(f"  ... width row {i + 1}/{n_width}")
 
@@ -1872,41 +1977,54 @@ class MultitoneFlatTopOptimizer:
                 (i, j, win_input_val, width_val, list(r0), r_bounds, alpha, optimizer_kwargs)
                 for i, width_val in enumerate(width_vals)
                 for j, win_input_val in enumerate(win_input_vals)
+                if not (np.isfinite(uniformity_grid[i, j]) and np.isfinite(r_x_grid[i, j])
+                        and np.isfinite(r_y_grid[i, j]))
             ]
+            done = n_done_before
 
             if verbose:
-                print(f"Verteile {len(tasks)} Punkte auf {n_jobs_resolved} Prozesse "
+                skipped = total - len(tasks)
+                skip_msg = f" ({skipped} bereits aus Checkpoint vorhanden)" if skipped else ""
+                print(f"Verteile {len(tasks)} Punkte auf {n_jobs_resolved} Prozesse{skip_msg} "
                       f"(warm_start wird bei n_jobs>1 ignoriert)...")
 
-            with ProcessPoolExecutor(max_workers=n_jobs_resolved,
-                                      initializer=pool_initializer,
-                                      initargs=pool_initargs) as executor:
-                futures = {executor.submit(_amp_dependence_worker, task): task for task in tasks}
-                for future in as_completed(futures):
-                    try:
-                        i, j, uniformity, eta, r_x, r_y = future.result()
-                    except Exception:
-                        task = futures[future]
-                        i, j = task[0], task[1]
-                        uniformity = eta = r_x = r_y = None
+            if not tasks:
+                if verbose:
+                    print("  Alle Punkte bereits vorhanden - nichts zu tun.")
+            else:
+                with ProcessPoolExecutor(max_workers=n_jobs_resolved,
+                                          initializer=pool_initializer,
+                                          initargs=pool_initargs) as executor:
+                    futures = {executor.submit(_amp_dependence_worker, task): task for task in tasks}
+                    for future in as_completed(futures):
+                        try:
+                            i, j, uniformity, eta, r_x, r_y = future.result()
+                        except Exception:
+                            task = futures[future]
+                            i, j = task[0], task[1]
+                            uniformity = eta = r_x = r_y = None
 
-                    if uniformity is not None:
-                        uniformity_grid[i, j] = uniformity
-                        crosstalk_grid[i, j] = eta
-                        r_x_grid[i, j] = r_x
-                        r_y_grid[i, j] = r_y
+                        if uniformity is not None:
+                            uniformity_grid[i, j] = uniformity
+                            crosstalk_grid[i, j] = eta
+                            r_x_grid[i, j] = r_x
+                            r_y_grid[i, j] = r_y
 
-                    done += 1
-                    if progress_callback is not None and not cancelled:
-                        if progress_callback(done, total) is False:
-                            cancelled = True
-                            # nur noch nicht gestartete Futures lassen sich wirklich
-                            # abbrechen - bereits laufende Worker liefern ihr
-                            # Ergebnis trotzdem noch (wird oben weiter verwertet)
-                            for f in futures:
-                                f.cancel()
-                    if verbose and total >= 10 and done % max(1, total // 10) == 0:
-                        print(f"  ... {done}/{total} Punkte fertig")
+                        done += 1
+                        if progress_callback is not None and not cancelled:
+                            if progress_callback(done, total) is False:
+                                cancelled = True
+                                # nur noch nicht gestartete Futures lassen sich wirklich
+                                # abbrechen - bereits laufende Worker liefern ihr
+                                # Ergebnis trotzdem noch (wird oben weiter verwertet)
+                                for f in futures:
+                                    f.cancel()
+                        ckpt.maybe_save(_current_results_amp, done=done, total=total)
+                        if verbose and total >= 10 and done % max(1, total // 10) == 0:
+                            print(f"  ... {done}/{total} Punkte fertig")
+
+        if ckpt.active:
+            ckpt.maybe_save(_current_results_amp, done=done, total=total, force=True)
 
         self.results['scan2d_amp'] = dict(
             win_input_vals=win_input_vals, width_vals=width_vals,
