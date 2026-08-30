@@ -14,10 +14,16 @@ welche vorliegt:
 
 Erzeugt in Fit_Plots/ bzw. Fit_Results/:
 
-  {Praefix}_metric_comparison.pdf   hart vs. atom-gewichtet, 2x2
+  {Praefix}_metric_comparison.pdf   hart vs. atom-gewichtet, 2x2 (auf Wunsch
+                                    mit eingezeichneter Talpfad-Geraden)
   {Praefix}_region.pdf              Score-Karte mit Region und bestem Punkt
   {Praefix}_agreement.pdf           nur Hard-Check: Uebereinstimmungs-Karte
   {Praefix}_score_scatter.pdf       nur Hard-Check: gewichtet vs. hart
+  {Praefix}_valley_{X}_over_{Y}.pdf Querschnitt entlang des Minimums von X,
+                                    aufgetragen ueber Y (Waist oder width),
+                                    auf Wunsch mit Gerade durch den Talpfad
+  {Praefix}_line_{X}_over_{Y}.pdf   derselbe Querschnitt, aber entlang der
+                                    Geraden statt entlang des Minimums
   {Praefix}_Report.md               Bericht mit allen Kennzahlen
   (optional) die 6-Panel-Uebersicht und die Schnitte des AmplitudeScanPlotter
 
@@ -36,7 +42,7 @@ import sys
 from pathlib import Path as FilePath
 
 from PyQt5.QtWidgets import (
-    QApplication, QDialog, QFormLayout, QVBoxLayout, QHBoxLayout,
+    QApplication, QDialog, QFormLayout, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QDoubleSpinBox, QPushButton, QGroupBox, QMessageBox,
     QFileDialog, QCheckBox, QComboBox, QScrollArea, QWidget,
 )
@@ -128,9 +134,28 @@ class PlotsDialog(QDialog):
         display_layout.addRow("Waist-Achse:", self.win_axis)
         self.legend_fontsize = self._make_spin(9.0, 4.0, 24.0, 1.0, decimals=0)
         display_layout.addRow("Schriftgroesse Legenden:", self.legend_fontsize)
-        self.draw_best_point = QCheckBox("Region und besten Punkt einzeichnen")
+        self.draw_best_point = QCheckBox("Besten Punkt als Stern einzeichnen")
         self.draw_best_point.setChecked(True)
+        self.draw_best_point.setToolTip(
+            "Markiert in den Karten den Gitterpunkt mit dem kleinsten Score als roten\n"
+            "Stern. Seine Zahlen stehen ohnehin im Bericht - ohne Haken bleiben die\n"
+            "Heatmaps voellig frei.\n\n"
+            "Das groesste Rechteck (\"Region\") wird nicht mehr eingezeichnet; seine\n"
+            "Grenzen stehen weiterhin im Bericht.")
         display_layout.addRow(self.draw_best_point)
+        self.fit_line_on_maps = QCheckBox(
+            "Gerade auch in den Metrik-Vergleich einzeichnen (2x2-Karten)")
+        self.fit_line_on_maps.setToolTip(
+            "Zeichnet die Gerade, die unten durch den Talpfad gelegt wird, zusaetzlich\n"
+            "in alle vier Karten von ..._metric_comparison.pdf - durchgezogen im\n"
+            "gefitteten Bereich, gepunktet in der Extrapolation.\n\n"
+            "Welche Groesse gefittet wird, bestimmt \"Groesse fuer Talpfad/Gerade\"\n"
+            "in der Talschnitt-Gruppe. Die Gerade ist immer die ueber dem effektiven\n"
+            "Waist in µm - auf einer mm-Achse erscheint sie deshalb leicht gekruemmt,\n"
+            "weil win_input und effektiver Waist nichtlinear zusammenhaengen.\n\n"
+            "Ohne brauchbare Gerade bleiben die Karten unveraendert (Hinweis auf der\n"
+            "Konsole).")
+        display_layout.addRow(self.fit_line_on_maps)
         self.plot_amplitudes = QCheckBox("Amplituden-Uebersicht und Schnitte mitzeichnen")
         self.plot_amplitudes.setChecked(True)
         self.plot_amplitudes.setToolTip(
@@ -142,6 +167,117 @@ class PlotsDialog(QDialog):
         display_layout.addRow(self.show_interactive)
         display_group.setLayout(display_layout)
         main_layout.addWidget(display_group)
+
+        # -- Querschnitt entlang des Minimums (Talschnitt) --
+        valley_group = QGroupBox("Querschnitt entlang des Minimums (Talschnitt)")
+        valley_layout = QVBoxLayout()
+        valley_info = QLabel(
+            "Einer Groesse folgen und pro Spalte (bzw. Zeile) den Punkt suchen, an dem sie\n"
+            "minimal ist. GENAU an diesen Punkten werden dann die angehakten Groessen\n"
+            "abgelesen - also nicht deren eigenes Minimum, sondern ihr Wert dort, wo die\n"
+            "Fuehrungsgroesse am besten ist. Jede Kurve bekommt eine eigene y-Achse.\n"
+            "Alternativ laeuft der Schnitt statt entlang des (springenden) Minimums\n"
+            "entlang der Geraden, die durch den Talpfad gelegt wurde."
+        )
+        valley_info.setStyleSheet("font-style: italic;")
+        valley_layout.addWidget(valley_info)
+
+        self.do_valley = QCheckBox("Talschnitt erzeugen")
+        self.do_valley.setChecked(True)
+        self.do_valley.toggled.connect(self._on_valley_toggled)
+        valley_layout.addWidget(self.do_valley)
+
+        valley_form = QFormLayout()
+        self.valley_path_mode = QComboBox()
+        for _key, label in report.PATH_MODE_CHOICES:
+            self.valley_path_mode.addItem(label)
+        self.valley_path_mode.setToolTip(
+            "Talpfad: pro Spalte (bzw. Zeile) der Punkt mit dem kleinsten Wert der\n"
+            "Fuehrungsgroesse - echte Gitterwerte, aber der Pfad springt dort, wo das\n"
+            "Minimum flach ist oder aus dem Scan-Fenster laeuft.\n\n"
+            "Gerade: der Schnitt folgt der Geraden, die durch den Talpfad gefittet\n"
+            "wurde - ueber den GANZEN gescannten Bereich, also auch weit ausserhalb\n"
+            "der Punkte, aus denen sie bestimmt wurde (dort extrapoliert, im Plot mit\n"
+            "offenen Kreisen markiert). Da die Gerade die Gitterpunkte nicht trifft,\n"
+            "werden die Werte zwischen den beiden Nachbarzeilen linear interpoliert."
+        )
+        self.valley_path_mode.currentIndexChanged.connect(
+            lambda _i: self._sync_valley_fit_state())
+        valley_form.addRow("Schnitt entlang:", self.valley_path_mode)
+        self.valley_follow = QComboBox()
+        for _key, label in report.FOLLOW_CHOICES:
+            self.valley_follow.addItem(label)
+        self.valley_follow.setToolTip(
+            "Welcher Groesse der Schnitt folgt. \"Kombiniert mit Penalty\" ist der\n"
+            "combined_score des Datensatzes - also Uniformity UND Crosstalk, hart und\n"
+            "gewichtet, mit dem Penalty-Term verrechnet."
+        )
+        valley_form.addRow("Groesse fuer Talpfad/Gerade:", self.valley_follow)
+        self.valley_axis = QComboBox()
+        for _key, label in report.VALLEY_AXIS_CHOICES:
+            self.valley_axis.addItem(label)
+        self.valley_axis.setToolTip(
+            "Bei Waist: pro Waist-Spalte wird ueber width minimiert.\n"
+            "Bei width: pro width-Zeile wird ueber den Waist minimiert.\n\n"
+            + report.valley_fit_axis_hint()
+        )
+        self.valley_axis.currentIndexChanged.connect(
+            lambda _i: self._sync_valley_fit_state())
+        valley_form.addRow("Aufgetragen ueber:", self.valley_axis)
+        valley_layout.addLayout(valley_form)
+
+        self.valley_fit_line = QCheckBox("Gerade durch den Talpfad legen (linearer Fit)")
+        self.valley_fit_line.setChecked(True)
+        self._fit_line_gemerkt = True
+        self._fit_line_axis_tooltip = (
+            report.valley_fit_axis_hint() + "\n"
+            "Bei den anderen Achsen ist die Gerade deshalb gesperrt.")
+        self._fit_line_mode_tooltip = (
+            "Im Geradenmodus wird die Gerade immer bestimmt - sie ist ja der "
+            "Schnitt selbst.")
+        self._fit_line_tooltip = (
+            "Legt eine Gerade durch den brauchbaren Teil des Talpfads und zeichnet sie\n"
+            "in die Heatmap. Unbrauchbare Punkte werden automatisch ausgeschlossen:\n"
+            "erst Minima am Rand des gescannten Fensters (das sind keine echten\n"
+            "Minima), dann ein abgesetzter Nebenzweig, zuletzt abknickende Randpunkte.\n"
+            "Die ausgeschlossenen Punkte werden im Plot markiert und im Bericht\n"
+            "gezaehlt - dasselbe Verfahren wie in fit_waist_width_relation.py.")
+        self.valley_fit_line.setToolTip(self._fit_line_tooltip)
+        valley_layout.addWidget(self.valley_fit_line)
+
+
+        traces_label = QLabel("Welche Groessen sollen entlang dieses Wegs gezeigt werden?")
+        valley_layout.addWidget(traces_label)
+
+        # Checkboxen zweispaltig, damit die Gruppe nicht zu hoch wird.
+        self.trace_boxes = {}
+        traces_grid = QGridLayout()
+        for position, key in enumerate(report.TRACE_ORDER):
+            klartext = {
+                "uniformity_weighted": "Uniformity, atom-gewichtet",
+                "crosstalk_weighted": "Crosstalk, atom-gewichtet",
+                "uniformity_hard": "Uniformity, hart",
+                "crosstalk_hard": "Crosstalk, hart",
+                "combined": "combined score (Penalty)",
+                "r_x": "r_x (Amplituden-Verhaeltnis x)",
+                "r_y": "r_y (Amplituden-Verhaeltnis y)",
+            }[key]
+            box = QCheckBox(klartext)
+            box.setChecked(True)
+            self.trace_boxes[key] = box
+            traces_grid.addWidget(box, position // 2, position % 2)
+        valley_layout.addLayout(traces_grid)
+
+        traces_hint = QLabel(
+            "Je mehr Haken, desto mehr y-Achsen - mit allen sieben wird es voll. "
+            "Die Fuehrungsgroesse wird immer mitgezeichnet, auch ohne Haken."
+        )
+        traces_hint.setWordWrap(True)
+        traces_hint.setStyleSheet("color: gray;")
+        valley_layout.addWidget(traces_hint)
+
+        valley_group.setLayout(valley_layout)
+        main_layout.addWidget(valley_group)
 
         # -- Neuberechnung --
         recombine_group = QGroupBox("Score und Region neu berechnen (optional)")
@@ -206,6 +342,80 @@ class PlotsDialog(QDialog):
         box.setSingleStep(step)
         box.setValue(value)
         return box
+
+    def _on_valley_toggled(self, checked):
+        for widget in [self.valley_path_mode, self.valley_follow, self.valley_axis,
+                       *self.trace_boxes.values()]:
+            widget.setEnabled(bool(checked))
+        self._sync_valley_fit_state()
+
+    def _sync_valley_fit_state(self):
+        """Haelt Pfad-Dropdown und Fit-Haken im Einklang mit der gewaehlten
+        Achse. Zwei Regeln:
+
+        - Eine Gerade gibt es nur fuer die µm-Achse (report.VALLEY_FIT_AXIS).
+          Bei den anderen Achsen ist der Haken gesperrt und leer, und
+          "Gerade" laesst sich im Pfad-Dropdown gar nicht erst waehlen.
+        - Im Geradenmodus IST die Gerade der Schnitt, der Haken ist dort
+          gesetzt und gesperrt.
+
+        Was der Nutzer zuletzt selbst eingestellt hat, wird gemerkt und
+        wiederhergestellt, sobald der Haken wieder frei ist.
+        """
+        if self.valley_fit_line.isEnabled():
+            self._fit_line_gemerkt = self.valley_fit_line.isChecked()
+
+        moeglich = report.valley_fit_supported(self._current_axis())
+        for index, (key, _label) in enumerate(report.PATH_MODE_CHOICES):
+            item = self.valley_path_mode.model().item(index)
+            if item is not None:
+                item.setEnabled(moeglich or key != "line")
+        if not moeglich and self._current_path_mode() == "line":
+            self.valley_path_mode.setCurrentIndex(0)      # zurueck auf Talpfad
+
+        aktiv = self.do_valley.isChecked()
+        if not moeglich:
+            self.valley_fit_line.setChecked(False)
+            self.valley_fit_line.setEnabled(False)
+            self.valley_fit_line.setToolTip(self._fit_line_axis_tooltip)
+        elif self._current_path_mode() == "line":
+            self.valley_fit_line.setChecked(True)
+            self.valley_fit_line.setEnabled(False)
+            self.valley_fit_line.setToolTip(self._fit_line_mode_tooltip)
+        else:
+            self.valley_fit_line.setChecked(bool(self._fit_line_gemerkt))
+            self.valley_fit_line.setEnabled(aktiv)
+            self.valley_fit_line.setToolTip(self._fit_line_tooltip)
+
+    def _current_path_mode(self):
+        return report.PATH_MODE_CHOICES[self.valley_path_mode.currentIndex()][0]
+
+    def _current_axis(self):
+        return report.VALLEY_AXIS_CHOICES[self.valley_axis.currentIndex()][0]
+
+    def _sync_valley_options(self):
+        """Nur die Groessen anbieten, die der geladene Datensatz hergibt."""
+        if self.loaded is None:
+            return
+        moegliche_follow = report.available_follow_keys(self.loaded)
+        for index, (key, _label) in enumerate(report.FOLLOW_CHOICES):
+            item = self.valley_follow.model().item(index)
+            if item is not None:
+                item.setEnabled(key in moegliche_follow)
+        if report.FOLLOW_CHOICES[self.valley_follow.currentIndex()][0] not in moegliche_follow:
+            for index, (key, _label) in enumerate(report.FOLLOW_CHOICES):
+                if key in moegliche_follow:
+                    self.valley_follow.setCurrentIndex(index)
+                    break
+        moegliche_traces = report.available_trace_keys(self.loaded)
+        aktiv = self.do_valley.isChecked()
+        for key, box in self.trace_boxes.items():
+            verfuegbar = key in moegliche_traces
+            box.setEnabled(aktiv and verfuegbar)
+            if not verfuegbar:
+                box.setChecked(False)
+                box.setToolTip("In diesem Datensatz nicht enthalten.")
+        self._sync_valley_fit_state()
 
     def _on_recombine_toggled(self, checked):
         for widget in (self.alpha, self.combo_lambda, self.combo_percentile,
@@ -300,6 +510,7 @@ class PlotsDialog(QDialog):
             self.combo_lambda.setValue(float(results['combo_lambda']))
         if results.get('combo_percentile') is not None:
             self.combo_percentile.setValue(float(results['combo_percentile']))
+        self._sync_valley_options()
 
     def _on_accept(self):
         self._try_load()
@@ -310,6 +521,24 @@ class PlotsDialog(QDialog):
                 "(scan_amp_data_combined_*.pkl) oder einen Hard-Check "
                 "(hard_check_*.pkl).")
             return
+        if self.do_valley.isChecked() and self._current_path_mode() == "line":
+            werte = self.get_values()
+            if not report.valley_fit_supported(werte["valley_axis"]):
+                QMessageBox.warning(self, "Gerade nur fuer die µm-Achse",
+                                    report.valley_fit_axis_hint())
+                return
+            if report.fit_valley_line(self.loaded, axis=werte["valley_axis"],
+                                      follow=werte["valley_follow"]) is None:
+                QMessageBox.warning(
+                    self, "Keine Gerade moeglich",
+                    "Fuer diese Kombination aus Groesse und Achse laesst sich keine "
+                    "Gerade durch den Talpfad legen: nach dem Ausschluss der "
+                    "unbrauchbaren Talpunkte bleiben zu wenige uebrig.\n\n"
+                    "Das heisst meist, dass das Minimum ueber weite Teile des Scans am "
+                    "Rand des gescannten Fensters liegt.\n\n"
+                    "Bitte eine andere Groesse waehlen oder auf \"Talpfad\" "
+                    "umschalten.")
+                return
         self.accept()
 
     def get_values(self):
@@ -318,6 +547,7 @@ class PlotsDialog(QDialog):
             win_axis=WIN_AXIS_CHOICES[self.win_axis.currentIndex()][1],
             legend_fontsize=int(self.legend_fontsize.value()),
             draw_best_point=self.draw_best_point.isChecked(),
+            fit_line_on_maps=self.fit_line_on_maps.isChecked(),
             plot_amplitudes=self.plot_amplitudes.isChecked(),
             show=self.show_interactive.isChecked(),
             do_recombine=self.do_recombine.isChecked(),
@@ -326,6 +556,12 @@ class PlotsDialog(QDialog):
             combo_percentile=self.combo_percentile.value(),
             save_recombined=self.save_recombined.isChecked(),
             ask_before_save=self.ask_before_save.isChecked(),
+            do_valley=self.do_valley.isChecked(),
+            valley_follow=report.FOLLOW_CHOICES[self.valley_follow.currentIndex()][0],
+            valley_axis=report.VALLEY_AXIS_CHOICES[self.valley_axis.currentIndex()][0],
+            valley_traces=[key for key, box in self.trace_boxes.items() if box.isChecked()],
+            valley_fit_line=self.valley_fit_line.isChecked(),
+            valley_path_mode=self._current_path_mode(),
         )
 
 
@@ -361,10 +597,17 @@ def main():
             results,
             win_axis=params["win_axis"],
             draw_best_point=params["draw_best_point"],
+            fit_line_on_maps=params["fit_line_on_maps"],
             plot_amplitudes_overview=params["plot_amplitudes"],
             save=True, show=params["show"],
             ask_before_save=params["ask_before_save"],
             legend_fontsize=params["legend_fontsize"],
+            valley_cut=params["do_valley"],
+            valley_axis=params["valley_axis"],
+            valley_follow=params["valley_follow"],
+            valley_traces=params["valley_traces"],
+            valley_fit_line=params["valley_fit_line"],
+            valley_path_mode=params["valley_path_mode"],
         )
     except Exception as exc:
         QMessageBox.critical(None, "Auswertung fehlgeschlagen", f"{exc!r}")
@@ -372,6 +615,20 @@ def main():
 
     lines = [f"Auswertung fertig ({combine.KIND_LABELS.get(out['kind'], out['kind'])}).", ""]
     lines.append(f"Plots: {paths.FIT_PLOTS_DIR}")
+    if params["do_valley"]:
+        lines.append("")
+        lines.append(f"Schnitt entlang: "
+                     f"{report.path_mode_label(params['valley_path_mode'])}")
+        if params["valley_fit_line"] or params["valley_path_mode"] == "line":
+            fit = out.get('valley_line')
+            if fit is None:
+                lines.append("Talpfad-Gerade: zu wenige brauchbare Talpunkte - "
+                             "siehe Bericht.")
+            else:
+                lines.append(f"Talpfad-Gerade: {report.valley_line_formula(fit)}")
+                lines.append(f"   R² = {report._r2_text(fit['r2'])}, "
+                             f"{fit['n_used']} von {fit['n_total']} Talpunkten verwendet")
+        lines.append("")
     if out.get('report'):
         lines.append(f"Bericht: {out['report']}")
     if saved_recombined:
