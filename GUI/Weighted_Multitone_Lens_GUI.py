@@ -974,7 +974,7 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             nonlocal row, col
             lbl = QLabel(label_text)
             spin = QDoubleSpinBox()
-            spin.setRange(0.0, 2.0)
+            spin.setRange(0.0, 10.0)
             spin.setSingleStep(0.05)
             spin.setDecimals(3)
             spin.setValue(value)

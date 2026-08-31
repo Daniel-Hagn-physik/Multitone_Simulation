@@ -33,6 +33,7 @@ Root*.
 | einen **neuen Datensatz erzeugen** (dauert lange) | `run_penalty_scan.py` |
 | zu einem vorhandenen **gewichteten** Scan den harten Fall nachrechnen | `run_hard_check.py` |
 | einen **vorhandenen Datensatz auswerten**, Plots und Bericht erzeugen | `run_plots.py` |
+| **einen einzelnen Parametersatz suchen**: ein paar Groessen vorgeben, den Rest optimieren lassen | `run_penalty_only.py` |
 
 Die Dateien in `lib/` werden nur benutzt, nicht direkt ausgefuehrt.
 
@@ -167,13 +168,32 @@ Wer immer denselben Datensatz auswertet, kann ihn oben im Skript bei
   Bericht - ohne Haken bleiben die Heatmaps voellig frei.
 - **Gerade auch in den Metrik-Vergleich einzeichnen**: siehe Abschnitt
   *Talschnitt*; die dort gefittete Gerade wird zusaetzlich in die vier
-  Metrik-Karten gelegt.
+  Metrik-Karten gelegt - durchgezogen im gefitteten Bereich, gepunktet in
+  der Extrapolation. Die Legende der Figur hat dabei genau einen Eintrag
+  ("Linear model fit"); der extrapolierte Teil und der Stern bekommen
+  keinen.
 - **Amplituden-Uebersicht und Schnitte mitzeichnen**: die 6-Panel-Uebersicht
   und die Schnitte des AmplitudeScanPlotter, als PNG. Kostet etwas Zeit.
 - **Plots zusaetzlich interaktiv anzeigen**: oeffnet jedes Bild in einem
   Fenster. Praktisch zum Hineinzoomen, laestig bei vielen Plots.
 
 ### Querschnitt entlang des Minimums ("Talschnitt")
+
+**Zuerst das Wichtigste zum Dropdown "Groesse fuer Talpfad/Gerade":** dort
+stehen zwei Penalty-Eintraege, und sie sind nicht dasselbe.
+
+- *Kombiniert mit Penalty, normiert (combined_score)* - die Groesse, die auch
+  die Score-Karte und die Region benutzen. Dafuer werden die vier Gitter
+  vorher einzeln auf 0..1 gezogen. Der Optimierer hat diese Groesse nie
+  gesehen; sie entsteht erst bei der Auswertung.
+- *Kombiniert mit Penalty, ROH (J der Optimierung)* - genau das, was der Scan
+  an jedem Gitterpunkt minimiert hat.
+
+Die Gerade kann je nach Wahl deutlich anders ausfallen - beim
+41x41-Datensatz 0.283 MHz/µm gegen 0.196, und die beiden Talpfade liegen
+sogar in verschiedenen Teilen der Karte. Welche Groesse gemeint war, steht im
+Dateinamen und im Bericht. Wer die Steigung weiterverwendet, sollte wissen,
+welche der beiden es war.
 
 Das ist die eigentliche Auswertung entlang einer Linie durch das Gitter.
 
@@ -228,6 +248,90 @@ schauen.
 
 ---
 
+## 5b. `run_penalty_only.py` - Parametersatz suchen statt scannen
+
+Dieses Skript beantwortet eine andere Frage als die drei anderen. Es
+erzeugt keinen Datensatz und wertet keinen aus, sondern sucht **einen
+einzigen Parametersatz**:
+
+> "Waist und Brennweiten habe ich - wie muessen width, r_x und r_y sein?"
+
+Es braucht keine Eingangsdatei. Ergebnis ist ein Markdown-Bericht in
+`Fit_Results/`, sonst nichts (keine .pkl, keine Plots - es gibt hier
+nichts zu plotten, das Ergebnis ist ein Punkt).
+
+### Groessen - vorgeben oder optimieren lassen
+
+Die Tabelle oben im Dialog hat eine Zeile je Groesse. In der zweiten
+Spalte steht, was mit ihr passieren soll:
+
+- **vorgeben** - die Groesse wird auf den Wert in der Spalte *Wert*
+  festgehalten. Die Felder *von*/*bis* sind dann grau.
+- **optimieren** - die Groesse wird mitoptimiert und darf zwischen *von*
+  und *bis* liegen. Das Feld *Wert* ist dann grau.
+
+Waehlbar sind: **Waist** (µm), **Width** (MHz), **r_x**, **r_y** und die
+drei Brennweiten **f1**, **f2**, **fLO** (mm). Voreingestellt ist genau
+der Fall aus der Frage oben: Waist und Brennweiten vorgegeben, width und
+die beiden Amplituden-Verhaeltnisse frei.
+
+Zwei Dinge, die von aussen ueberraschen:
+
+- Der Waist ist der **effektive Waist nach der Linse in µm**, nicht der
+  Eingangswaist `win_input` in mm, den der 2D-Scan abfaehrt. Das ist die
+  Groesse, die man vorgibt, wenn man sie kennt. Welchen `win_input` man
+  dafuer einstellen muss, rechnet der Bericht am Ende aus den Brennweiten
+  zurueck und nennt ihn in mm.
+- Die Brennweiten sind **keine Anzeigegroesse**. Sie legen fest, wo die
+  Spots in der Fallenebene liegen - also auch, welche Laenge ein
+  gegebenes `width` ueberhaupt bedeutet. Sie zu aendern aendert das
+  Ergebnis wirklich.
+
+Ist *bis* nicht groesser als *von*, sagt der Dialog das beim Start und
+laeuft nicht los.
+
+### Penalty-Zielfunktion
+
+`alpha` und `combo_lambda` wie im Scan - dieselbe Formel, dieselben rohen
+Metriken. Ein Ergebnis hier und ein Gitterpunkt des Scans sind deshalb
+direkt vergleichbar.
+
+### Aufbau
+
+`N_x`, `N_y`, Profil, `offset` und `n_grid`. Zu `n_grid`: groesser ist
+quadratisch langsamer und macht das Ergebnis nachweislich **nicht**
+genauer (siehe "zackige harte Kurven" weiter unten). 400 bis 1000 sind
+sinnvoll.
+
+### Suche
+
+- **Startpunkte**: wie viele Optimierungen von verschiedenen Startwerten
+  aus laufen. Der erste Start ist immer die Mitte aller Bereiche, die
+  uebrigen decken sie gleichmaessig ab. Mehr Startpunkte kosten linear
+  mehr Zeit, sind aber der einzige Schutz gegen die feinen lokalen Minima,
+  die das Rauschen der harten Metriken erzeugt. `1` = nur der Mittelpunkt.
+- **Parallele Prozesse**: verteilt die Startpunkte auf mehrere Kerne.
+- **max. Iterationen je Start**: Obergrenze fuer einen einzelnen Lauf.
+
+**Laufzeit.** Eine einzelne Auswertung dauert grob 1-2 s bei
+`n_grid = 400` und mehrere Sekunden bei `n_grid = 1000`; ein
+Nelder-Mead-Lauf mit drei freien Groessen braucht ungefaehr 130 davon.
+Acht Startpunkte auf vier Kernen sind also eher eine halbe Stunde als
+eine Minute. Fuer einen ersten Blick: `n_grid = 400`, 2-3 Startpunkte.
+
+### Was im Bericht steht
+
+Die Vorgaben (was war fest, was frei, mit welchem Bereich), das gefundene
+Optimum mit allen sieben Groessen, der zugehoerige `win_input` in mm, die
+volle Metrik-Aufschluesselung (hart / gewichtet / kombiniert, je fuer
+Uniformity und Crosstalk) und `J` - und die Tabelle **aller** Startpunkte.
+Die ist der eigentliche Wert: liegen die besten Laeufe dicht beieinander,
+ist das Optimum belastbar; streuen sie, hat man eine von mehreren
+gleichwertigen Loesungen gefunden und sollte die letzten Nachkommastellen
+nicht ernst nehmen.
+
+---
+
 ## 6. Was am Ende herauskommt
 
 Nach "Auswertung erzeugen" meldet ein Fenster, wohin geschrieben wurde. In
@@ -245,7 +349,9 @@ Nach "Auswertung erzeugen" meldet ein Fenster, wohin geschrieben wurde. In
 Der Dateiname beginnt mit `PenaltyRegion_` oder `HardCheck_`, dann Tonanzahl,
 Gitterpunkte, Strahlprofil und Datum. Der Bericht mit allen Zahlen -
 Steigung und R² der Geraden, Region-Grenzen, bester Punkt, Scan-Parameter -
-liegt als `..._Report.md` in `Fit_Results/`.
+liegt als `..._Report.md` in `Fit_Results/`. Der Bericht von
+`run_penalty_only.py` heisst `PenaltyOpt_...md` und liegt im selben
+Ordner - dazu gibt es keine Plots.
 
 Die PDFs sind fuer einen LaTeX-Satz gemacht: englische Beschriftung,
 Serifenschrift, eingebettete TrueType-Schriften. Sie lassen sich unveraendert

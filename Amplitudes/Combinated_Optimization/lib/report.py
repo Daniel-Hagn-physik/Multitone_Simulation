@@ -36,7 +36,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
 from . import paths
-from .combine import dataset_kind
+from .combine import dataset_kind, penalty_objective
 
 from weighted_multitone_amplitude_dependence_plots import (  # noqa: E402
     AmplitudeScanPlotter, resolve_save_path, win_input_to_win,
@@ -77,6 +77,8 @@ def _mit_stil(func):
 
 BEST_POINT_STYLE = dict(marker='*', color='red', markersize=16,
                         markeredgecolor='white', markeredgewidth=1.2, linestyle='none')
+# Einheitliche Bezeichnung der Ausgleichsgeraden in allen Legenden.
+FIT_LINE_LABEL = "Linear model fit"
 # Das groesste Rechteck ("Region") wird weiterhin berechnet und steht mit
 # seinen Grenzen im Bericht - eingezeichnet wird es nicht mehr.
 
@@ -118,7 +120,11 @@ def draw_best_point_marker(ax, results, win_axis, legend=True):
     win_input_vals = np.asarray(results['win_input_vals'], dtype=float)
     j = int(np.argmin(np.abs(win_input_vals - best['win_input'])))
     x = _x_of_index(results, j, win_axis)
-    ax.plot([x], [best['width'] * 1e-6], label="best point", **BEST_POINT_STYLE)
+    # Ohne eigene Legende bekommt der Stern auch KEINEN Legendeneintrag:
+    # sonst sammelt ihn der Aufrufer ueber get_legend_handles_labels() in
+    # seine gemeinsame Legende ein, und genau die soll knapp bleiben.
+    ax.plot([x], [best['width'] * 1e-6],
+            label=("best point" if legend else "_nolegend_"), **BEST_POINT_STYLE)
     handles, _ = ax.get_legend_handles_labels()
     if legend and handles:
         ax.legend(loc="best", framealpha=0.85)
@@ -188,10 +194,13 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
         if fit_line is not None:
             draw_fit_line_on_map(ax, results, fit_line, win_axis)
         if draw_best_point:
-            # Die Legende kommt EINMAL unter die ganze Figur - vier gleiche
-            # Kaesten mitten in den Karten verdecken sonst genau den
-            # Bereich, um den es geht.
+            # Der Stern wird gezeichnet, bekommt aber KEINEN
+            # Legendeneintrag (legend=False setzt das Label auf
+            # "_nolegend_"): ein roter Stern in einer Metrik-Karte erklaert
+            # sich selbst, und die Legende soll genau einen Eintrag haben.
             draw_best_point_marker(ax, results, win_axis, legend=False)
+    # Uebrig bleibt damit hoechstens die Ausgleichsgerade - ein Eintrag,
+    # einmal unter der ganzen Figur statt vier Kaesten mitten in den Karten.
     handles, labels = axes.flat[0].get_legend_handles_labels()
     if handles:
         fig.legend(handles, labels, loc="outside lower center",
@@ -691,7 +700,8 @@ def make_all(results, win_axis="before_lens", draw_best_point=True,
 
 # Waehlbare Fuehrungsgroessen: key -> (Anzeigename, wie berechnet)
 FOLLOW_CHOICES = [
-    ("combined", "Kombiniert mit Penalty (combined_score)"),
+    ("combined", "Kombiniert mit Penalty, normiert (combined_score)"),
+    ("penalty_raw", "Kombiniert mit Penalty, ROH (J der Optimierung)"),
     ("uniformity_weighted", "Uniformity, atom-gewichtet"),
     ("crosstalk_weighted", "Crosstalk, atom-gewichtet"),
     ("uniformity_hard", "Uniformity, hart (globale Maske)"),
@@ -701,14 +711,39 @@ FOLLOW_CHOICES = [
 ]
 
 # Waehlbare Kurven im Querschnitt: key -> (Label, Einheit, Farbe, in % ?)
+#
+# BESCHRIFTUNG: reine Symbole statt ausgeschriebener Namen. Im Querschnitt
+# stehen bis zu sieben Legendeneintraege nebeneinander unter dem Panel, da
+# ist "Crosstalk (hard)" zu lang und zu unruhig. Index h = harte
+# Pitch-Box-Maske, w = atom-gewichtet; ausgeschrieben steht das an der
+# Colorbar (FOLLOW_PLOT_LABELS) und im Bericht. eta ist dasselbe Symbol,
+# das die Colorbars der Metrik-Karten schon benutzen.
+#
+# FARBEN: feste Farbe je Groesse (dieselbe Kurve sieht in jedem Plot gleich
+# aus), aber neu vergeben. Vorher war U_h gruen (#54a24b) und r_y tuerkis
+# (#72b7b2) - genau diese beiden Kurven laufen im oberen Drittel des
+# Querschnitts uebereinander und waren nicht zu trennen; dasselbe galt fuer
+# das untere Paar U_w / r_x.
+#
+# Die sieben Werte sind nicht nach Gefuehl gewaehlt, sondern als Satz mit
+# moeglichst grossem kleinstem Farbabstand: Umrechnung nach CIE-Lab,
+# Abstand zusaetzlich unter simulierter Deuteranopie und Protanopie
+# geprueft, Helligkeit auf L* <= 72 begrenzt, damit keine Linie auf weissem
+# Grund verblasst. Ergebnis: kleinster Abstand ueber ALLE 21 Paare dE = 53
+# (normalsichtig) bzw. 24 (farbenblind). Die Zuordnung zu den Kurven ist
+# danach so gewaehlt, dass die Paare, die im Bild tatsaechlich
+# uebereinanderliegen, die groessten Abstaende bekommen:
+#   r_x / r_y  (gemeinsame Achse)          dE = 124
+#   U_h / r_y  (beide im oberen Drittel)   dE = 113
+#   U_w / r_x  (beide unten)               dE = 125
 TRACE_SPECS = {
-    "uniformity_weighted": (r"Uniformity$_w$", "%", "#4c78a8", True),
-    "crosstalk_weighted": (r"Crosstalk$_w$", "%", "#f58518", True),
-    "uniformity_hard": ("Uniformity (hard)", "%", "#54a24b", True),
-    "crosstalk_hard": ("Crosstalk (hard)", "%", "#b279a2", True),
-    "combined": ("Combined score", "norm.", "#333333", False),
-    "r_x": (r"$r_x$", "", "#e45756", False),
-    "r_y": (r"$r_y$", "", "#72b7b2", False),
+    "uniformity_weighted": (r"$U_w$", "%", "#009E73", True),
+    "crosstalk_weighted": (r"$\eta_w$", "%", "#882255", True),
+    "uniformity_hard": (r"$U_h$", "%", "#0072B2", True),
+    "crosstalk_hard": (r"$\eta_h$", "%", "#E69F00", True),
+    "combined": (r"$S$", "norm.", "#000000", False),
+    "r_x": (r"$r_x$", "", "#785EF0", False),
+    "r_y": (r"$r_y$", "", "#CC3311", False),
 }
 
 # Reihenfolge der y-Achsen im Querschnitt (nur die angehakten erscheinen)
@@ -743,6 +778,22 @@ def _grid_for(results, key, alpha=None):
         "r_x": results.get("r_x_grid"),
         "r_y": results.get("r_y_grid"),
     }
+    if key == "penalty_raw":
+        # Die Zielfunktion, die der Scan an jedem Gitterpunkt ueber (r_x, r_y)
+        # minimiert hat - auf den ROHEN Metriken, ohne die gitterweite
+        # Min-Max-Normierung, die in combined_score steckt. Wird hier aus den
+        # gespeicherten rohen Gittern nachgerechnet, kostet also keinen
+        # neuen Scan. Wichtig, weil sich die beiden unterscheiden: die
+        # Normierung hebt die atom-gewichteten Groessen gegenueber der harten
+        # Uniformity an (deren rohe Spanne ist ein Vielfaches groesser), und
+        # der Talpfad laeuft dadurch merklich anders.
+        if U_h is None or C_h is None or U_w is None or C_w is None:
+            return None
+        combo_lambda = float(results.get("combo_lambda", 0.75))
+        return np.asarray(penalty_objective(
+            np.asarray(U_h, float), np.asarray(C_h, float),
+            np.asarray(U_w, float), np.asarray(C_w, float),
+            alpha, combo_lambda), dtype=float)
     if key == "score_hard":
         if U_h is None or C_h is None:
             return None
@@ -849,12 +900,16 @@ def extract_valley(results, axis="waist_um", follow="combined"):
 
 # Fuer die Plots: knappe englische Bezeichnungen. FOLLOW_CHOICES bleibt
 # deutsch, weil es die Eintraege des Dialogs sind.
+# Das Symbol steht mit dabei, damit die Colorbar der Karte und der
+# Legendeneintrag derselben Groesse im Querschnitt (TRACE_SPECS, nur
+# Symbole) ohne Nachdenken zusammenpassen.
 FOLLOW_PLOT_LABELS = {
-    "combined": "Combined score (penalty)",
-    "uniformity_weighted": r"Uniformity$_w$ (atom-weighted)",
-    "crosstalk_weighted": r"Crosstalk$_w$ (atom-weighted)",
-    "uniformity_hard": "Uniformity (hard mask)",
-    "crosstalk_hard": "Crosstalk (hard mask)",
+    "combined": r"Combined score $S$ (penalty, normalized)",
+    "penalty_raw": r"Penalty objective $J$ (raw)",
+    "uniformity_weighted": r"Uniformity $U_w$ (atom-weighted)",
+    "crosstalk_weighted": r"Crosstalk $\eta_w$ (atom-weighted)",
+    "uniformity_hard": r"Uniformity $U_h$ (hard mask)",
+    "crosstalk_hard": r"Crosstalk $\eta_h$ (hard mask)",
     "score_weighted": r"$\alpha\,U_w + (1-\alpha)\,C_w$",
     "score_hard": r"$\alpha\,U + (1-\alpha)\,C$",
 }
@@ -1023,6 +1078,23 @@ def _entzerre_achse(ax, werte_liste, ziel=AXIS_NOISE_TARGET):
     ax.set_ylim(mitte - soll / 2, mitte + soll / 2)
 
 
+# Eine helle Kurvenfarbe ist als LINIE gut zu sehen, als Achsenbeschriftung
+# auf weissem Grund aber zu blass (das Amber von eta_h etwa). Ticks und
+# Achsenlabel werden deshalb abgedunkelt, wenn die Farbe zu hell ist - die
+# Linie selbst behaelt ihre Farbe, sonst gehoerten Kurve und Achse optisch
+# nicht mehr zusammen.
+AXIS_LABEL_MAX_LUMA = 0.45
+
+
+def _achsenfarbe(color):
+    r, g, b = matplotlib.colors.to_rgb(color)
+    luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    if luma <= AXIS_LABEL_MAX_LUMA:
+        return color
+    f = AXIS_LABEL_MAX_LUMA / luma
+    return (r * f, g * f, b * f)
+
+
 def _axis_label_for_group(gruppe):
     labels = [TRACE_SPECS[k][0] for k in gruppe]
     einheit = TRACE_SPECS[gruppe[0]][1]
@@ -1181,8 +1253,8 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="combined", traces=
                 linien.append(linie)
             _entzerre_achse(ax, [werte_benutzt[k] for k in gruppe])
             achsen_label = _axis_label_for_group(gruppe)
-            achsen_farbe = (TRACE_SPECS[gruppe[0]][2] if len(gruppe) == 1
-                            else MULTI_TRACE_AXIS_COLOR)
+            achsen_farbe = _achsenfarbe(TRACE_SPECS[gruppe[0]][2] if len(gruppe) == 1
+                                        else MULTI_TRACE_AXIS_COLOR)
             ax.set_ylabel(achsen_label, color=achsen_farbe)
             ax.tick_params(axis="y", colors=achsen_farbe)
             if position > 0:
@@ -1540,19 +1612,27 @@ def line_points_for_axis(results, fit, win_axis, n=240):
 
 def draw_fit_line_on_map(ax, results, fit, win_axis):
     """Die Fit-Gerade in eine beliebige (Waist, width)-Karte zeichnen -
-    durchgezogen im gefitteten Bereich, gepunktet in der Extrapolation.
+    ueber den ganzen gescannten Bereich, durchgezogen im gefitteten Teil,
+    gepunktet in der Extrapolation (auf den gescannten width-Bereich
+    beschnitten, siehe line_points_for_axis).
 
-    Die Fitparameter stehen bewusst NICHT in der Legende: Steigung,
+    Der extrapolierte Teil bekommt bewusst KEINEN eigenen
+    Legendeneintrag ("_nolegend_"): die Legende der vier Karten soll genau
+    einen Eintrag haben. Der Unterschied zwischen Fit und Verlaengerung
+    bleibt trotzdem sichtbar - er steckt im Linienformat statt in einem
+    zweiten Kasten. Wie weit gefittet wurde, steht im Bericht.
+
+    Auch die Fitparameter stehen nicht in der Legende: Steigung,
     Achsenabschnitt, R2 und der gefittete Bereich sind im Bericht
     nachzulesen und wuerden den Kasten nur aufblaehen."""
     if fit is None:
         return
     x_in, y_in, x_out, y_out = line_points_for_axis(results, fit, win_axis)
     ax.plot(x_in, y_in, color=VALLEY_FIT_STYLE["color"], linewidth=2.0,
-            linestyle="-", label="linear fit")
+            linestyle="-", label=FIT_LINE_LABEL)
     if np.any(np.isfinite(x_out)):
         ax.plot(x_out, y_out, color=VALLEY_FIT_STYLE["color"], linewidth=1.4,
-                linestyle=":", label="fit, extrapolated")
+                linestyle=":", label="_nolegend_")
 
 
 def draw_valley_line(ax, fit, legend_fontsize=None):
@@ -1561,7 +1641,7 @@ def draw_valley_line(ax, fit, legend_fontsize=None):
     gemeinsame \"not used\"-Markierung."""
     if fit is None:
         return
-    ax.plot(fit["x_line"], fit["y_line"], label="linear fit", **VALLEY_FIT_STYLE)
+    ax.plot(fit["x_line"], fit["y_line"], label=FIT_LINE_LABEL, **VALLEY_FIT_STYLE)
 
 
 # ======================================================================

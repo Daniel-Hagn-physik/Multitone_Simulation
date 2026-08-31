@@ -4,7 +4,7 @@
 Schritt in `ANLEITUNG.md`.** Dieses Dokument beschreibt, was die Verfahren
 rechnen und wie der Code aufgebaut ist.
 
-Drei Skripte zum Ausfuehren, ein Ordner `lib/` mit dem, was sie benutzen.
+Vier Skripte zum Ausfuehren, ein Ordner `lib/` mit dem, was sie benutzen.
 
 ## Was will ich gerade?
 
@@ -13,8 +13,9 @@ Drei Skripte zum Ausfuehren, ein Ordner `lib/` mit dem, was sie benutzen.
 | **neue Daten erzeugen**, bei denen die Amplituden gemeinsam auf hart + gewichtet optimiert werden (Penalty-Methode) | `run_penalty_scan.py` |
 | pruefen, **ob mein vorhandener Weighted-Datensatz auch im Hard Case gut ist** | `run_hard_check.py` |
 | **vorhandene Datensaetze plotten** und den Bericht (neu) erzeugen | `run_plots.py` |
+| **einen einzelnen Parametersatz suchen**: einen Teil der Groessen vorgeben, die uebrigen gegen die Penalty optimieren lassen (kein Gitter) | `run_penalty_only.py` |
 
-Alle drei oeffnen einen Dialog, in dem die Parameter stehen. Nichts muss
+Alle vier oeffnen einen Dialog, in dem die Parameter stehen. Nichts muss
 im Code geaendert werden.
 
 **Welchen Datensatz?** `run_plots.py` und `run_hard_check.py` zeigen im
@@ -27,6 +28,8 @@ nimmt, traegt ihn ganz oben im jeweiligen Skript ein:
 PKL_DATEI    = "scan_amp_data_combined_N3x4_21x21pts_Airy.pkl"   # run_plots.py
 WEIGHTED_PKL = "scan_amp_data_weighted_N3x4_10x10pts_Airy.pkl"   # run_hard_check.py
 ```
+
+(`run_penalty_only.py` braucht keinen Datensatz - es rechnet von Grund auf.)
 
 Dateiname genuegt (wird in `Results/` gesucht), ein vollstaendiger Pfad geht
 auch. "Andere Datei..." waehlt eine von ausserhalb, "Aktualisieren" liest die
@@ -111,11 +114,51 @@ den Querschnitt mit einer eigenen y-Achse je Kurve. Minima, die am Rand des
 gescannten Fensters liegen (also vermutlich gar keine echten Minima sind),
 werden als offene Kreise markiert und im Titel gezaehlt.
 
+**Beschriftung und Farben der Kurven.** Im Querschnitt heissen die Kurven mit
+Symbolen statt ausgeschrieben: $U_w$/$U_h$ fuer die Uniformity, $\eta_w$/$\eta_h$
+fuer den Crosstalk (Index w = atom-gewichtet, h = harte Pitch-Box-Maske), $S$
+fuer den combined score, dazu $r_x$ und $r_y$. Bei bis zu sieben
+Legendeneintraegen unter dem Panel ist "Crosstalk (hard)" schlicht zu lang;
+ausgeschrieben steht es weiterhin an der Colorbar der Karte links, die das
+Symbol jetzt mit auffuehrt. Die sieben Farben sind als Satz mit moeglichst
+grossem kleinstem Farbabstand gewaehlt (CIE-Lab, zusaetzlich unter simulierter
+Rot-Gruen-Schwaeche geprueft, Helligkeit begrenzt) und danach so zugeordnet,
+dass gerade die Kurven, die im Bild uebereinanderliegen, am weitesten
+auseinanderliegen - $U_h$ und $r_y$ im oberen Drittel, $U_w$ und $r_x$ unten,
+$r_x$ und $r_y$ auf ihrer gemeinsamen Achse. Ist eine Kurvenfarbe fuer eine
+Achsenbeschriftung zu hell, wird nur die Achse abgedunkelt, die Linie behaelt
+ihre Farbe.
+
+**Welcher Groesse der Talpfad folgt - normiert oder roh.** Das Dropdown
+"Groesse fuer Talpfad/Gerade" hat zwei Penalty-Eintraege, und der Unterschied
+ist erheblich:
+
+- **`combined_score` (normiert)** - jedes der vier Gitter wird vorher einzeln
+  min-max ueber das Scan-Fenster auf 0..1 gezogen, dann kombiniert. Das macht
+  die vier vergleichbar, hebt aber die atom-gewichteten Groessen gegenueber
+  der harten Uniformity an, deren rohe Spanne ein Vielfaches groesser ist.
+  Diese Groesse hat der Optimierer **nie gesehen** - sie entsteht erst bei der
+  Auswertung.
+- **`J` roh** - genau die Zielfunktion, die der Scan an jedem Gitterpunkt ueber
+  (r_x, r_y) minimiert hat. Wird aus den gespeicherten rohen Gittern
+  nachgerechnet (`report._grid_for(..., "penalty_raw")`), kostet also keinen
+  neuen Scan, und haengt nicht am gescannten Fenster.
+
+Am 41x41-Datensatz laufen die beiden Talpfaeder in **verschiedenen Teilen der
+Karte**: der normierte Fit sitzt bei 0.79-1.03 µm mit Steigung 0.283, der rohe
+bei 1.03-1.67 µm mit Steigung 0.196. Der Dateiname und der Bericht nennen
+jeweils, welche Groesse gemeint war. Vorsicht bei der Interpretation: auf dem
+rohen Zweig klebten in jenem Datensatz 19 der 23 gefitteten Talpunkte an der
+`r_bounds`-Schranke - das sind keine freien Optima.
+
 **Die Gerade in den Metrik-Karten.** Der Haken "Gerade auch in den
 Metrik-Vergleich einzeichnen" in der Gruppe *Darstellung* zeichnet dieselbe
 Gerade zusaetzlich in alle vier Karten von `..._metric_comparison.pdf` -
 durchgezogen im gefitteten Bereich, gepunktet in der Extrapolation, auf den
-gescannten width-Bereich beschnitten. Welche Groesse gefittet wird, bestimmt
+gescannten width-Bereich beschnitten. Der extrapolierte Teil bekommt dabei
+KEINEN eigenen Legendeneintrag: der Unterschied zwischen Fit und
+Verlaengerung steckt im Linienformat, nicht in einem zweiten Kasten. Wie weit
+gefittet wurde, steht im Bericht. Welche Groesse gefittet wird, bestimmt
 "Groesse fuer Talpfad/Gerade" in der Talschnitt-Gruppe. Die Gerade ist immer
 die ueber dem effektiven Waist in µm; auf der mm-Achse erscheint sie deshalb
 leicht gekruemmt, weil win_input und effektiver Waist nichtlinear
@@ -123,7 +166,12 @@ zusammenhaengen (`report.line_points_for_axis` tastet sie dort dicht ab).
 Laesst sich keine Gerade legen, bleiben die Karten unveraendert und es kommt
 ein Hinweis auf die Konsole. Die Legende der vier Karten steht **einmal unter
 der ganzen Figur** statt vier Mal mitten in den Heatmaps - dort verdeckten
-die Kaesten sonst genau den Bereich, um den es geht.
+die Kaesten sonst genau den Bereich, um den es geht - und hat genau **einen
+Eintrag**: "Linear model fit" (auch dann, wenn die Gerade extrapoliert
+gezeichnet wird). Der beste Punkt wird weiterhin als roter Stern
+eingezeichnet (Haken "Besten Punkt als Stern einzeichnen"), bekommt hier aber
+keinen Legendeneintrag; ein roter Stern in einer Metrik-Karte erklaert sich
+selbst. Ohne Gerade hat die Figur gar keine Legende.
 
 Der LaTeX-Stil haengt uebrigens nicht mehr daran, ob ueber `make_all()`
 aufgerufen wird: jede Plot-Funktion traegt den Dekorator `@_mit_stil`, der
@@ -151,7 +199,9 @@ unbrauchbaren Punkte in drei Stufen ausgeschlossen - dieselbe Logik wie in
 3. Rand-Kinks: die beiden Enden werden getrimmt, solange der Randpunkt
    deutlich neben der Ausgleichsgeraden liegt.
 
-Die in Stufe 2/3 verworfenen Punkte erscheinen im Plot als schwarze Kreuze,
+Die in Stufe 2/3 verworfenen Punkte erscheinen im Plot als offene Kreise -
+dieselbe Markierung wie die Randminima, denn fuer den Betrachter ist beides
+dasselbe ("steckt nicht in der Auswertung") -,
 die Geradengleichung samt R² steht im Bericht (bewusst nicht in der Legende -
 dort wuerde sie den Kasten nur aufblaehen), und der Bericht bekommt
 einen eigenen Abschnitt mit Steigung, Achsenabschnitt, R², gefittetem Bereich
@@ -222,18 +272,83 @@ Grids neu berechnet, **ohne** den teuren Scan zu wiederholen.
 
 ---
 
+## 4. `run_penalty_only.py` - ein einzelner Parametersatz statt eines Gitters
+
+Beantwortet die Frage, die der Scan nicht direkt beantwortet:
+
+> "Waist und Brennweiten habe ich vorgegeben - wie muessen width, r_x und
+> r_y sein?"
+
+Im Dialog wird fuer jede der sieben Groessen einzeln eingestellt, ob sie
+**vorgegeben** wird (fester Wert) oder **optimiert** (dann mit einem
+Bereich, in dem sie liegen darf):
+
+| Groesse | Einheit | |
+|---|---|---|
+| Waist nach der Linse | µm | der EFFEKTIVE Waist, nicht `win_input` |
+| Width | MHz | |
+| r_x, r_y | - | Amplituden-Verhaeltnisse |
+| f1, f2, fLO | mm | die drei Brennweiten |
+
+Die freien Groessen werden anschliessend **gemeinsam** so gewaehlt, dass
+dieselbe Zielfunktion `J` minimal wird, die auch `run_penalty_scan.py` an
+jedem Gitterpunkt minimiert - dieselbe Formel, dieselben rohen
+(unnormierten) Metriken, dasselbe eine `_evaluate(..., weighted=True)` pro
+Auswertung. Ein Ergebnis hier und ein Gitterpunkt dort sind deshalb direkt
+vergleichbar.
+
+**Zu den Brennweiten.** f1, f2 und fLO sind keine Anzeigegroesse: sie
+bestimmen ueber `radius_from_angle()` die Spot-Positionen in der
+Fallenebene und damit, welche Laenge ein gegebenes `width` ueberhaupt
+bedeutet. Weil der Waist hier direkt in µm vorgegeben wird, ist das der
+wirksame Weg; die zweite Rolle der Brennweiten (Umrechnung
+Eingangswaist -> effektiver Waist) benutzt der Bericht, um am Ende zu
+sagen, welchen **win_input in mm** man fuer den gefundenen Waist
+einstellen muss.
+
+**Warum mehrere Startpunkte.** Die harten Metriken rauschen (siehe
+`ANLEITUNG.md`, "zackige harte Kurven"), die Zielfunktion hat dadurch
+feine lokale Minima ohne physikalische Bedeutung. Deshalb laufen per
+Default acht Nelder-Mead-Optimierungen: die erste aus der Mitte aller
+Bereiche, die uebrigen von Latin-Hypercube-Punkten (fester Seed, also
+reproduzierbar). Der Bericht listet **alle** Laeufe mit ihrem J - liegen
+die besten dicht beieinander, ist das Optimum belastbar; streuen sie, ist
+es eine von mehreren gleichwertigen Loesungen. `Startpunkte = 1` ist genau
+der eine Lauf aus der Mitte.
+
+Optimiert wird intern in normierten Koordinaten `u` in `[0, 1]` je freier
+Groesse. Nelder-Mead baut seinen Startsimplex aus festen relativen
+Schritten; mit `waist ~ 1` (µm), `width ~ 0.3` (MHz) und `f2 ~ 750` (mm)
+im selben Vektor waere er um drei Groessenordnungen verzerrt und der Lauf
+wuerde faktisch nur noch f2 variieren.
+
+- Ergebnis: `Fit_Results/PenaltyOpt_N{Nx}x{Ny}_{Profil}_{Datum}.md`
+- **Keine .pkl, keine Plots** - das Ergebnis ist ein Punkt, kein Feld
+- Braucht keinen vorhandenen Datensatz
+
+Der Bericht enthaelt: die Vorgaben (was war fest, was frei, mit welchem
+Bereich), das Optimum mit allen sieben Groessen, den zugehoerigen
+win_input in mm, die volle Metrik-Aufschluesselung (hart / gewichtet /
+kombiniert fuer Uniformity und Crosstalk) und J, die Tabelle aller
+Startpunkte samt Streuung, sowie einen Abschnitt dazu, wie genau das
+Ergebnis ueberhaupt sein kann.
+
+---
+
 ## Ordner
 
 ```
 Combinated_Optimization/
     run_penalty_scan.py     <- ausfuehren: neue Daten (Penalty)
+    run_penalty_only.py     <- ausfuehren: ein Parametersatz, kein Gitter
     run_hard_check.py       <- ausfuehren: Hard Case zu vorhandenem Weighted
     run_plots.py            <- ausfuehren: plotten/auswerten
     lib/                    <- wird von den drei Skripten benutzt,
                                nicht direkt ausfuehren
         paths.py            Ordner-Konstanten, Anbindung an Weighted_Optimization
         combine.py          Penalty-Kombination, Region, Laden/Speichern
-        penalty_scan.py     die gemeinsame Amplituden-Optimierung
+        penalty_scan.py     die gemeinsame Amplituden-Optimierung (Gitter)
+        penalty_opt.py      dieselbe Zielfunktion ohne Gitter (freie Parameter)
         hard_check.py       harte Nachrechnung + Konsistenz-Analyse
         report.py           Plots und Markdown-Berichte
     Results/                gespeicherte Datensaetze (.pkl)

@@ -208,9 +208,20 @@ class PlotsDialog(QDialog):
         for _key, label in report.FOLLOW_CHOICES:
             self.valley_follow.addItem(label)
         self.valley_follow.setToolTip(
-            "Welcher Groesse der Schnitt folgt. \"Kombiniert mit Penalty\" ist der\n"
-            "combined_score des Datensatzes - also Uniformity UND Crosstalk, hart und\n"
-            "gewichtet, mit dem Penalty-Term verrechnet."
+            "Welcher Groesse der Talpfad folgt - und damit auch, worauf die Gerade\n"
+            "gefittet wird.\n\n"
+            "Die beiden Penalty-Eintraege unterscheiden sich, und der Unterschied ist\n"
+            "nicht klein:\n\n"
+            "  NORMIERT (combined_score): jedes der vier Gitter wird vorher einzeln\n"
+            "  min-max ueber das Scan-Fenster auf 0..1 gezogen. Das macht die vier\n"
+            "  vergleichbar, hebt aber die atom-gewichteten Groessen gegenueber der\n"
+            "  harten Uniformity an - deren rohe Spanne ist ein Vielfaches groesser.\n"
+            "  Diese Groesse hat der Optimierer nie gesehen.\n\n"
+            "  ROH (J): genau die Zielfunktion, die der Scan an jedem Gitterpunkt\n"
+            "  ueber (r_x, r_y) minimiert hat. Keine Normierung, haengt damit auch\n"
+            "  nicht am gescannten Fenster.\n\n"
+            "Die Steigung der Geraden kann sich zwischen beiden deutlich\n"
+            "unterscheiden. Welche gemeint war, steht im Bericht und im Dateinamen."
         )
         valley_form.addRow("Groesse fuer Talpfad/Gerade:", self.valley_follow)
         self.valley_axis = QComboBox()
