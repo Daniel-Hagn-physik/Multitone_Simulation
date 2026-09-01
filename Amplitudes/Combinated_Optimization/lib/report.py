@@ -67,6 +67,30 @@ LATEX_STYLE = {
     "ps.fonttype": 42,
 }
 
+# Die Metrik-Karten sind zum direkten Einbinden in ein A4-Dokument gedacht:
+# Breite = Textbreite bei 2.5-cm-Raendern (16 cm), Hoehe = Texthoehe minus
+# Platz fuer die Bildunterschrift. \includegraphics[width=\textwidth] skaliert
+# eine so gebaute Datei NICHT mehr - erst dadurch kommen die unten
+# eingestellten Schriftgroessen 1:1 im Dokument an. Vorher war die Figur
+# 12 Zoll breit und wurde auf Textbreite geschrumpft (Faktor 0.52), 10-pt-Text
+# kam als 5 pt heraus.
+PAGE_FIGSIZE = (6.3, 9.0)        # 3x2, ganze Seite
+HALF_PAGE_FIGSIZE = (6.3, 6.2)   # 2x2, gleiche Kartenhoehe wie oben
+
+# Groesser als LATEX_STYLE, weil diese Figuren im Dokument nicht mehr
+# verkleinert werden.
+MAP_STYLE = dict(LATEX_STYLE)
+MAP_STYLE.update({
+    "font.size": 10,
+    "axes.titlesize": 11.5,
+    "axes.labelsize": 11,
+    "xtick.labelsize": 9.5,
+    "ytick.labelsize": 9.5,
+    "legend.fontsize": 10,
+})
+
+WORKING_POINT_LABEL = "Working point"
+
 WIDTH_LABEL = "Width (MHz)"
 
 
@@ -168,7 +192,8 @@ def _x_of_index(results, j, win_axis):
     return x_vals[n - 1 - j] if reversed_ else x_vals[j]
 
 
-def draw_best_point_marker(ax, results, win_axis, legend=True, best=None):
+def draw_best_point_marker(ax, results, win_axis, legend=True, best=None,
+                           label=None):
     """Markiert den besten Gitterpunkt in einer vorhandenen Heatmap-Achse.
 
     best=None nimmt den im Datensatz gespeicherten Punkt, sonst das dict
@@ -176,7 +201,13 @@ def draw_best_point_marker(ax, results, win_axis, legend=True, best=None):
     wird der Stern OFFEN gezeichnet - er ist dann vermutlich keiner.
 
     `legend=False`, wenn der Aufrufer die Legende selbst setzt (z.B. eine
-    gemeinsame fuer mehrere Panels)."""
+    gemeinsame fuer mehrere Panels). `label` steuert davon unabhaengig, ob
+    der Stern ueberhaupt einen Legendeneintrag bekommt - so kann ein
+    Aufrufer in GENAU EINEM Panel einen Handle einsammeln und ihn in seine
+    gemeinsame Legende stecken, ohne in jedem Panel einen Kasten zu haben.
+    Ohne Angabe folgt `label` dem Wert von `legend` (altes Verhalten)."""
+    if label is None:
+        label = legend
     if best is None:
         best = results.get('best') or {}
     if not best or best.get('win_input') is None:
@@ -192,15 +223,15 @@ def draw_best_point_marker(ax, results, win_axis, legend=True, best=None):
         x = _x_of_index(results, j, win_axis)
     am_rand = bool(best.get('at_edge'))
     stil = BEST_POINT_EDGE_STYLE if am_rand else BEST_POINT_STYLE
-    if best.get('on_line'):
-        beschriftung = "selected point"
-    else:
-        beschriftung = "best point (at scan edge)" if am_rand else "best point"
+    # Ein Name fuer alle drei Faelle: im Dokument ist es der Arbeitspunkt,
+    # ob nun selbst gesetzt oder als bester Gitterpunkt gefunden. Der Zusatz
+    # am Rand bleibt - der offene Stern allein erklaert ihn nicht.
+    beschriftung = WORKING_POINT_LABEL + (" (at scan edge)" if am_rand else "")
     # Ohne eigene Legende bekommt der Stern auch KEINEN Legendeneintrag:
     # sonst sammelt ihn der Aufrufer ueber get_legend_handles_labels() in
     # seine gemeinsame Legende ein, und genau die soll knapp bleiben.
     ax.plot([x], [best['width'] * 1e-6],
-            label=(beschriftung if legend else "_nolegend_"), **stil)
+            label=(beschriftung if label else "_nolegend_"), **stil)
     handles, _ = ax.get_legend_handles_labels()
     if legend and handles:
         ax.legend(loc="best", framealpha=0.85)
@@ -607,7 +638,17 @@ def r_bounds_clamped_fraction(results):
     return tuple(anteile)
 
 
-@_mit_stil
+def _mit_kartenstil(func):
+    """Wie _mit_stil, nur mit den groesseren Schriften von MAP_STYLE - die
+    Kartenplots werden im Dokument nicht mehr verkleinert."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with plt.rc_context(MAP_STYLE):
+            return func(*args, **kwargs)
+    return wrapper
+
+
+@_mit_kartenstil
 def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens",
                            draw_best_point=True, save=True, show=False,
                            confirm_overwrite=None, fit_line=None,
@@ -625,11 +666,6 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
     width_vals = np.asarray(results['width_vals'], dtype=float)
     x_vals, x_label, reversed_ = win_axis_values(results, win_axis)
 
-    kind = dataset_kind(results)
-    # Knappe Titel: der Rest steht im Bericht, nicht im Bild.
-    suptitle = ("Weighted vs. recomputed hard metrics" if kind == "hard_check"
-                else "Hard vs. atom-weighted metrics")
-
     panels = list(METRIC_PANELS)
     if with_amplitudes:
         amp = amplitude_panels(results)
@@ -639,12 +675,21 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
                 "fehlen oder sind leer) - die 6-Karten-Uebersicht ist hier "
                 "nicht moeglich.")
         panels = panels + amp
-        suptitle += " and amplitude ratios"
 
-    # Zeilenhoehe bleibt bei 4.6 Zoll wie in der 2x2-Fassung, damit die
-    # Karten in beiden Varianten gleich gross herauskommen.
+    # Keine Ueberschrift ueber der Figur: in einem LaTeX-Dokument steht dort
+    # die \caption, und zwei Titel uebereinander sind einer zu viel. Was der
+    # Plot zeigt, steht in den Titeln der einzelnen Karten.
+    #
+    # Die 3x2-Fassung fuellt eine Seite, die 2x2-Fassung behaelt dieselbe
+    # Kartenhoehe und wird dadurch etwa halb so hoch.
     n_rows = (len(panels) + 1) // 2
-    fig, axes = plt.subplots(n_rows, 2, figsize=(12.0, 4.6 * n_rows),
+    figsize = PAGE_FIGSIZE if n_rows >= 3 else HALF_PAGE_FIGSIZE
+    # Alle Karten haben dieselben Achsen. Die Beschriftung deshalb nur einmal
+    # aussen herum - das spart pro eingesparter Zeile rund einen halben Zoll,
+    # der direkt in die Kartenhoehe geht (die Amplitudenkarten unten waren
+    # sonst die kleinsten).
+    fig, axes = plt.subplots(n_rows, 2, figsize=figsize,
+                             sharex="all", sharey="all",
                              constrained_layout=True)
     for ax, panel in zip(axes.flat, panels):
         Z = np.asarray(results[panel['key']], dtype=float) * panel['scale']
@@ -673,21 +718,24 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
             # der geklemmte Bereich in Grau, ungueltige Punkte bleiben weiss.
             ax.pcolormesh(x_vals, width_vals * 1e-6, M_plot, shading="auto",
                           cmap=ListedColormap([R_CLAMP_COLOR]), vmin=0.0, vmax=1.0)
-        ax.set_xlabel(x_label)
-        ax.set_ylabel(WIDTH_LABEL)
         ax.set_title(panel['title'])
         if forbidden_factor is not None:
             draw_forbidden_region(ax, results, win_axis, forbidden_factor)
         if fit_line is not None:
             draw_fit_line_on_map(ax, results, fit_line, win_axis)
         if draw_best_point:
-            # Der Stern wird gezeichnet, bekommt aber KEINEN
-            # Legendeneintrag (legend=False setzt das Label auf
-            # "_nolegend_"): ein roter Stern in einer Metrik-Karte erklaert
-            # sich selbst, und die Legende soll genau einen Eintrag haben.
-            draw_best_point_marker(ax, results, win_axis, legend=False, best=best_point)
+            # Gezeichnet wird der Stern in jeder Karte, den Legendeneintrag
+            # holt sich aber nur die erste - sonst steht "Working point"
+            # sechsmal in der gemeinsamen Legende.
+            draw_best_point_marker(ax, results, win_axis, legend=False,
+                                   label=(ax is axes.flat[0]), best=best_point)
     # Uebrig bleibt damit hoechstens die Ausgleichsgerade - ein Eintrag,
     # einmal unter der ganzen Figur statt vier Kaesten mitten in den Karten.
+    for ax in axes[-1, :]:
+        ax.set_xlabel(x_label)
+    for ax in axes[:, 0]:
+        ax.set_ylabel(WIDTH_LABEL)
+
     handles, labels = axes.flat[0].get_legend_handles_labels()
     if any(p.get('clamped') for p in panels):
         # Das Grau erklaert sich nicht von selbst - ein Eintrag in der
@@ -696,8 +744,7 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
         labels.append(R_CLAMP_LABEL)
     if handles:
         fig.legend(handles, labels, loc="outside lower center",
-                   ncol=min(4, len(handles)), framealpha=0.9)
-    fig.suptitle(suptitle)
+                   ncol=min(3, len(handles)), framealpha=0.9)
     dateiname = (f"{prefix}_metric_comparison_amp.pdf" if with_amplitudes
                  else f"{prefix}_metric_comparison.pdf")
     return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite)

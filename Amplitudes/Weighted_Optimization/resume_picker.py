@@ -93,6 +93,91 @@ def is_unfinished(results):
 
 
 # ----------------------------------------------------------------------
+# Dateien finden - OHNE sie zu lesen
+# ----------------------------------------------------------------------
+# WICHTIG: Beim Oeffnen des Dialogs wird KEINE .pkl eingelesen. Ein
+# Results-Ordner kann Dutzende Dateien mit zig MB enthalten, und wenn er
+# (wie hier) in OneDrive liegt, loest schon das Oeffnen einer ausgelagerten
+# Datei einen Download aus - der Dialog haengt dann sekunden- bis
+# minutenlang, bevor er ueberhaupt erscheint. Deshalb wird die Liste nur
+# aus Dateinamen und os.stat() aufgebaut (beides beruehrt den Inhalt
+# nicht); eingelesen wird ausschliesslich die Datei, die der Nutzer
+# tatsaechlich auswaehlt.
+#
+# Die Art wird dafuer erst am Dateinamen geraten und beim Auswaehlen am
+# tatsaechlichen Inhalt geprueft - passt sie nicht, sagt der Dialog das
+# klar, statt stillschweigend etwas Falsches fortzusetzen.
+
+# Reihenfolge: spezifischste Praefixe zuerst.
+_NAME_PATTERNS = [
+    ("scan_amp_data_combined", KIND_PENALTY),
+    ("scan_amp_data_joint", KIND_PENALTY),
+    ("scan_amp_data_weighted", KIND_WEIGHTED_AMP),
+    ("scan_data_weighted", KIND_WEIGHTED_FIXED),
+    ("scan_amp_data_", KIND_HARD_AMP),
+    ("scan_data_", KIND_HARD_FIXED),
+]
+
+
+def guess_kind_from_name(name):
+    """Art am Dateinamen raten (ohne die Datei zu lesen), oder None."""
+    low = name.lower()
+    for prefix, kind in _NAME_PATTERNS:
+        if low.startswith(prefix):
+            return kind
+    return None
+
+
+def list_candidates(directory, kind=None, extra_dirs=()):
+    """Kandidaten fuer das Auswahlfeld - nur Name, Groesse, Zeitstempel.
+
+    Es wird NICHTS eingelesen. Enthalten sind Dateien, deren Name auf die
+    gesuchte Art passt, sowie Dateien mit unbekanntem Namensmuster (etwa
+    selbst umbenannte) - ob sie wirklich passen, entscheidet erst
+    load_entry() beim Auswaehlen.
+    """
+    out = []
+    seen = set()
+    for d in [directory] + list(extra_dirs):
+        if not d:
+            continue
+        d = Path(d)
+        if not d.is_dir():
+            continue
+        try:
+            it = list(os.scandir(d))
+        except OSError:
+            continue
+        for e in it:
+            if not e.name.lower().endswith(".pkl") or not e.is_file():
+                continue
+            rp = os.path.normcase(os.path.abspath(e.path))
+            if rp in seen:
+                continue
+            seen.add(rp)
+            guessed = guess_kind_from_name(e.name)
+            if kind is not None and guessed is not None and guessed != kind:
+                continue
+            try:
+                st = e.stat()
+            except OSError:
+                continue
+            out.append(dict(path=e.path, name=e.name, mtime=st.st_mtime,
+                            size=st.st_size, guessed_kind=guessed, results=None))
+    out.sort(key=lambda x: x["mtime"], reverse=True)
+    for x in out:
+        x["label"] = describe_candidate(x)
+    return out
+
+
+def describe_candidate(cand):
+    """Einzeiler fuer das Auswahlfeld - ohne die Datei gelesen zu haben."""
+    when = time.strftime("%d.%m.%Y %H:%M", time.localtime(cand["mtime"]))
+    return "%s  -  %.1f MB, %s" % (cand["name"], cand["size"] / 1e6, when)
+
+
+
+# ----------------------------------------------------------------------
 # Dateien finden
 # ----------------------------------------------------------------------
 def find_unfinished(directory, kind=None, extra_dirs=()):
@@ -324,9 +409,15 @@ if QGroupBox is not None:
             return p
 
         def refresh(self, keep_path=None):
-            """Ordner neu einlesen (z.B. nach einem gerade beendeten Scan)."""
+            """Ordner neu auflisten (z.B. nach einem gerade beendeten Scan).
+
+            Liest NUR Dateinamen und Zeitstempel - keine einzige .pkl wird
+            dabei geoeffnet. Der Dialog erscheint dadurch sofort, auch bei
+            vielen oder grossen Dateien und auch, wenn der Ordner in
+            OneDrive liegt.
+            """
             keep_path = keep_path or self.selected_path()
-            self._entries = find_unfinished(self.results_dir, kind=self.kind,
+            self._entries = list_candidates(self.results_dir, kind=self.kind,
                                             extra_dirs=self.extra_dirs)
             self.combo.blockSignals(True)
             self.combo.clear()
@@ -350,21 +441,66 @@ if QGroupBox is not None:
                 n = len(self._entries)
                 self.status.setText(
                     "Neuer Scan - alle Felder frei." if n else
-                    "Neuer Scan - im Results-Ordner liegt gerade kein unfertiger "
-                    "Datensatz dieser Art.")
-            else:
-                self._selected = self._entries[i - 1]
-                res = self._selected["results"]
-                self.status.setText(
-                    "Wird fortgesetzt: %d von %d Punkten fehlen noch. "
-                    "Gespeichert wird weiter in dieselbe Datei. "
-                    "(Art: %s, airy_scale_factor %s)"
-                    % (self._selected["n_total"] - self._selected["n_done"],
-                       self._selected["n_total"],
-                       KIND_LABELS.get(self._selected["kind"], self._selected["kind"]),
-                       res.get("airy_scale_factor", "1.19 (nicht gespeichert)")))
+                    "Neuer Scan - im Results-Ordner liegt gerade keine passende "
+                    "Datei.")
+                if self._on_change is not None:
+                    self._on_change(None)
+                return
+
+            cand = self._entries[i - 1]
+            # ERST JETZT wird die Datei gelesen - genau die eine, die der
+            # Nutzer ausgewaehlt hat.
+            if cand.get("results") is None:
+                self.status.setText("Lese %s ..." % cand["name"])
+                self.repaint()
+                entry, err = load_entry(cand["path"])
+                if entry is None:
+                    self._reject(cand, "Datei passt nicht", err)
+                    return
+                if self.kind is not None and entry["kind"] != self.kind:
+                    self._reject(cand, "Falsche Datensatz-Art",
+                                 "Diese Datei ist ein %s.\nDieser Dialog kann nur %s "
+                                 "fortsetzen."
+                                 % (KIND_LABELS.get(entry["kind"], entry["kind"]),
+                                    KIND_LABELS.get(self.kind, self.kind)))
+                    return
+                if not is_unfinished(entry["results"]):
+                    self._reject(cand, "Datensatz ist fertig",
+                                 "Dieser Datensatz ist vollstaendig - es gibt nichts "
+                                 "fortzusetzen.")
+                    return
+                cand.update(entry)
+
+            self._selected = cand
+            res = cand["results"]
+            self.status.setText(
+                "Wird fortgesetzt: %d von %d Punkten fehlen noch. "
+                "Gespeichert wird weiter in dieselbe Datei. "
+                "(Art: %s, airy_scale_factor %s)"
+                % (cand["n_total"] - cand["n_done"], cand["n_total"],
+                   KIND_LABELS.get(cand["kind"], cand["kind"]),
+                   res.get("airy_scale_factor", "1.19 (nicht gespeichert)")))
             if self._on_change is not None:
                 self._on_change(self._selected)
+
+        def _reject(self, cand, title, text):
+            """Ausgewaehlte Datei taugt nicht: Meldung zeigen, Eintrag aus der
+            Liste nehmen und zurueck auf "Neuer Scan"."""
+            QMessageBox.warning(self, title, text)
+            try:
+                idx = self._entries.index(cand)
+            except ValueError:
+                idx = None
+            self.combo.blockSignals(True)
+            if idx is not None:
+                self._entries.pop(idx)
+                self.combo.removeItem(idx + 1)
+            self.combo.setCurrentIndex(0)
+            self.combo.blockSignals(False)
+            self._selected = None
+            self.status.setText("Neuer Scan - alle Felder frei.")
+            if self._on_change is not None:
+                self._on_change(None)
 
         def _on_other(self):
             path, _ = QFileDialog.getOpenFileName(
@@ -495,9 +631,25 @@ if QGroupBox is not None:
             w = getattr(dialog, name, None)
             if w is not None:
                 keep_widgets.add(id(w))
+
+        targets = []
         for w in dialog.findChildren((QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox)):
             if resume_group is not None and resume_group.isAncestorOf(w):
                 continue
             if id(w) in keep_widgets:
                 continue
-            w.setEnabled(not locked)
+            targets.append(w)
+
+        if locked:
+            # Vorherigen Zustand merken - manche Felder sind vom Dialog selbst
+            # absichtlich deaktiviert (z.B. das airy_scale_factor-Feld, solange
+            # eine benannte Konvention gewaehlt ist). Ohne dieses Merken waeren
+            # sie nach einmal Fortsetzen-und-zurueck faelschlich bedienbar.
+            dialog._resume_prev_enabled = {id(w): w.isEnabled() for w in targets}
+            for w in targets:
+                w.setEnabled(False)
+        else:
+            prev = getattr(dialog, "_resume_prev_enabled", None)
+            for w in targets:
+                w.setEnabled(True if prev is None else prev.get(id(w), True))
+            dialog._resume_prev_enabled = None

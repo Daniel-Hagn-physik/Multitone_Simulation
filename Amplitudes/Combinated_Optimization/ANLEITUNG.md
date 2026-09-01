@@ -496,6 +496,19 @@ Die PDFs sind fuer einen LaTeX-Satz gemacht: englische Beschriftung,
 Serifenschrift, eingebettete TrueType-Schriften. Sie lassen sich unveraendert
 in ein Dokument einbinden.
 
+Die Metrik-Karten sind dabei gleich auf A4 gebaut: die 6-Karten-Fassung fuellt
+eine Seite (Textbreite bei 2.5-cm-Raendern, Hoehe abzueglich Platz fuer die
+`\caption`), die 4-Karten-Fassung etwa eine halbe. Einbinden mit
+
+```latex
+\includegraphics[width=\textwidth]{..._metric_comparison_amp.pdf}
+```
+
+verkleinert die Datei praktisch nicht mehr - deshalb kommen die Schriften in
+der eingestellten Groesse im Dokument an. Eine Ueberschrift ueber der Figur
+gibt es nicht; dort gehoert die `\caption` hin. Der rote Stern steht als
+*Working point* in der Legende unter der Abbildung.
+
 ---
 
 ## 7. Haeufige Stolpersteine

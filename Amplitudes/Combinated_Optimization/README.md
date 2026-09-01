@@ -536,6 +536,37 @@ Journals und von `pdffonts`-Pruefungen abgelehnt. Der Stil wird nur ueber
 `plt.rc_context` gesetzt und faerbt deshalb nicht auf andere Skripte ab.
 Berichte (`.md`) und der Dialog bleiben deutsch.
 
+**Die Metrik-Karten sind auf A4 gebaut (2026-09-01).** Frueher war die Figur
+12 Zoll breit. `\includegraphics[width=\textwidth]` schrumpfte sie im Dokument
+auf Textbreite - Faktor 0.52 -, und aus 10-pt-Beschriftung wurden 5 pt. Jetzt
+wird die Datei gleich in der Groesse erzeugt, in der sie im Dokument landet:
+
+- `PAGE_FIGSIZE = (6.3, 9.0)` Zoll fuer die 3x2-Fassung: Textbreite bei
+  2.5-cm-Raendern, Hoehe = Texthoehe abzueglich rund 1.6 cm fuer die
+  `\caption`. Die Abbildung fuellt damit eine Seite.
+- `HALF_PAGE_FIGSIZE = (6.3, 6.2)` Zoll fuer die 2x2-Fassung - gleiche
+  Kartenhoehe, also etwa eine halbe Seite. Sie auf volle Seitenhoehe zu
+  ziehen wuerde die vier Karten nur unnatuerlich strecken.
+
+Weil im Dokument nicht mehr skaliert wird, sind die Schriften groesser als im
+Rest des Ordners (`report.MAP_STYLE`: Achsen 11 pt, Titel 11.5 pt, Ticks und
+Colorbar 9.5 pt). Zwei weitere Aenderungen holen Platz fuer die Karten selbst:
+
+- **Keine Ueberschrift ueber der Figur.** In einem LaTeX-Dokument steht dort
+  die `\caption`; zwei Titel uebereinander sind einer zu viel. Was die Karten
+  zeigen, steht in ihren eigenen Titeln.
+- **Achsenbeschriftung nur aussen herum** (`sharex`/`sharey`): alle Karten
+  haben dieselben Achsen, also steht die x-Beschriftung nur unter der
+  untersten Reihe und die y-Beschriftung nur links. Das gibt rund einen
+  halben Zoll je eingesparter Zeile - der direkt in die Kartenhoehe geht,
+  und die Amplitudenkarten unten waren vorher die kleinsten.
+
+**Der Stern heisst "Working point"** und steht in der gemeinsamen Legende
+unter der Figur - einmal, obwohl er in jeder Karte gezeichnet wird. Der Name
+gilt fuer beide Faelle, den selbst gesetzten Punkt und den gefundenen besten;
+liegt er am Rand des gescannten Fensters, wird daraus "Working point (at scan
+edge)" und der Stern bleibt offen.
+
 Im Querschnitt bekommt nicht mehr jede Kurve eine eigene y-Achse: Kurven mit
 derselben Einheit und derselben Groessenordnung teilen sich eine
 (`report.group_traces_by_axis`), und `r_x`/`r_y` liegen immer zusammen. Eine
