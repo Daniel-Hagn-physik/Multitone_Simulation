@@ -66,6 +66,19 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 
 from lens_design_dialog import LensDesignDialog
+import airy_scale
+
+# ----------------------------------------------------------------------
+# Airy-Skalenfaktor: first_zero_radius = AIRY_SCALE_FACTOR * waist
+# ----------------------------------------------------------------------
+# Legt fest, was die Zahl "waist" beim Airy-Profil physikalisch bedeutet.
+# Voreingestellt ist 1.4830 - damit hat die Airy-Hauptkeule denselben
+# 1/e^2-Radius wie ein Gauss-Strahl mit diesem Waist. Der historische Wert
+# 1.19 (kein 1/e^2-Radius, sondern 0.8025 * waist) bleibt im Dialog
+# waehlbar. Die Definitionen stehen in airy_scale.py, einer identischen
+# Kopie der Datei aus Amplitudes/Weighted_Optimization/.
+AIRY_SCALE_FACTOR = airy_scale.AIRY_SCALE_DIALOG_DEFAULT
+
 
 
 # ============================================================
@@ -157,9 +170,11 @@ def airy_2d_weighted_distance_from_centers(X, Y, centers_x, centers_y, first_zer
     return I
 
 
-def compute_intensity_profile(X, Y, centers_x, centers_y, width_param, amps, use_airy):
+def compute_intensity_profile(X, Y, centers_x, centers_y, width_param, amps, use_airy,
+                              airy_scale_factor=None):
     if use_airy:
-        first_zero_radius = 1.19 * width_param
+        factor = AIRY_SCALE_FACTOR if airy_scale_factor is None else float(airy_scale_factor)
+        first_zero_radius = factor * width_param
         return airy_2d_weighted_distance_from_centers(X, Y, centers_x, centers_y, first_zero_radius, amps)
     else:
         return gaussian_2d_weighted_distance_from_centers(X, Y, centers_x, centers_y, width_param, amps)
@@ -646,6 +661,13 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.cb_airy = QCheckBox("Airy disk instead of Gaussian")
         self.cb_airy.setChecked(self.state["use_airy"])
         layout.addWidget(self.cb_airy)
+        # Parametrisierung des Airy-Profils - nur wirksam, solange die
+        # Checkbox darueber gesetzt ist (beim Gauss-Profil gibt es keinen
+        # Skalenfaktor, deshalb wird die Gruppe dann ausgegraut).
+        self.airy_group = airy_scale.AiryScaleGroup(AIRY_SCALE_FACTOR)
+        self.airy_group.setEnabled(self.state["use_airy"])
+        self.airy_group.factor_spin.valueChanged.connect(self.on_airy_scale_changed)
+        layout.addWidget(self.airy_group)
         return box
 
     def _build_amp_group(self):
@@ -1750,7 +1772,18 @@ class WeightedFlatMultiToneWindow(QMainWindow):
 
     def on_profile_toggle(self, checked_state):
         self.state["use_airy"] = bool(checked_state)
+        if hasattr(self, "airy_group"):
+            self.airy_group.setEnabled(self.state["use_airy"])
         self.medium_update()
+
+    def on_airy_scale_changed(self, value):
+        """Neuer Airy-Skalenfaktor: setzt das Modul-Global, das
+        compute_intensity_profile() benutzt, und rechnet neu. Wirkt nur
+        beim Airy-Profil."""
+        global AIRY_SCALE_FACTOR
+        AIRY_SCALE_FACTOR = float(value)
+        if self.state["use_airy"]:
+            self.medium_update()
 
     def on_amp_toggle(self, checked_state):
         self.state["custom_amps"] = bool(checked_state)

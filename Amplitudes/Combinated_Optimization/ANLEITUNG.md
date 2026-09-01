@@ -166,16 +166,154 @@ Wer immer denselben Datensatz auswertet, kann ihn oben im Skript bei
 - **Besten Punkt als Stern einzeichnen**: markiert in den Karten den
   Gitterpunkt mit dem kleinsten Score. Seine Zahlen stehen ohnehin im
   Bericht - ohne Haken bleiben die Heatmaps voellig frei.
+- **Bester Punkt nach**: nach welcher Groesse der Stern gesetzt wird.
+  Voreingestellt ist der im Datensatz gespeicherte Punkt - dann zeigen Stern
+  und Bericht dasselbe. Waehlt man etwas anderes, erklaert der Bericht das in
+  einem eigenen Abschnitt. **Liegt der Punkt am Rand des gescannten
+  Fensters, ist der Stern offen statt gefuellt** - dort ist das Minimum
+  vermutlich nur das Ende des Scans. Beim rohen J ist genau das der Fall:
+  sein Minimum sitzt in beiden vorhandenen Datensaetzen auf width =
+  0.200 MHz.
+- **Eigener Punkt**: die letzten beiden Eintraege des Dropdowns. Du gibst
+  eine Koordinate vor - Waist in µm oder width in MHz -, die andere kommt aus
+  der Talpfad-Geraden. Das Feld darunter nimmt den Wert entgegen und
+  beschriftet sich passend. Der Punkt liegt exakt auf der Geraden, also meist
+  zwischen zwei Gitterpunkten; der Bericht nennt zusaetzlich den
+  naechstgelegenen wirklich gerechneten Gitterpunkt. Ohne Talpfad-Gerade geht
+  es nicht - dann kommt ein Hinweis auf der Konsole und es wird kein Punkt
+  gezeichnet.
+  Im Bericht stehen zu dem Punkt auch die Werte der sechs Groessen (U und
+  Crosstalk je hart und gewichtet, r_x, r_y) und J - einmal interpoliert und
+  einmal am naechstgelegenen Gitterpunkt. Die Interpolation ist bei r_x/r_y
+  mit Vorsicht zu geniessen: das sind Optimierungsergebnisse, keine glatten
+  Funktionen. Exakte Werte an einem freien Punkt liefert nur eine neue
+  Optimierung dort, also `run_penalty_only.py`.
 - **Gerade auch in den Metrik-Vergleich einzeichnen**: siehe Abschnitt
   *Talschnitt*; die dort gefittete Gerade wird zusaetzlich in die vier
   Metrik-Karten gelegt - durchgezogen im gefitteten Bereich, gepunktet in
   der Extrapolation. Die Legende der Figur hat dabei genau einen Eintrag
   ("Linear model fit"); der extrapolierte Teil und der Stern bekommen
   keinen.
+- **Metrik-Vergleich zusaetzlich mit Amplituden (6 Karten, eigene PDF)**:
+  schreibt neben `..._metric_comparison.pdf` eine zweite Datei
+  `..._metric_comparison_amp.pdf` mit denselben vier Metrik-Karten plus `r_x`
+  und `r_y`. Die beiden Amplituden-Karten teilen sich eine logarithmische
+  Farbskala; Punkte, deren Amplitude auf einer `r_bounds`-Schranke klemmt,
+  sind grau - dort steht kein freies Optimum, sondern die Schranke, und ihr
+  Anteil erscheint auf der Konsole. Nicht zu verwechseln mit dem naechsten
+  Haken.
 - **Amplituden-Uebersicht und Schnitte mitzeichnen**: die 6-Panel-Uebersicht
   und die Schnitte des AmplitudeScanPlotter, als PNG. Kostet etwas Zeit.
 - **Plots zusaetzlich interaktiv anzeigen**: oeffnet jedes Bild in einem
   Fenster. Praktisch zum Hineinzoomen, laestig bei vielen Plots.
+
+**Welche Kurven im Schnitt stehen.** Voreingestellt sind alle ausser dem
+NORMIERTEN Score: im Querschnitt steht `J` (Penalty ROH), also die Groesse,
+die der Scan an jedem Gitterpunkt tatsaechlich minimiert hat. Der normierte
+Score `S` bleibt anhakbar - er ist praktisch zum Sortieren, aber nichts, was
+man physikalisch deuten kann, weil die Normierung jede Rohgroesse gitterweit
+auf 0..1 zieht. `J` traegt eine Einheit und wird deshalb NICHT in Prozent
+gezeigt, sondern roh (Werte um 0.04 statt 4 %) - genau wie im Bericht.
+
+**Talpunkt-Auswahl** - der wichtigste Schalter der Gruppe:
+
+- *Lokales Minimum nahe einer Leitgeraden* (Voreinstellung): pro Spalte wird
+  nicht das kleinste, sondern das der Leitgeraden naechstliegende LOKALE
+  Minimum genommen. Lokal heisst: beide Nachbarn existieren und sind
+  groesser - Punkte am Rand des Scans und Punkte, die an den
+  ausgeschlossenen verbotenen Bereich grenzen, fallen damit von selbst raus.
+- *Globales Minimum je Spalte*: das alte Verhalten. Beim rohen J laeuft der
+  Pfad damit auf der Grenze des verbotenen Bereichs entlang - die Steigung
+  ist dann die der Grenze, nicht die der Physik.
+
+**Leitgroesse** ist die Groesse, aus der die Leitgerade kommt (Voreinstellung
+Uniformity atom-gewichtet - ihr Talpfad ist der stabilste im Projekt). Der
+**Korridor** begrenzt, wie weit die Auswahl von der Leitgeraden abweichen
+darf. Am 41x41-Datensatz aendert sich zwischen 0.010 und 0.100 MHz gar
+nichts; am 21x21 lohnt ein Vergleich zweier Werte.
+
+Zu wissen: die Leitgerade waehlt nur aus. Die Punkte sind echte lokale
+Minima, die Steigung ist deren eigene - aber welcher Zweig verfolgt wird,
+haengt an der Leitgroesse. Der Bericht sagt das ausdruecklich dazu.
+
+**Suchbereich einschraenken** - der Haken darunter. Ohne ihn wird ueber das
+ganze Scan-Fenster gesucht. Mit ihm nur innerhalb der vier Grenzen (waist
+von/bis in µm, width von/bis in MHz), die beim Laden mit dem vollen Bereich
+des Datensatzes vorbelegt werden; die graue Zeile darunter sagt jederzeit,
+was ueberhaupt gescannt wurde.
+
+Wozu: Datensaetze koennen MEHRERE Talzweige haben. Dann mischt der Fit sie
+und die Steigung ist wertlos. Mit dem Fenster sagt man ihm, welchen Zweig
+man meint.
+
+Zwei Dinge zum Verhalten:
+
+- Ein Talpunkt auf der Grenze zaehlt, SOLANGE es ausserhalb nicht weiter
+  bergab geht - dann ist er ein echtes lokales Minimum und die Grenze hat ihn
+  nur gestreift. Geht es draussen tiefer, laeuft der Zweig aus dem Fenster
+  heraus; der Punkt faellt als Randminimum heraus, sonst fittete man die
+  eigene Grenze statt eines Tals.
+- Der Bereich gilt auch fuer die Leitgerade des gefuehrten Modus.
+
+Kommt keine Gerade zustande, sagt der Dialog warum: wie viele Talpunkte im
+Bereich liegen, wie viele Randminima es sind, wo sie liegen und an welcher
+Grenze sie kleben. Meist lautet die Antwort: den Bereich weiter fassen, eine
+andere Fuehrungsgroesse nehmen - oder feiner rechnen, weil der Zweig im
+Scan-Fenster zu kurz ist.
+
+Beispiel `11x11` (Airy-Faktor 1.483): ohne Fenster laeuft der gefundene Zweig
+komplett auf der `r_bounds`-Schranke (r_x = r_y = 3.000 ueberall - ein
+Klemm-Artefakt). Mit **Waist 0.787 bis 1.05 µm und width 0.24 bis 0.40 MHz**
+und Leitgroesse *Uniformity, atom-gewichtet* kommt der freie Zweig heraus:
+a = 0.37723 MHz/µm bei R² = 0.995 aus 5 von 5 Punkten (Handfit: 0.37735).
+Nur eine der beiden Grenzen reicht nicht.
+
+**Strahlprofil (nur run_penalty_scan.py / run_penalty_only.py).** Das
+Dropdown *Parametrisierung* legt fest, was die Zahl „waist" physikalisch
+bedeutet:
+
+- *wie bisher (1.1900)* — der bisherige Default. Der tatsaechliche
+  1/e²-Radius des Airy-Profils liegt dann bei 0.8025 x waist.
+- *1/e² der Airy-Hauptkeule = waist (1.4830)* — der Waist bedeutet bei Airy
+  dasselbe wie bei einem Gauss-Strahl.
+- *frei eingeben* — eigener Faktor.
+
+Der Wert wandert in die .pkl und steht im Bericht; `run_hard_check.py`
+uebernimmt ihn von dort. Datensaetze mit verschiedenen Faktoren sind NICHT
+vergleichbar - der Faktor setzt die physikalische Spotgroesse und damit jede
+Metrik.
+
+Die Anzeige unter dem k-Feld nennt zusaetzlich den `airy_scale_factor` des
+geladenen Datensatzes und rechnet aus, bei welchem k sich die
+Airy-Hauptkeulen bzw. die 1/e²-Radien gerade beruehren - man muss sich also
+keine Umrechnung merken.
+
+### Verbotener Bereich (Ueberlappung der Eck-Spots)
+
+Die beiden diagonal gegenueberliegenden Eck-Spots duerfen sich nicht
+ueberlappen. `width` ist die Gesamtspannweite des Tonarrays, raeumlich also
+eine Kantenlaenge S; der Eckabstand ist sqrt(2)*S. Aus `sqrt(2)*S > k*waist`
+wird in der (waist, width)-Ebene eine Ursprungsgerade - alles darunter ist
+verboten (dicke Spots, eng beieinander).
+
+- **Faktor k**: k = 2 heisst "die Spot-Radien beruehren sich gerade" und
+  meint den gaussaequivalenten Radius (1/e^2). Wer beim Airy-Profil die
+  Hauptkeule bis zur ersten Nullstelle als den Spot ansieht, nimmt
+  k = 2*1.19 = 2.38. Unter dem Feld steht sofort, wie die Grenze dann lautet
+  und wie viele Gitterpunkte betroffen waeren - man muss den Lauf nicht
+  starten, um das zu sehen.
+- **Einzeichnen**: rote Grenzlinie und Schraffur in allen Karten. Aendert
+  keine einzige Zahl. Auf der mm-Achse ist die Grenze gekruemmt, das ist
+  richtig so (win_input und Waist haengen reziprok zusammen).
+- **Ausschliessen**: die verbotenen Punkte werden wie ungueltig behandelt.
+  Bester Punkt, Region, Talpfad und Geradenfit sehen sie dann nicht mehr.
+  Der normierte Score aendert sich dabei ueberall, weil die Normierung ueber
+  das ganze Gitter laeuft - die rohen Metriken nicht. Die .pkl auf der
+  Platte wird nicht angefasst.
+
+Beide Haken sind unabhaengig. Nur einzeichnen ist der ehrlichere erste
+Blick; ausschliessen lohnt, wenn der Talpfad in den verbotenen Bereich
+laeuft.
 
 ### Querschnitt entlang des Minimums ("Talschnitt")
 
@@ -340,6 +478,7 @@ Nach "Auswertung erzeugen" meldet ein Fenster, wohin geschrieben wurde. In
 | Datei | Inhalt |
 |---|---|
 | `..._metric_comparison.pdf` | vier Karten: Uniformity und Crosstalk, je hart und gewichtet |
+| `..._metric_comparison_amp.pdf` | dieselben vier Karten plus r_x und r_y (nur mit dem entsprechenden Haken) |
 | `..._region.pdf` | die Score-Karte |
 | `..._agreement.pdf` | nur Hard-Check: wo hart und gewichtet einig sind |
 | `..._score_scatter.pdf` | nur Hard-Check: gewichtet gegen hart, je Gitterpunkt |

@@ -1086,7 +1086,9 @@ class MultitoneFlatTopOptimizer:
 
         resumed = scan_checkpoint.load_resumable(
             checkpoint_path, win_input_range, width_range, n_win_input, n_width,
-            self.N_x, self.N_y, extra_match=dict(amps=amps, alpha=alpha), verbose=verbose,
+            self.N_x, self.N_y, extra_match=dict(amps=amps, alpha=alpha),
+            airy_scale_factor=self.airy_scale_factor,
+            optics_match=dict(n_grid=self.n_grid), verbose=verbose,
         )
         if resumed is not None:
             uniformity_grid = np.asarray(resumed['uniformity_grid'], dtype=float).copy()
@@ -1114,6 +1116,11 @@ class MultitoneFlatTopOptimizer:
                 N_x=self.N_x, N_y=self.N_y, f1=self.f1, f2=self.f2, fLO=self.fLO,
                 lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
                 profile=self.profile,
+                airy_scale_factor=self.airy_scale_factor,
+                # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
+                # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
+                # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
+                n_grid=self.n_grid,
             )
 
         if verbose:
@@ -1200,6 +1207,11 @@ class MultitoneFlatTopOptimizer:
             f1=self.f1, f2=self.f2, fLO=self.fLO,
             lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
             profile=self.profile,
+            airy_scale_factor=self.airy_scale_factor,
+            # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
+            # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
+            # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
+            n_grid=self.n_grid,
         )
         return res
 
@@ -1376,7 +1388,9 @@ class MultitoneFlatTopOptimizer:
 
         resumed = scan_checkpoint.load_resumable(
             checkpoint_path, win_input_range, width_range, n_win_input, n_width,
-            self.N_x, self.N_y, extra_match=dict(alpha=alpha, r_bounds=r_bounds), verbose=verbose,
+            self.N_x, self.N_y, extra_match=dict(alpha=alpha, r_bounds=r_bounds),
+            airy_scale_factor=self.airy_scale_factor,
+            optics_match=dict(n_grid=self.n_grid), verbose=verbose,
         )
         if resumed is not None:
             uniformity_grid = np.asarray(resumed['uniformity_grid'], dtype=float).copy()
@@ -1404,6 +1418,11 @@ class MultitoneFlatTopOptimizer:
                 N_x=self.N_x, N_y=self.N_y, f1=self.f1, f2=self.f2, fLO=self.fLO,
                 lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
                 profile=self.profile,
+                airy_scale_factor=self.airy_scale_factor,
+                # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
+                # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
+                # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
+                n_grid=self.n_grid,
             )
 
         total = n_width * n_win_input
@@ -1575,6 +1594,11 @@ class MultitoneFlatTopOptimizer:
             f1=self.f1, f2=self.f2, fLO=self.fLO,
             lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
             profile=self.profile,
+            airy_scale_factor=self.airy_scale_factor,
+            # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
+            # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
+            # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
+            n_grid=self.n_grid,
         )
         return res
 

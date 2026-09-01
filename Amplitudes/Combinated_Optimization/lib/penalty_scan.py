@@ -61,7 +61,8 @@ def make_optimizer(**params):
 
 
 def peek_checkpoint(checkpoint_path, win_input_range, width_range, n_points,
-                    N_x, N_y, alpha, r_bounds, combo_lambda):
+                    N_x, N_y, alpha, r_bounds, combo_lambda,
+                    airy_scale_factor=None, optics_match=None):
     """Schaut VOR dem Scan nach, ob unter checkpoint_path ein passender
     Zwischenstand liegt.
 
@@ -74,6 +75,8 @@ def peek_checkpoint(checkpoint_path, win_input_range, width_range, n_points,
         checkpoint_path, win_input_range, width_range, n_points, n_points, N_x, N_y,
         extra_match=dict(alpha=alpha, r_bounds=r_bounds, combo_lambda=combo_lambda,
                          joint_optimization=True),
+        airy_scale_factor=airy_scale_factor,
+        optics_match=optics_match,
         verbose=False,
     )
     if resumed is None:
@@ -199,7 +202,12 @@ def run_penalty_scan(opt, win_input_range, width_range,
                        joint_optimization=True)
     resumed = scan_checkpoint.load_resumable(
         checkpoint_path, win_input_range, width_range, n_win_input, n_width,
-        opt.N_x, opt.N_y, extra_match=extra_match, verbose=verbose,
+        opt.N_x, opt.N_y, extra_match=extra_match,
+        airy_scale_factor=opt.airy_scale_factor,
+        optics_match=dict(n_grid=opt.n_grid, weighted_n_grid=opt.weighted_n_grid,
+                          atom_offset_x=getattr(opt, 'atom_offset_x', 0.0),
+                          atom_offset_y=getattr(opt, 'atom_offset_y', 0.0)),
+        verbose=verbose,
     )
 
     if resumed is not None:
@@ -239,8 +247,19 @@ def run_penalty_scan(opt, win_input_range, width_range,
             N_x=opt.N_x, N_y=opt.N_y, f1=opt.f1, f2=opt.f2, fLO=opt.fLO,
             lambda_opt=opt.lambda_opt, theta_max=opt.theta_max, f_band=opt.f_band,
             profile=opt.profile,
+            # Der Airy-Skalenfaktor bestimmt die physikalische Spotgroesse
+            # (first_zero_radius = airy_scale_factor * win) und damit JEDE
+            # Metrik dieses Scans. Er gehoert deshalb in den Datensatz -
+            # aeltere Dateien haben ihn nicht, dort gilt der Default 1.19.
+            airy_scale_factor=getattr(opt, "airy_scale_factor", None),
             atom_mass=opt.atom_mass, atom_temperature=opt.atom_temperature,
             trap_freq_r=opt.trap_freq_r,
+            # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
+            # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
+            # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
+            n_grid=opt.n_grid, weighted_n_grid=opt.weighted_n_grid,
+            atom_offset_x=getattr(opt, "atom_offset_x", 0.0),
+            atom_offset_y=getattr(opt, "atom_offset_y", 0.0),
         )
 
     def _is_done(i, j):

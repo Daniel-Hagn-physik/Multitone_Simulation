@@ -106,6 +106,7 @@ from PyQt5.QtWidgets import (
     QApplication, QDialog, QFormLayout, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QSpinBox, QDoubleSpinBox, QPushButton, QGroupBox, QMessageBox,
     QProgressDialog, QFileDialog, QComboBox, QCheckBox, QLineEdit,
+    QScrollArea, QWidget,
 )
 from PyQt5.QtCore import Qt
 
@@ -117,6 +118,8 @@ import weighted_amp_scan_methods  # nur Import noetig - patcht scan_win_width_we
 from weighted_multitone_amplitude_dependence_plots import WeightedFixedScanPlotter, win_input_to_win
 import perf_log
 import scan_checkpoint
+import airy_scale
+import resume_picker
 
 # Feste Optik-Parameter fuer die Umrechnung win_input (vor der Linse) <->
 # win_eff (nach der Linse/am Fokus) in diesem Dialog - identisch zum
@@ -170,7 +173,27 @@ class StartParametersDialog(QDialog):
         self.amp_x_boxes = []
         self.amp_y_boxes = []
 
-        main_layout = QVBoxLayout(self)
+        # Der Parameterbereich liegt in einer QScrollArea, die Buttons
+        # bewusst DARUNTER und ausserhalb - so bleiben "Start"/"Cancel"
+        # immer sichtbar, egal wie viele Gruppen der Dialog enthaelt
+        # (gleiche Loesung wie in den Combinated_Optimization-Dialogen).
+        outer_layout = QVBoxLayout(self)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_content = QWidget()
+        main_layout = QVBoxLayout(scroll_content)
+        scroll_area.setWidget(scroll_content)
+        outer_layout.addWidget(scroll_area)
+
+        # -- Fortsetzen: unfertigen Datensatz auswaehlen --
+        # Steht bewusst GANZ OBEN: die Entscheidung "neu oder fortsetzen"
+        # kommt vor allen Parametern, denn beim Fortsetzen kommen die
+        # Parameter aus der Datei und die Felder darunter werden gesperrt.
+        self.resume_group = resume_picker.ResumePickerGroup(
+            DEFAULT_RESULTS_DIR, kind=resume_picker.KIND_WEIGHTED_FIXED,
+            on_change=self._on_resume_changed)
+        main_layout.addWidget(self.resume_group)
+
 
         # -- fixed optical parameters (display only) --
         info_label = QLabel(
@@ -382,6 +405,19 @@ class StartParametersDialog(QDialog):
         # stuendlicher Checkpoint-Pfad (scan_checkpoint.py) als auch als
         # Endergebnis-Pfad - kein separater Speichern-Dialog mehr am Ende. --
         self._save_path_auto = True
+        # -- Strahlprofil (Airy-Skalenfaktor) --
+        # Legt fest, was die Zahl "waist" physikalisch bedeutet:
+        #     first_zero_radius = airy_scale_factor * waist
+        # Voreingestellt ist 1.4830 (1/e^2-Radius der Airy-Hauptkeule = waist,
+        # also dieselbe Bedeutung wie bei einem Gauss-Strahl). Der historische
+        # Wert 1.19 bleibt waehlbar. Datensaetze mit verschiedenen Faktoren
+        # sind NICHT vergleichbar - der Faktor wandert deshalb in die .pkl und
+        # (wenn er nicht 1.19 ist) in den vorgeschlagenen Dateinamen.
+        self.airy_group = airy_scale.AiryScaleGroup()
+        main_layout.addWidget(self.airy_group)
+        self.airy_group.factor_spin.valueChanged.connect(
+            lambda _v: self._update_default_save_path())
+
         save_group = QGroupBox("Save Location (Zwischenspeicherung + Endergebnis)")
         save_layout = QHBoxLayout()
         self.save_path_edit = QLineEdit()
@@ -418,7 +454,13 @@ class StartParametersDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(ok_btn)
         btn_layout.addWidget(cancel_btn)
-        main_layout.addLayout(btn_layout)
+        outer_layout.addLayout(btn_layout)
+
+        # Anfangsgroesse an die tatsaechlich verfuegbare Bildschirmhoehe
+        # kappen - bei kleineren Bildschirmen greift der Scrollbalken.
+        screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry().height() if screen is not None else 900
+        self.resize(max(self.width(), 660), min(820, int(avail * 0.85)))
 
     @staticmethod
     def _make_spin(value, minimum, maximum, step):
@@ -446,6 +488,9 @@ class StartParametersDialog(QDialog):
         n_y = self.ny_spin.value()
         profile_tag = "Airy" if MultitoneFlatTopOptimizer.DEFAULTS['profile'] == "airy" else "Gauss"
         name = f"scan_data_weighted_N{n_x}x{n_y}_{n}x{n}pts_{profile_tag}"
+        # Skalenfaktor nur dann im Namen, wenn er NICHT der historische
+        # 1.19 ist - so bleiben die bisherigen Dateinamen unveraendert.
+        name += airy_scale.scale_tag(self.airy_group.value())
         frac_x = self.atom_offset_frac_x.value()
         frac_y = self.atom_offset_frac_y.value()
         if frac_x != 0.0:
@@ -559,6 +604,31 @@ class StartParametersDialog(QDialog):
             "0 = atom exactly on the site (previous/default behavior)."
         )
 
+    def _on_resume_changed(self, entry):
+        """Auswahl im Fortsetzen-Feld hat sich geaendert.
+
+        Wird schon beim Aufbau der Gruppe einmal aufgerufen, also bevor die
+        uebrigen Felder ueberhaupt existieren - deshalb die hasattr-Pruefung.
+        """
+        if not hasattr(self, "save_path_edit"):
+            return
+        if entry is None:
+            resume_picker.set_inputs_locked(self, False, self.resume_group)
+            self._save_path_auto = True
+            self._update_default_save_path()
+            return
+        # Werte aus der Datei anzeigen, dann sperren. Massgeblich ist
+        # ohnehin resume_group.apply() in get_values().
+        resume_picker.apply_display(self, entry["results"])
+        resume_picker.set_inputs_locked(self, True, self.resume_group)
+        self._save_path_auto = False
+        self.save_path_edit.setText(entry["path"])
+
+    def get_values(self):
+        """Wie _get_values_raw(), aber beim Fortsetzen aus dem gewaehlten
+        Datensatz ueberschrieben - siehe resume_picker.apply_to_params()."""
+        return self.resume_group.apply(self._get_values_raw())
+
     def _on_accept(self):
         if self.win_input_min.value() >= self.win_input_max.value():
             QMessageBox.warning(self, "Invalid Range",
@@ -574,7 +644,7 @@ class StartParametersDialog(QDialog):
             return
         self.accept()
 
-    def get_values(self):
+    def _get_values_raw(self):
         """Returns all entered parameters as a dict (SI units: meters, Hz, K).
 
         win_input_range wird IMMER in win_input (vor der Linse, Meter)
@@ -622,6 +692,7 @@ class StartParametersDialog(QDialog):
             # main() nutzt seit 2026-08-26 IMMER die µm-Achse, unabhaengig
             # vom hier gewaehlten Eingabemodus (siehe Docstring).
             waist_mode=self._current_waist_mode,
+            airy_scale_factor=self.airy_group.value(),
             save_path=self.save_path_edit.text().strip(),
         )
 
@@ -676,6 +747,7 @@ def main():
         weighted_n_grid=params["weighted_n_grid"],
         atom_offset_x=params["atom_offset_x"],
         atom_offset_y=params["atom_offset_y"],
+        airy_scale_factor=params["airy_scale_factor"],
     )
 
     save_path = params["save_path"]
@@ -689,7 +761,8 @@ def main():
         resumable = scan_checkpoint.load_resumable(
             save_path, params["win_input_range"], params["width_range"],
             params["n_points"], params["n_points"], params["N_x"], params["N_y"],
-            extra_match=dict(amps=amps, alpha=params["alpha"]), verbose=False,
+            extra_match=dict(amps=amps, alpha=params["alpha"]),
+            airy_scale_factor=params["airy_scale_factor"], verbose=False,
         )
         if resumable is not None:
             n_done = scan_checkpoint.count_done(resumable["uniformity_weighted_grid"])

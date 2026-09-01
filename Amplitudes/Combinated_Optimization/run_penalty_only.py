@@ -53,7 +53,7 @@ sys.path.insert(0, str(FilePath(__file__).resolve().parent))
 
 # Alles kommt aus lib - auch der Optimierer, der eigentlich in
 # ../Weighted_Optimization liegt (siehe Hinweis in lib/paths.py).
-from lib import paths, penalty_opt  # noqa: E402
+from lib import paths, combine, penalty_opt  # noqa: E402
 
 
 ROLLE_FEST = "vorgeben"
@@ -168,6 +168,30 @@ class PenaltyOnlyDialog(QDialog):
             setup_form.addRow(name, widget)
         self.profile.currentIndexChanged.connect(lambda _i: self._sync_save_name())
         setup_form.addRow("Profil:", self.profile)
+        self.airy_scale_mode = QComboBox()
+        for _key, label, _wert in combine.AIRY_SCALE_CHOICES:
+            self.airy_scale_mode.addItem(label)
+        self.airy_scale_mode.setToolTip(
+            "Was die Zahl 'waist' physikalisch bedeuten soll - siehe den\n"
+            "gleichnamigen Schalter in run_penalty_scan.py.\n\n"
+            "Fuer einen Vergleich mit einem vorhandenen Scan dieselbe\n"
+            "Parametrisierung waehlen, mit der jener gerechnet wurde (der\n"
+            "Faktor steht in dessen Bericht unter Scan-Parameter).")
+        self.airy_scale_mode.currentIndexChanged.connect(
+            lambda _i: self._sync_airy_mode())
+        setup_form.addRow("Parametrisierung:", self.airy_scale_mode)
+        self.airy_scale_factor = self._spin(1.19, (0.1, 5.0), 6, 0.01)
+        self.airy_scale_factor.setToolTip(
+            "Nur beim Airy-Profil wirksam: first_zero_radius = Faktor * waist.\n"
+            "Setzt die physikalische Spotgroesse und damit jede Metrik.\n\n"
+            "Der bisherige Default 1.19 entspricht keiner gaengigen Konvention;\n"
+            "gleicher 1/e^2-Radius wie ein Gauss waere 1.4830, bester Fit an die\n"
+            "Hauptkeule 1.4499, gleiche FWHM 1.3956.\n\n"
+            "Wichtig: fuer einen Vergleich mit einem vorhandenen Scan denselben\n"
+            "Wert waehlen, mit dem jener gerechnet wurde (steht in dessen Bericht).")
+        setup_form.addRow("airy_scale_factor:", self.airy_scale_factor)
+        self.profile.currentIndexChanged.connect(lambda _i: self._sync_airy_mode())
+        self._sync_airy_mode()
         setup_form.addRow("offset (MHz):", self.offset)
         setup_form.addRow("n_grid:", self.n_grid)
         setup_group.setLayout(setup_form)
@@ -240,6 +264,17 @@ class PenaltyOnlyDialog(QDialog):
         self._sync_save_name()
 
     # ------------------------------------------------------------------
+    def _sync_airy_mode(self):
+        """Feld nur bei Airy UND 'frei eingeben' bedienbar; bei einer
+        benannten Konvention zeigt es deren Wert."""
+        airy = self.profile.currentText() == "airy"
+        _key, _label, wert = combine.AIRY_SCALE_CHOICES[
+            self.airy_scale_mode.currentIndex()]
+        self.airy_scale_mode.setEnabled(airy)
+        if wert is not None:
+            self.airy_scale_factor.setValue(float(wert))
+        self.airy_scale_factor.setEnabled(airy and wert is None)
+
     @staticmethod
     def _spin(value, spanne, stellen, step=None):
         box = QDoubleSpinBox()
@@ -314,6 +349,7 @@ class PenaltyOnlyDialog(QDialog):
         optimizer_kwargs = dict(
             N_x=self.N_x.value(), N_y=self.N_y.value(),
             profile=self.profile.currentText(),
+            airy_scale_factor=self.airy_scale_factor.value(),
             offset=self.offset.value() * 1e6,
             n_grid=self.n_grid.value(),
             weighted_metrics_enabled=True,

@@ -18,7 +18,8 @@ Inhalt:
                    den der eigentliche Optimierer erreichbar ist.
 - combine.py       Die Penalty-Kombination (Normierung, Mittelwert +
                    combo_lambda*|Differenz|, combined_score), die Region-Suche
-                   (groesstes Rechteck) sowie Laden/Speichern/Neuberechnen.
+                   (groesstes Rechteck), der verbotene Bereich (Ueberlappung
+                   der Eck-Spots) sowie Laden/Speichern/Neuberechnen.
 - penalty_scan.py  Die gemeinsame (jointe) Amplituden-Optimierung MIT
                    Penalty-Term: pro Gitterpunkt EINE Nelder-Mead-Optimierung
                    direkt gegen die Kombination aus hart + atom-gewichtet.

@@ -39,6 +39,10 @@ import numpy as np
 
 from . import paths
 
+from weighted_multitone_amplitude_dependence_plots import (  # noqa: E402
+    width_to_um, win_input_to_win,
+)
+
 
 # ======================================================================
 # 1) Die rohe Penalty-Zielfunktion (waehrend der Optimierung)
@@ -60,19 +64,23 @@ def penalty_objective(U_hard, C_hard, U_weighted, C_weighted, alpha, combo_lambd
 # ======================================================================
 # 2) Kombination/Region als Nachbearbeitung ueber das fertige Gitter
 # ======================================================================
-def normalize01(grid):
-    """Min-Max-Normierung ueber alle endlichen Werte des Gitters.
-    NaN bleibt NaN. Konstantes Gitter -> 0."""
-    grid = np.asarray(grid, dtype=float)
-    finite = np.isfinite(grid)
-    if not np.any(finite):
-        return np.full_like(grid, np.nan)
-    lo = np.nanmin(grid[finite])
-    hi = np.nanmax(grid[finite])
-    span = hi - lo
-    if not np.isfinite(span) or span <= 0:
-        return np.where(finite, 0.0, np.nan)
-    return (grid - lo) / span
+# HINWEIS ZUR AENDERUNG (2026-09-01): hier stand frueher normalize01(), eine
+# gitterweite Min-Max-Normierung, und combine_grids() bildete daraus einen
+# NORMIERTEN combined_score. Der ist ersatzlos entfallen. Gruende, alle
+# gemessen und nicht vermutet:
+#
+#   - Der Optimierer hat diese Groesse nie gesehen; er minimiert an jedem
+#     Gitterpunkt das ROHE J (siehe penalty_objective oben).
+#   - Die Normierung haengt am gescannten Fenster: dieselbe Physik ergibt
+#     bei anderem Scan-Bereich andere Zahlen.
+#   - Sie hebt die atom-gewichteten Groessen um das Fuenf- bis Zehnfache an
+#     (ihre rohen Spannen sind 4-7 pp gegen 41 pp bei U_hart) und verschiebt
+#     damit Bestpunkt, Region und Talpfad.
+#
+# `combined_score` heisst weiterhin so (Dateiformat), IST aber jetzt das
+# rohe J. Datensaetze aus der Zeit davor tragen dort noch den normierten
+# Wert; deshalb setzt combine_grids() das Kennzeichen score_is_raw=True,
+# und run_plots.py rechnet beim Laden grundsaetzlich neu.
 
 
 def largest_rectangle(mask):
@@ -112,9 +120,13 @@ def largest_rectangle(mask):
 def combine_grids(U_hard, C_hard, U_weighted, C_weighted,
                   win_input_vals, width_vals,
                   alpha=0.7, combo_lambda=0.75, combo_percentile=25.0):
-    """Normierung -> Penalty-Kombination -> combined_score -> Bestpunkt +
+    """Penalty-Kombination auf den ROHEN Gittern -> Score -> Bestpunkt +
     Region. Gibt das Teil-dict zurueck, das in jedes Ergebnis-dict
-    einfliesst (siehe build_penalty_results()/hard_check.py)."""
+    einfliesst (siehe build_penalty_results()/hard_check.py).
+
+    Identisch zu penalty_objective(), nur ueber ganze Gitter statt ueber
+    einen Punkt - der Score ist also genau die Groesse, die der Scan an
+    jedem Gitterpunkt minimiert hat."""
     U_hard = np.asarray(U_hard, dtype=float)
     C_hard = np.asarray(C_hard, dtype=float)
     U_weighted = np.asarray(U_weighted, dtype=float)
@@ -122,13 +134,8 @@ def combine_grids(U_hard, C_hard, U_weighted, C_weighted,
     win_input_vals = np.asarray(win_input_vals, dtype=float)
     width_vals = np.asarray(width_vals, dtype=float)
 
-    U_hard_norm = normalize01(U_hard)
-    C_hard_norm = normalize01(C_hard)
-    U_weighted_norm = normalize01(U_weighted)
-    C_weighted_norm = normalize01(C_weighted)
-
-    U_kombi = penalty_pair(U_hard_norm, U_weighted_norm, combo_lambda)
-    C_kombi = penalty_pair(C_hard_norm, C_weighted_norm, combo_lambda)
+    U_kombi = penalty_pair(U_hard, U_weighted, combo_lambda)
+    C_kombi = penalty_pair(C_hard, C_weighted, combo_lambda)
     combined_score = alpha * U_kombi + (1.0 - alpha) * C_kombi
 
     finite = np.isfinite(combined_score)
@@ -136,7 +143,8 @@ def combine_grids(U_hard, C_hard, U_weighted, C_weighted,
     best = dict(win_input=None, width=None,
                 uniformity_hart=None, crosstalk_hart=None,
                 uniformity_weighted=None, crosstalk_weighted=None,
-                uniformity_kombi=None, crosstalk_kombi=None, combined_score=None)
+                uniformity_kombi=None, crosstalk_kombi=None, combined_score=None,
+                row=None, col=None, at_edge=False)
     if np.any(finite):
         i, j = np.unravel_index(
             int(np.argmin(np.where(finite, combined_score, np.inf))), combined_score.shape)
@@ -146,6 +154,14 @@ def combine_grids(U_hard, C_hard, U_weighted, C_weighted,
             uniformity_weighted=float(U_weighted[i, j]), crosstalk_weighted=float(C_weighted[i, j]),
             uniformity_kombi=float(U_kombi[i, j]), crosstalk_kombi=float(C_kombi[i, j]),
             combined_score=float(combined_score[i, j]),
+            row=int(i), col=int(j),
+            # Liegt der beste Punkt auf dem Rand des gescannten Fensters,
+            # ist er vermutlich gar kein Optimum, sondern nur der Rand -
+            # beim rohen J ist das der Regelfall (gemessen: 41x41 und
+            # 21x21 landen beide auf width = 0.200 MHz, dem unteren
+            # Fensterrand). Der Plot zeichnet ihn dann als OFFENEN Stern.
+            at_edge=bool(i in (0, combined_score.shape[0] - 1)
+                         or j in (0, combined_score.shape[1] - 1)),
         )
 
     region = dict(win_input_min=None, win_input_max=None, width_min=None, width_max=None,
@@ -171,13 +187,21 @@ def combine_grids(U_hard, C_hard, U_weighted, C_weighted,
             )
 
     return dict(
-        uniformity_hart_norm=U_hard_norm, crosstalk_hart_norm=C_hard_norm,
-        uniformity_weighted_norm=U_weighted_norm, crosstalk_weighted_norm=C_weighted_norm,
         uniformity_kombi=U_kombi, crosstalk_kombi=C_kombi,
-        combined_score=combined_score,
+        combined_score=combined_score, score_is_raw=True,
         best=best, region=region,
         alpha=alpha, combo_lambda=combo_lambda, combo_percentile=combo_percentile,
     )
+
+
+def score_is_raw(results):
+    """Ist der gespeicherte combined_score schon der ROHE J-Wert?
+
+    Datensaetze, die vor dem 2026-09-01 erzeugt wurden, tragen dort den
+    frueheren normierten Score. run_plots.py rechnet deshalb beim Laden
+    grundsaetzlich neu; diese Funktion sagt nur, ob das noetig war.
+    """
+    return bool(results.get('score_is_raw', False))
 
 
 # ======================================================================
@@ -226,6 +250,7 @@ def build_penalty_results(scan, alpha=0.7, combo_lambda=0.75, combo_percentile=2
         f1=scan['f1'], f2=scan['f2'], fLO=scan['fLO'],
         lambda_opt=scan['lambda_opt'], theta_max=scan['theta_max'], f_band=scan['f_band'],
         profile=scan['profile'],
+        airy_scale_factor=scan.get('airy_scale_factor'),
         sigma_atom=scan.get('sigma_atom'),
         atom_mass=scan.get('atom_mass'), atom_temperature=scan.get('atom_temperature'),
         trap_freq_r=scan.get('trap_freq_r'),
@@ -256,6 +281,175 @@ def recombine_from_grids(results, alpha=None, combo_lambda=None, combo_percentil
     )
     results.update(combo)
     return results
+
+
+# ======================================================================
+# Verbotener Bereich: ueberlappende Eck-Spots
+# ======================================================================
+# Die beiden diagonal gegenueberliegenden ECK-Spots des N_x x N_y-Arrays
+# duerfen sich nicht ueberlappen.
+#
+# `width` ist die GESAMTSPANNWEITE des Tonarrays in Frequenz - und zwar
+# dieselbe fuer x und y: multitone_frequencies(N, offset, width) laeuft in
+# BEIDEN Achsen von offset bis offset+width, nur die Zwischenschritte
+# unterscheiden sich (N_x bzw. N_y Toene). Nachgesehen in
+# weighted_multitone_flattop_optimizer._compute_centers_for_width(), nicht
+# angenommen. Raeumlich entspricht das der Kantenlaenge
+#
+#     S(width) = width_to_um(width, ...)                          [µm]
+#
+# Die beiden Ecken liegen damit bei (0, 0) und (S, S), ihr Abstand ist
+#
+#     d = sqrt(S^2 + S^2) = sqrt(2) * S            (Pythagoras)
+#
+# Nicht-Ueberlappung heisst d > k * waist, mit k = 2 (Default): die beiden
+# Spot-Radien beruehren sich dann gerade. S ist linear in width
+# (radius_from_angle geht zwar ueber tan, aber theta liegt bei 1.2e-3 rad -
+# die Abweichung von der Geraden ist 5e-7 relativ, also weit unter jeder
+# Gitterweite). Die Bedingung ist deshalb in der (waist, width)-Ebene
+# exakt eine Ursprungsgerade:
+#
+#     width/MHz > a * waist/µm     mit     a = k / (sqrt(2) * u)
+#
+# u = S(1 MHz) in µm/MHz, aus der Optik des Datensatzes. Fuer f1=75mm,
+# f2=750mm, fLO=52.88mm, theta_max=43mrad, f_band=36MHz ist
+# u = 6.3162 µm/MHz und damit a = 0.22390 MHz/µm bei k = 2.
+#
+# Der verbotene Bereich liegt UNTERHALB dieser Geraden: grosser Waist bei
+# kleiner width - dicke Spots, die eng beieinander sitzen.
+#
+# Zum Faktor k: der Nutzer hat "2 mal waist" vorgegeben, also den
+# gaussaequivalenten Radius w_0 (1/e^2). Bei Airy-Profil ist die
+# Hauptkeule bis zur ersten Nullstelle 1.19*w_0 breit - wer DAS als
+# "den Spot" ansieht, setzt k = 2*1.19 = 2.38. Deshalb ist k frei
+# einstellbar und nirgends fest verdrahtet.
+
+# ----------------------------------------------------------------------
+# Parametrisierung des Airy-Profils
+# ----------------------------------------------------------------------
+# `first_zero_radius = airy_scale_factor * waist`. Der Faktor legt fest, was
+# die Zahl "waist" physikalisch bedeutet - und damit JEDE Metrik eines Scans.
+#
+#   1.19      der historische Default des Optimierers. Entspricht keiner
+#             gaengigen Konvention (nachgerechnet: gleicher 1/e^2-Radius
+#             1.4830, bester Gauss-Fit an die Hauptkeule 1.4499, gleiche
+#             FWHM 1.3956). Bei 1.19 liegt der tatsaechliche 1/e^2-Radius
+#             des Airy-Profils bei 0.8025 * waist.
+#
+#   1.482951  so gewaehlt, dass der 1/e^2-Radius der Airy-HAUPTKEULE genau
+#             auf `waist` liegt - der Waist bedeutet dann bei Airy dasselbe
+#             wie bei einem Gauss-Strahl. Herleitung: (2*J1(u)/u)^2 faellt
+#             bei u = 2.583838989865 auf exp(-2), die erste Nullstelle liegt
+#             bei u = 3.831705970207512, also Faktor = 3.8317.../2.5838... .
+#             Gegengerechnet: mit diesem Wert ist der 1/e^2-Radius
+#             1.000000168 * waist.
+# Seit 2026-09-01 stehen diese Definitionen EINMAL im Projekt, naemlich in
+# `Weighted_Optimization/airy_scale.py` (identische Kopie in
+# `Hard_Optimization/`) - von dort benutzen sie auch die vier
+# Scan-Startdialoge und die Lens-GUIs. Hier werden sie nur noch
+# re-exportiert, damit bestehender Code (`combine.AIRY_SCALE_CHOICES`,
+# `combine.airy_e2_radius_factor`, ...) unveraendert weiterlaeuft.
+# Die Zahlenwerte sind dieselben wie vorher.
+from airy_scale import (                                    # noqa: E402
+    AIRY_SCALE_LEGACY,
+    AIRY_SCALE_GAUSS_E2,
+    AIRY_SCALE_CHOICES,
+    AIRY_E2_OVER_FIRST_ZERO,
+    AIRY_SCALE_DIALOG_DEFAULT,
+    airy_e2_radius_factor,
+    scale_tag as airy_scale_tag,
+    describe as airy_scale_describe,
+)
+
+
+FORBIDDEN_FACTOR_DEFAULT = 2.0
+
+# Fallbacks, falls ein aelterer Datensatz theta_max/f_band nicht
+# mitgespeichert hat - dieselben Werte wie die Optimierer-Defaults.
+THETA_MAX_DEFAULT = 43e-3
+F_BAND_DEFAULT = 36e6
+
+
+def um_per_MHz(results):
+    """Wieviele µm an der Trap-Ebene entspricht 1 MHz width?
+
+    Benutzt width_to_um() des Projekts, nicht eine nachgebaute Formel.
+    """
+    return float(width_to_um(
+        1e6, results['f1'], results['f2'], results['fLO'],
+        results.get('theta_max') or THETA_MAX_DEFAULT,
+        results.get('f_band') or F_BAND_DEFAULT))
+
+
+def waist_um_vals(results):
+    """Effektiver Waist (µm nach der Linse) je win_input-Spalte."""
+    return np.array([win_input_to_win(w, results['f1'], results['f2'],
+                                      results['lambda_opt'], results['fLO'])
+                     for w in np.asarray(results['win_input_vals'], dtype=float)]) * 1e6
+
+
+def forbidden_boundary(results, factor=FORBIDDEN_FACTOR_DEFAULT):
+    """Die Grenzgerade des verbotenen Bereichs, oder None.
+
+    None nur, wenn es gar keine zwei Eck-Spots gibt (N_x < 2 UND N_y < 2)
+    - dann kann nichts ueberlappen.
+    """
+    n_achsen = int(results.get('N_x', 1) > 1) + int(results.get('N_y', 1) > 1)
+    if n_achsen == 0:
+        return None
+    u = um_per_MHz(results)
+    diag = np.sqrt(float(n_achsen))          # sqrt(2) beim ueblichen 2D-Array
+    slope = float(factor) / (diag * u)
+    return dict(factor=float(factor), um_per_MHz=u, n_axes=n_achsen,
+                diag_factor=float(diag), slope=slope)
+
+
+def forbidden_mask(results, factor=FORBIDDEN_FACTOR_DEFAULT):
+    """Boolesche Maske (Zeilen=width, Spalten=win_input): True, wo sich die
+    Eck-Spots ueberlappen wuerden. None, wenn es keine Grenze gibt."""
+    grenze = forbidden_boundary(results, factor)
+    if grenze is None:
+        return None
+    waist = waist_um_vals(results)                              # µm
+    width = np.asarray(results['width_vals'], dtype=float) * 1e-6   # MHz
+    W, WD = np.meshgrid(waist, width)
+    # Erlaubt ist d > k*waist, also width > slope*waist. Gleichheit heisst
+    # "beruehren sich gerade" und zaehlt damit als verboten.
+    return WD <= grenze['slope'] * W
+
+
+GRID_KEYS_FORBIDDEN = ("uniformity_grid", "crosstalk_grid",
+                       "uniformity_weighted_grid", "eta_weighted_grid",
+                       "r_x_grid", "r_y_grid",
+                       "r_x_grid_hart", "r_y_grid_hart",
+                       "r_x_grid_weighted", "r_y_grid_weighted")
+
+
+def mask_forbidden_grids(results, factor=FORBIDDEN_FACTOR_DEFAULT):
+    """Kopie des Datensatzes, in der alle Gitter im verbotenen Bereich auf
+    NaN stehen. Gibt (results, maske) zurueck; maske ist None, wenn es
+    keine Grenze gibt.
+
+    Score, Region und Bestpunkt werden hier NICHT neu gerechnet - das
+    macht der Aufrufer mit recombine_from_grids() bzw.
+    hard_check.recheck_from_grids(), weil nur er weiss, welche Art
+    Datensatz vorliegt. Wichtig dabei: die Normierung in combine_grids()
+    ist gitterweit, das Ausschliessen aendert den combined_score also
+    UEBERALL, nicht nur im verbotenen Bereich.
+    """
+    maske = forbidden_mask(results, factor)
+    if maske is None:
+        return dict(results), None
+    neu = dict(results)
+    for key in GRID_KEYS_FORBIDDEN:
+        if key in neu and neu[key] is not None:
+            grid = np.array(neu[key], dtype=float)
+            if grid.shape == maske.shape:
+                grid[maske] = np.nan
+                neu[key] = grid
+    neu['forbidden_factor'] = float(factor)
+    neu['forbidden_excluded'] = True
+    return neu, maske
 
 
 # ======================================================================

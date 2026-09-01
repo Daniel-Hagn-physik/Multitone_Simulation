@@ -38,6 +38,7 @@ Die anderen beiden Hauptskripte:
     run_hard_check.py    -  vorhandenen GEWICHTETEN Scan hart nachrechnen
 """
 
+import math
 import sys
 from pathlib import Path as FilePath
 
@@ -134,15 +135,43 @@ class PlotsDialog(QDialog):
         display_layout.addRow("Waist-Achse:", self.win_axis)
         self.legend_fontsize = self._make_spin(9.0, 4.0, 24.0, 1.0, decimals=0)
         display_layout.addRow("Schriftgroesse Legenden:", self.legend_fontsize)
-        self.draw_best_point = QCheckBox("Besten Punkt als Stern einzeichnen")
+        self.draw_best_point = QCheckBox("Punkt als Stern einzeichnen")
         self.draw_best_point.setChecked(True)
+        self.draw_best_point.toggled.connect(self._on_draw_best_point_toggled)
         self.draw_best_point.setToolTip(
-            "Markiert in den Karten den Gitterpunkt mit dem kleinsten Score als roten\n"
-            "Stern. Seine Zahlen stehen ohnehin im Bericht - ohne Haken bleiben die\n"
-            "Heatmaps voellig frei.\n\n"
+            "Markiert einen Punkt in den Karten als roten Stern. WELCHEN, bestimmt\n"
+            "das Dropdown darunter - der beste Punkt nach einer Groesse, oder ein\n"
+            "selbst vorgegebener. Ohne Haken bleiben die Heatmaps voellig frei.\n\n"
             "Das groesste Rechteck (\"Region\") wird nicht mehr eingezeichnet; seine\n"
             "Grenzen stehen weiterhin im Bericht.")
         display_layout.addRow(self.draw_best_point)
+        self.best_point_follow = QComboBox()
+        self.best_point_follow.setToolTip(
+            "Nach welcher Groesse der Stern gesetzt wird.\n\n"
+            "\"wie im Datensatz gespeichert\" ist der Punkt, den auch der Bericht\n"
+            "unter \"Bester Einzelpunkt\" nennt - Stern und Bericht zeigen dann\n"
+            "ohne Zutun dasselbe.\n\n"
+            "Waehlt man etwas anderes, bekommt der Bericht einen eigenen Abschnitt\n"
+            "dazu. Vorsicht beim rohen J: dessen Minimum liegt in beiden\n"
+            "vorhandenen Datensaetzen auf width = 0.200 MHz, also auf dem unteren\n"
+            "Rand des Scan-Fensters. Solche Punkte werden als OFFENER Stern\n"
+            "gezeichnet - sie sind kein Optimum, sondern nur das Ende des Scans.\n\n"
+            "Die beiden letzten Eintraege sind etwas anderes: dort gibst DU eine\n"
+            "Koordinate vor, die zweite kommt aus der Talpfad-Geraden. Der Punkt\n"
+            "liegt dann exakt auf der Geraden - auch zwischen den Gitterpunkten.")
+        self.best_point_follow.currentIndexChanged.connect(
+            lambda _i: self._sync_manual_point())
+        display_layout.addRow("Punkt:", self.best_point_follow)
+
+        self.best_point_value = self._make_spin(1.0, 0.0001, 1000.0, 0.01, decimals=4)
+        self.best_point_value.setToolTip(
+            "Der selbst vorgegebene Wert - Waist in µm oder width in MHz, je nach\n"
+            "Auswahl darueber. Die jeweils andere Koordinate wird aus der\n"
+            "Talpfad-Geraden berechnet.\n\n"
+            "Liegt der Punkt ausserhalb des gescannten Fensters, wird er trotzdem\n"
+            "gezeichnet - der Bericht sagt dann, dass es dort keine Daten gibt.")
+        self.best_point_value_label = QLabel("Vorgabe:")
+        display_layout.addRow(self.best_point_value_label, self.best_point_value)
         self.fit_line_on_maps = QCheckBox(
             "Gerade auch in den Metrik-Vergleich einzeichnen (2x2-Karten)")
         self.fit_line_on_maps.setToolTip(
@@ -156,6 +185,22 @@ class PlotsDialog(QDialog):
             "Ohne brauchbare Gerade bleiben die Karten unveraendert (Hinweis auf der\n"
             "Konsole).")
         display_layout.addRow(self.fit_line_on_maps)
+        self.amplitude_maps = QCheckBox(
+            "Metrik-Vergleich zusaetzlich mit Amplituden (6 Karten, eigene PDF)")
+        self.amplitude_maps.setToolTip(
+            "Schreibt neben ..._metric_comparison.pdf eine zweite Datei\n"
+            "..._metric_comparison_amp.pdf: dieselben vier Metrik-Karten, plus\n"
+            "r_x und r_y - also die Amplituden, bei denen die Metriken darueber\n"
+            "ausgewertet wurden. Stern und Gerade werden in allen sechs Karten\n"
+            "genauso gezeichnet wie in der 2x2-Fassung, die unveraendert\n"
+            "erhalten bleibt.\n\n"
+            "r_x und r_y teilen sich eine logarithmische Farbskala (Verhaelt-\n"
+            "nisse, und die Verteilung hat einen langen Schwanz). Punkte, deren\n"
+            "Amplitude auf einer r_bounds-Schranke klemmt, sind grau: dort steht\n"
+            "kein freies Optimum. Ihr Anteil erscheint auf der Konsole.\n\n"
+            "NICHT zu verwechseln mit dem Haken darunter: der erzeugt die\n"
+            "PNG-Uebersicht und die Schnitte des AmplitudeScanPlotter.")
+        display_layout.addRow(self.amplitude_maps)
         self.plot_amplitudes = QCheckBox("Amplituden-Uebersicht und Schnitte mitzeichnen")
         self.plot_amplitudes.setChecked(True)
         self.plot_amplitudes.setToolTip(
@@ -210,20 +255,62 @@ class PlotsDialog(QDialog):
         self.valley_follow.setToolTip(
             "Welcher Groesse der Talpfad folgt - und damit auch, worauf die Gerade\n"
             "gefittet wird.\n\n"
-            "Die beiden Penalty-Eintraege unterscheiden sich, und der Unterschied ist\n"
-            "nicht klein:\n\n"
-            "  NORMIERT (combined_score): jedes der vier Gitter wird vorher einzeln\n"
-            "  min-max ueber das Scan-Fenster auf 0..1 gezogen. Das macht die vier\n"
-            "  vergleichbar, hebt aber die atom-gewichteten Groessen gegenueber der\n"
-            "  harten Uniformity an - deren rohe Spanne ist ein Vielfaches groesser.\n"
-            "  Diese Groesse hat der Optimierer nie gesehen.\n\n"
-            "  ROH (J): genau die Zielfunktion, die der Scan an jedem Gitterpunkt\n"
-            "  ueber (r_x, r_y) minimiert hat. Keine Normierung, haengt damit auch\n"
-            "  nicht am gescannten Fenster.\n\n"
-            "Die Steigung der Geraden kann sich zwischen beiden deutlich\n"
-            "unterscheiden. Welche gemeint war, steht im Bericht und im Dateinamen."
+            "ROH (J) ist die Zielfunktion, die der Scan an jedem Gitterpunkt ueber\n"
+            "(r_x, r_y) minimiert hat - und zugleich der Score von Region und\n"
+            "Bestpunkt. Keine Normierung, haengt damit auch nicht am gescannten\n"
+            "Fenster.\n\n"
+            "Welche Groesse gemeint war, steht im Bericht und im Dateinamen."
         )
         valley_form.addRow("Groesse fuer Talpfad/Gerade:", self.valley_follow)
+
+        self.valley_select = QComboBox()
+        for _key, label in report.VALLEY_SELECT_CHOICES:
+            self.valley_select.addItem(label)
+        self.valley_select.setToolTip(
+            "WIE der Talpunkt je Spalte gewaehlt wird - der Schalter mit dem\n"
+            "groessten Einfluss auf die Steigung.\n\n"
+            "  Globales Minimum: der kleinste Wert der Spalte. Einfach, aber beim\n"
+            "  rohen J unbrauchbar - dessen globales Minimum liegt am Rand des\n"
+            "  Scan-Fensters bzw. direkt an der Grenze des verbotenen Bereichs.\n"
+            "  (Gemessen: nach Ausschluss des verbotenen Bereichs hat die Gerade\n"
+            "  die Steigung 0.2241 - die Grenze selbst hat 0.2239.)\n\n"
+            "  Lokales Minimum nahe einer Leitgeraden: pro Spalte das lokale\n"
+            "  Minimum, das der Leitgeraden am naechsten liegt. Lokal heisst: beide\n"
+            "  Nachbarn vorhanden und groesser - Punkte am Scan-Rand und Punkte, die\n"
+            "  an den ausgeschlossenen verbotenen Bereich grenzen, fallen damit von\n"
+            "  selbst heraus.\n\n"
+            "Die Leitgerade waehlt nur AUS, sie verschiebt nichts; die Punkte sind\n"
+            "echte lokale Minima. Welcher Zweig verfolgt wird, entscheidet aber die\n"
+            "Leitgroesse - das steht so auch im Bericht.")
+        self.valley_select.currentIndexChanged.connect(
+            lambda _i: self._sync_guide_state())
+        valley_form.addRow("Talpunkt-Auswahl:", self.valley_select)
+
+        self.valley_guide_follow = QComboBox()
+        for _key, label in report.FOLLOW_CHOICES:
+            self.valley_guide_follow.addItem(label)
+        vorgabe = [k for k, _l in report.FOLLOW_CHOICES].index(report.GUIDE_FOLLOW_DEFAULT)
+        self.valley_guide_follow.setCurrentIndex(vorgabe)
+        self.valley_guide_follow.setToolTip(
+            "Welche Groesse die Leitgerade liefert. Voreingestellt ist die\n"
+            "atom-gewichtete Uniformity: ihr Talpfad ist der stabilste im Projekt\n"
+            "(R² = 0.995) und liefert die Steigung, an der sich der Fit im rohen J\n"
+            "orientieren soll.\n\n"
+            "Die Leitgerade wird immer mit dem GLOBALEN Minimum bestimmt - sonst\n"
+            "braeuchte sie selbst wieder eine Leitgerade.")
+        valley_form.addRow("Leitgroesse:", self.valley_guide_follow)
+
+        self.valley_guide_halfwidth = self._make_spin(
+            report.GUIDE_HALFWIDTH_DEFAULT, 0.001, 1.0, 0.005, decimals=3)
+        self.valley_guide_halfwidth.setToolTip(
+            "Halbe Breite des Korridors um die Leitgerade, in MHz. Lokale Minima\n"
+            "weiter weg werden nicht in Betracht gezogen.\n\n"
+            "Am 41x41-Datensatz aendert sich das Ergebnis zwischen 0.010 und 0.100\n"
+            "MHz ueberhaupt nicht (a = 0.28316) - diese Unempfindlichkeit ist das\n"
+            "eigentliche Argument fuer das Verfahren. Beim groberen 21x21-Gitter\n"
+            "reagiert es dagegen merklich; dort lohnt es, zwei Werte zu vergleichen.")
+        valley_form.addRow("Korridor um die Leitgerade (+- MHz):",
+                           self.valley_guide_halfwidth)
         self.valley_axis = QComboBox()
         for _key, label in report.VALLEY_AXIS_CHOICES:
             self.valley_axis.addItem(label)
@@ -269,7 +356,7 @@ class PlotsDialog(QDialog):
                 "crosstalk_weighted": "Crosstalk, atom-gewichtet",
                 "uniformity_hard": "Uniformity, hart",
                 "crosstalk_hard": "Crosstalk, hart",
-                "combined": "combined score (Penalty)",
+                "penalty_raw": "Penalty ROH (J der Optimierung, = Score)",
                 "r_x": "r_x (Amplituden-Verhaeltnis x)",
                 "r_y": "r_y (Amplituden-Verhaeltnis y)",
             }[key]
@@ -287,8 +374,105 @@ class PlotsDialog(QDialog):
         traces_hint.setStyleSheet("color: gray;")
         valley_layout.addWidget(traces_hint)
 
+        self.valley_limit = QCheckBox(
+            "Suchbereich einschraenken (sagen, wo der Talpfad gesucht wird)")
+        self.valley_limit.setToolTip(
+            "Ohne Haken wird ueber das ganze Scan-Fenster gesucht.\n\n"
+            "Mit Haken nur innerhalb der vier Grenzen darunter - gedacht fuer\n"
+            "Datensaetze mit MEHREREN Talzweigen, wo man dem Fit sagen muss,\n"
+            "welcher gemeint ist.\n\n"
+            "Minima, die am Rand des eingestellten Bereichs liegen, zaehlen wie\n"
+            "Minima am Rand des Scan-Fensters und fallen aus dem Fit heraus -\n"
+            "sonst wuerde die Einschraenkung selbst kuenstliche Talpunkte\n"
+            "erzeugen.\n\n"
+            "Der Bereich gilt AUCH fuer die Leitgerade des gefuehrten Modus.")
+        self.valley_limit.toggled.connect(lambda _b: self._sync_valley_limit())
+        valley_layout.addWidget(self.valley_limit)
+
+        limit_form = QFormLayout()
+        self.waist_von = self._make_spin(0.0, 0.0, 1000.0, 0.05, decimals=4)
+        self.waist_bis = self._make_spin(0.0, 0.0, 1000.0, 0.05, decimals=4)
+        self.width_von = self._make_spin(0.0, 0.0, 1000.0, 0.01, decimals=4)
+        self.width_bis = self._make_spin(0.0, 0.0, 1000.0, 0.01, decimals=4)
+        for w in (self.waist_von, self.waist_bis):
+            w.setToolTip("Grenzen in µm (effektiver Waist nach der Linse).")
+        for w in (self.width_von, self.width_bis):
+            w.setToolTip("Grenzen in MHz.")
+        waist_zeile = QHBoxLayout()
+        waist_zeile.addWidget(self.waist_von)
+        waist_zeile.addWidget(QLabel("bis"))
+        waist_zeile.addWidget(self.waist_bis)
+        limit_form.addRow("Waist von (µm):", waist_zeile)
+        width_zeile = QHBoxLayout()
+        width_zeile.addWidget(self.width_von)
+        width_zeile.addWidget(QLabel("bis"))
+        width_zeile.addWidget(self.width_bis)
+        limit_form.addRow("width von (MHz):", width_zeile)
+        valley_layout.addLayout(limit_form)
+
+        self.valley_limit_info = QLabel("")
+        self.valley_limit_info.setWordWrap(True)
+        self.valley_limit_info.setStyleSheet("color: gray;")
+        valley_layout.addWidget(self.valley_limit_info)
+
         valley_group.setLayout(valley_layout)
         main_layout.addWidget(valley_group)
+
+        # -- Verbotener Bereich --
+        forbidden_group = QGroupBox("Verbotener Bereich (Ueberlappung der Eck-Spots)")
+        forbidden_layout = QVBoxLayout()
+        forbidden_info = QLabel(
+            "Die beiden diagonal gegenueberliegenden Eck-Spots duerfen sich nicht\n"
+            "ueberlappen. width ist die Gesamtspannweite des Tonarrays, raeumlich also\n"
+            "eine Kantenlaenge S; der Eckabstand ist sqrt(2)*S. Die Bedingung\n"
+            "sqrt(2)*S > k*waist ist in der (waist, width)-Ebene eine Ursprungsgerade;\n"
+            "darunter liegt der verbotene Bereich (dicke Spots, eng beieinander)."
+        )
+        forbidden_info.setStyleSheet("font-style: italic;")
+        forbidden_layout.addWidget(forbidden_info)
+
+        self.forbidden_draw = QCheckBox("Verbotenen Bereich in die Karten einzeichnen")
+        self.forbidden_draw.setToolTip(
+            "Grenzgerade plus schraffierte Flaeche darunter, in allen Karten\n"
+            "(Metrik-Vergleich, Region, Talschnitt, beim Hard-Check auch die\n"
+            "Uebereinstimmungs-Karte). Auf der mm-Achse ist die Grenze gekruemmt,\n"
+            "weil win_input und effektiver Waist reziprok zusammenhaengen.\n\n"
+            "Aendert keine einzige Zahl - dafuer ist der Haken darunter da.")
+        self.forbidden_draw.toggled.connect(self._sync_forbidden_state)
+        forbidden_layout.addWidget(self.forbidden_draw)
+
+        self.forbidden_exclude = QCheckBox(
+            "Punkte im verbotenen Bereich aus der Auswertung ausschliessen")
+        self.forbidden_exclude.setToolTip(
+            "Setzt alle Gitter im verbotenen Bereich auf NaN und rechnet Score,\n"
+            "Region und Bestpunkt daraus neu. Talpfad und Geradenfit sehen diese\n"
+            "Punkte dann nicht mehr.\n\n"
+            "Achtung: die Min-Max-Normierung laeuft ueber das ganze Gitter - der\n"
+            "Score ist das rohe J und punktweise definiert - er aendert sich durch\n"
+            "den Ausschluss nur im verbotenen Bereich, nicht anderswo.\n\n"
+            "Der Original-Datensatz auf der Platte wird nicht angefasst.")
+        self.forbidden_exclude.toggled.connect(self._sync_forbidden_state)
+        forbidden_layout.addWidget(self.forbidden_exclude)
+
+        forbidden_form = QFormLayout()
+        self.forbidden_factor = self._make_spin(
+            combine.FORBIDDEN_FACTOR_DEFAULT, 0.1, 20.0, 0.1, decimals=3)
+        self.forbidden_factor.setToolTip(
+            "k in der Bedingung Abstand > k * waist.\n\n"
+            "k = 2: die gaussaequivalenten Radien (1/e^2) beruehren sich gerade.\n"
+            "k = 2.38 = 2*1.19: dasselbe fuer die Airy-Hauptkeule bis zur ersten\n"
+            "Nullstelle - das ist der Radius, den man optisch als \"den Spot\" sieht.")
+        self.forbidden_factor.valueChanged.connect(self._sync_forbidden_info)
+        forbidden_form.addRow("Faktor k (Abstand > k * waist):", self.forbidden_factor)
+        forbidden_layout.addLayout(forbidden_form)
+
+        self.forbidden_info = QLabel("")
+        self.forbidden_info.setWordWrap(True)
+        self.forbidden_info.setStyleSheet("color: gray;")
+        forbidden_layout.addWidget(self.forbidden_info)
+
+        forbidden_group.setLayout(forbidden_layout)
+        main_layout.addWidget(forbidden_group)
 
         # -- Neuberechnung --
         recombine_group = QGroupBox("Score und Region neu berechnen (optional)")
@@ -318,6 +502,10 @@ class PlotsDialog(QDialog):
         recombine_group.setLayout(recombine_layout)
         main_layout.addWidget(recombine_group)
         self._on_recombine_toggled(False)
+        self._sync_forbidden_state()
+        self._sync_guide_state()
+        self._fill_best_point_combo()
+        self._sync_valley_limit()
 
         self.ask_before_save = QCheckBox("Vor dem Ueberschreiben vorhandener Plots nachfragen")
         self.ask_before_save.setChecked(False)
@@ -356,9 +544,13 @@ class PlotsDialog(QDialog):
 
     def _on_valley_toggled(self, checked):
         for widget in [self.valley_path_mode, self.valley_follow, self.valley_axis,
+                       self.valley_select, self.valley_guide_follow,
+                       self.valley_guide_halfwidth, self.valley_limit,
                        *self.trace_boxes.values()]:
             widget.setEnabled(bool(checked))
         self._sync_valley_fit_state()
+        self._sync_guide_state()
+        self._sync_valley_limit()
 
     def _sync_valley_fit_state(self):
         """Haelt Pfad-Dropdown und Fit-Haken im Einklang mit der gewaehlten
@@ -398,6 +590,78 @@ class PlotsDialog(QDialog):
             self.valley_fit_line.setEnabled(aktiv)
             self.valley_fit_line.setToolTip(self._fit_line_tooltip)
 
+    def _sync_valley_limit(self):
+        aktiv = self.do_valley.isChecked() and self.valley_limit.isChecked()
+        for w in (self.waist_von, self.waist_bis, self.width_von, self.width_bis):
+            w.setEnabled(aktiv)
+        if self.loaded is None:
+            self.valley_limit_info.setText("Noch kein Datensatz geladen.")
+            return
+        voll = self._dataset_ranges()
+        if voll is None:
+            self.valley_limit_info.setText("")
+            return
+        (w0, w1), (h0, h1) = voll
+        self.valley_limit_info.setText(
+            f"Gescannt: waist {w0:.4f} .. {w1:.4f} µm, width {h0:.4f} .. {h1:.4f} MHz."
+            + ("" if aktiv else " (Suche laeuft ueber den ganzen Bereich)"))
+
+    def _dataset_ranges(self):
+        """(waist_min, waist_max), (width_min, width_max) des Datensatzes."""
+        if self.loaded is None:
+            return None
+        import numpy as _np
+        waist = report.waist_um_of(self.loaded)
+        width = _np.asarray(self.loaded["width_vals"], dtype=float) * 1e-6
+        return ((float(waist.min()), float(waist.max())),
+                (float(width.min()), float(width.max())))
+
+    def _fill_valley_limit(self):
+        """Grenzen mit dem vollen Bereich des Datensatzes vorbelegen -
+        aber nur, solange der Haken aus ist (sonst wuerde man dem Nutzer
+        seine Eingabe ueberschreiben)."""
+        voll = self._dataset_ranges()
+        if voll is None or self.valley_limit.isChecked():
+            self._sync_valley_limit()
+            return
+        (w0, w1), (h0, h1) = voll
+        # nach aussen runden: die angezeigten 4 Stellen duerfen den
+        # aeussersten Gitterpunkt nicht abschneiden
+        self.waist_von.setValue(math.floor(w0 * 1e4) / 1e4)
+        self.waist_bis.setValue(math.ceil(w1 * 1e4) / 1e4)
+        self.width_von.setValue(math.floor(h0 * 1e4) / 1e4)
+        self.width_bis.setValue(math.ceil(h1 * 1e4) / 1e4)
+        self._sync_valley_limit()
+
+    def _current_valley_ranges(self):
+        """(waist_range, width_range) fuer report - None, wo nicht
+        eingeschraenkt wird. Ein Bereich, der den ganzen Scan umfasst,
+        wird als 'keine Einschraenkung' behandelt."""
+        if not self.valley_limit.isChecked():
+            return None, None
+        voll = self._dataset_ranges()
+        wr = (self.waist_von.value(), self.waist_bis.value())
+        hr = (self.width_von.value(), self.width_bis.value())
+        if voll is not None:
+            (w0, w1), (h0, h1) = voll
+            tw = 1e-4 * (w1 - w0)
+            th = 1e-4 * (h1 - h0)
+            if wr[0] <= w0 + tw and wr[1] >= w1 - tw:
+                wr = None
+            if hr[0] <= h0 + th and hr[1] >= h1 - th:
+                hr = None
+        return wr, hr
+
+    def _sync_guide_state(self):
+        """Leitgroesse und Korridor nur im gefuehrten Modus bedienbar."""
+        aktiv = (self.do_valley.isChecked()
+                 and self._current_select() == "guided")
+        self.valley_guide_follow.setEnabled(aktiv)
+        self.valley_guide_halfwidth.setEnabled(aktiv)
+
+    def _current_select(self):
+        return report.VALLEY_SELECT_CHOICES[self.valley_select.currentIndex()][0]
+
     def _current_path_mode(self):
         return report.PATH_MODE_CHOICES[self.valley_path_mode.currentIndex()][0]
 
@@ -427,6 +691,41 @@ class PlotsDialog(QDialog):
                 box.setChecked(False)
                 box.setToolTip("In diesem Datensatz nicht enthalten.")
         self._sync_valley_fit_state()
+
+    def _sync_forbidden_state(self, _checked=None):
+        aktiv = self.forbidden_draw.isChecked() or self.forbidden_exclude.isChecked()
+        self.forbidden_factor.setEnabled(aktiv)
+        self._sync_forbidden_info()
+
+    def _sync_forbidden_info(self, _wert=None):
+        """Zeigt Steigung und Anzahl betroffener Punkte fuer den geladenen
+        Datensatz - sonst muesste man den Lauf starten, um zu sehen, ob der
+        gewaehlte Faktor ueberhaupt etwas abschneidet."""
+        if self.loaded is None:
+            self.forbidden_info.setText("Noch kein Datensatz geladen.")
+            return
+        faktor = self.forbidden_factor.value()
+        grenze = combine.forbidden_boundary(self.loaded, faktor)
+        if grenze is None:
+            self.forbidden_info.setText(
+                "Dieser Datensatz hat keine zwei Eck-Spots - es kann nichts ueberlappen.")
+            return
+        maske = combine.forbidden_mask(self.loaded, faktor)
+        n, gesamt = int(maske.sum()), int(maske.size)
+        text = (f"Grenze: width/MHz > {grenze['slope']:.5f} * waist/µm "
+                f"({grenze['um_per_MHz']:.4f} µm/MHz). "
+                f"Betroffen: {n} von {gesamt} Gitterpunkten ({100.0 * n / gesamt:.1f}%).")
+        # Beim Airy-Profil ist "die Hauptkeulen beruehren sich" ein konkreter
+        # k-Wert - und der haengt am Skalenfaktor des Datensatzes, nicht an
+        # einer festen Zahl.
+        if str(self.loaded.get('profile')).lower() == "airy":
+            skala = self.loaded.get('airy_scale_factor')
+            quelle = "im Datensatz" if skala is not None else "Default, nicht gespeichert"
+            skala = 1.19 if skala is None else float(skala)
+            text += (f"\nDieser Datensatz: airy_scale_factor = {skala:.4f} ({quelle}) - "
+                     f"die Airy-Hauptkeulen beruehren sich bei k = {2 * skala:.4f}, "
+                     f"die 1/e²-Radien bei k = {2 * 0.67433 * skala:.4f}.")
+        self.forbidden_info.setText(text)
 
     def _on_recombine_toggled(self, checked):
         for widget in (self.alpha, self.combo_lambda, self.combo_percentile,
@@ -522,6 +821,57 @@ class PlotsDialog(QDialog):
         if results.get('combo_percentile') is not None:
             self.combo_percentile.setValue(float(results['combo_percentile']))
         self._sync_valley_options()
+        self._sync_forbidden_state()
+        self._fill_best_point_combo()
+        self._fill_valley_limit()
+
+    def _on_draw_best_point_toggled(self, an):
+        self.best_point_follow.setEnabled(bool(an))
+        self._sync_manual_point()
+
+    def _fill_best_point_combo(self):
+        """Eintraege haengen am geladenen Datensatz - erst danach steht fest,
+        welche Groessen es ueberhaupt gibt."""
+        vorher = self._current_best_point_follow()
+        self.best_point_combo_keys = (
+            [report.BEST_POINT_FOLLOW_STORED] if self.loaded is None
+            else [k for k, _l in report.best_point_choices(self.loaded)])
+        labels = (["wie im Datensatz gespeichert (Score)"] if self.loaded is None
+                  else [l for _k, l in report.best_point_choices(self.loaded)])
+        self.best_point_follow.blockSignals(True)
+        self.best_point_follow.clear()
+        self.best_point_follow.addItems(labels)
+        if vorher in self.best_point_combo_keys:
+            self.best_point_follow.setCurrentIndex(self.best_point_combo_keys.index(vorher))
+        self.best_point_follow.blockSignals(False)
+        self.best_point_follow.setEnabled(self.draw_best_point.isChecked())
+        self._sync_manual_point()
+
+    def _sync_manual_point(self):
+        """Das Wertfeld gibt es nur fuer die beiden Eigenvorgaben - und die
+        Einheit haengt daran, welche der beiden gewaehlt ist."""
+        key = self._current_best_point_follow()
+        manuell = key in report.MANUAL_POINT_KEYS
+        aktiv = manuell and self.draw_best_point.isChecked()
+        self.best_point_value.setEnabled(aktiv)
+        self.best_point_value_label.setEnabled(aktiv)
+        if key == report.BEST_POINT_MANUAL_WAIST:
+            self.best_point_value_label.setText("Vorgabe Waist (µm):")
+            self.best_point_value.setRange(0.0001, 100.0)
+            self.best_point_value.setSingleStep(0.01)
+        elif key == report.BEST_POINT_MANUAL_WIDTH:
+            self.best_point_value_label.setText("Vorgabe width (MHz):")
+            self.best_point_value.setRange(0.0001, 100.0)
+            self.best_point_value.setSingleStep(0.005)
+        else:
+            self.best_point_value_label.setText("Vorgabe:")
+
+    def _current_best_point_follow(self):
+        keys = getattr(self, "best_point_combo_keys", None)
+        if not keys:
+            return report.BEST_POINT_FOLLOW_STORED
+        i = self.best_point_follow.currentIndex()
+        return keys[i] if 0 <= i < len(keys) else report.BEST_POINT_FOLLOW_STORED
 
     def _on_accept(self):
         self._try_load()
@@ -532,24 +882,41 @@ class PlotsDialog(QDialog):
                 "(scan_amp_data_combined_*.pkl) oder einen Hard-Check "
                 "(hard_check_*.pkl).")
             return
-        if self.do_valley.isChecked() and self._current_path_mode() == "line":
+        braucht_gerade = self.do_valley.isChecked() and (
+            self._current_path_mode() == "line" or self.valley_fit_line.isChecked())
+        if braucht_gerade:
             werte = self.get_values()
             if not report.valley_fit_supported(werte["valley_axis"]):
                 QMessageBox.warning(self, "Gerade nur fuer die µm-Achse",
                                     report.valley_fit_axis_hint())
                 return
-            if report.fit_valley_line(self.loaded, axis=werte["valley_axis"],
-                                      follow=werte["valley_follow"]) is None:
-                QMessageBox.warning(
+            # Genau die Einstellungen pruefen, mit denen dann auch gerechnet
+            # wird - sonst meldet der Dialog etwas anderes, als hinterher
+            # herauskommt.
+            grund = report.valley_fit_diagnosis(
+                self.loaded, axis=werte["valley_axis"],
+                follow=werte["valley_follow"], select=werte["valley_select"],
+                guide_follow=werte["valley_guide_follow"],
+                guide_halfwidth=werte["valley_guide_halfwidth"],
+                waist_range=werte["valley_waist_range"],
+                width_range=werte["valley_width_range"])
+            if grund is not None:
+                if self._current_path_mode() == "line":
+                    # Im Geradenmodus IST die Gerade der Schnitt - ohne sie
+                    # gibt es nichts zu zeichnen.
+                    QMessageBox.warning(
+                        self, "Keine Gerade moeglich",
+                        grund + "\n\nIm Geradenmodus ist die Gerade der Schnitt "
+                        "selbst - bitte etwas davon aendern oder auf \"Talpfad\" "
+                        "umschalten.")
+                    return
+                antwort = QMessageBox.question(
                     self, "Keine Gerade moeglich",
-                    "Fuer diese Kombination aus Groesse und Achse laesst sich keine "
-                    "Gerade durch den Talpfad legen: nach dem Ausschluss der "
-                    "unbrauchbaren Talpunkte bleiben zu wenige uebrig.\n\n"
-                    "Das heisst meist, dass das Minimum ueber weite Teile des Scans am "
-                    "Rand des gescannten Fensters liegt.\n\n"
-                    "Bitte eine andere Groesse waehlen oder auf \"Talpfad\" "
-                    "umschalten.")
-                return
+                    grund + "\n\nDer Talschnitt selbst wird trotzdem gezeichnet, "
+                    "nur ohne Gerade. Fortfahren?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if antwort != QMessageBox.Yes:
+                    return
         self.accept()
 
     def get_values(self):
@@ -558,7 +925,10 @@ class PlotsDialog(QDialog):
             win_axis=WIN_AXIS_CHOICES[self.win_axis.currentIndex()][1],
             legend_fontsize=int(self.legend_fontsize.value()),
             draw_best_point=self.draw_best_point.isChecked(),
+            best_point_follow=self._current_best_point_follow(),
+            best_point_value=self.best_point_value.value(),
             fit_line_on_maps=self.fit_line_on_maps.isChecked(),
+            amplitude_maps=self.amplitude_maps.isChecked(),
             plot_amplitudes=self.plot_amplitudes.isChecked(),
             show=self.show_interactive.isChecked(),
             do_recombine=self.do_recombine.isChecked(),
@@ -573,6 +943,15 @@ class PlotsDialog(QDialog):
             valley_traces=[key for key, box in self.trace_boxes.items() if box.isChecked()],
             valley_fit_line=self.valley_fit_line.isChecked(),
             valley_path_mode=self._current_path_mode(),
+            valley_select=self._current_select(),
+            valley_guide_follow=report.FOLLOW_CHOICES[
+                self.valley_guide_follow.currentIndex()][0],
+            valley_guide_halfwidth=self.valley_guide_halfwidth.value(),
+            valley_waist_range=self._current_valley_ranges()[0],
+            valley_width_range=self._current_valley_ranges()[1],
+            forbidden_draw=self.forbidden_draw.isChecked(),
+            forbidden_exclude=self.forbidden_exclude.isChecked(),
+            forbidden_factor=self.forbidden_factor.value(),
         )
 
 
@@ -588,16 +967,38 @@ def main():
     source_path = results.get('_source_path')
     kind = combine.dataset_kind(results)
 
+    # Erst die verbotenen Punkte herausnehmen, dann (neu) kombinieren - die
+    # Normierung in combine_grids() ist gitterweit, sie muss also die schon
+    # ausgeschnittenen Gitter sehen.
+    n_verboten = None
+    if params["forbidden_exclude"]:
+        results, verboten = combine.mask_forbidden_grids(results, params["forbidden_factor"])
+        n_verboten = None if verboten is None else int(verboten.sum())
+
+    # Score, Region und Bestpunkt werden IMMER neu gerechnet. Datensaetze
+    # von vor dem 2026-09-01 tragen dort noch den frueheren NORMIERTEN
+    # Score; ohne Neuberechnung wuerden Karte (rohes J) und Bericht
+    # (gespeicherter Wert) verschiedene Dinge zeigen.
+    if not combine.score_is_raw(results):
+        print("Hinweis: dieser Datensatz wurde mit dem frueheren normierten Score "
+              "gespeichert. Score, Region und bester Punkt werden aus den rohen "
+              "Gittern neu berechnet - die Zahlen weichen deshalb von aelteren "
+              "Berichten zu derselben Datei ab. Die Datei selbst bleibt unangetastet.")
+
     saved_recombined = None
-    if params["do_recombine"]:
+    if True:   # bewusst bedingungslos - siehe Kommentar oben
+        # Ohne eigenen Haken bleiben die Kombinationsparameter die des
+        # Datensatzes (None = "so lassen, wie gespeichert").
+        a = params["alpha"] if params["do_recombine"] else None
+        lam = params["combo_lambda"] if params["do_recombine"] else None
+        pct = params["combo_percentile"] if params["do_recombine"] else None
         if kind == "hard_check":
             results = hard_check.recheck_from_grids(
-                results, alpha=params["alpha"], combo_lambda=params["combo_lambda"],
-                good_percentile=params["combo_percentile"])
+                results, alpha=a, combo_lambda=lam, good_percentile=pct)
         else:
             results = combine.recombine_from_grids(
-                results, alpha=params["alpha"], combo_lambda=params["combo_lambda"],
-                combo_percentile=params["combo_percentile"])
+                results, alpha=a, combo_lambda=lam, combo_percentile=pct)
+    if params["do_recombine"]:
         if params["save_recombined"] and source_path:
             src = FilePath(source_path)
             target = src.with_name(f"{src.stem}_recombined{src.suffix}")
@@ -608,7 +1009,15 @@ def main():
             results,
             win_axis=params["win_axis"],
             draw_best_point=params["draw_best_point"],
+            best_point_follow=params["best_point_follow"],
+            best_point_value=params["best_point_value"],
             fit_line_on_maps=params["fit_line_on_maps"],
+            amplitude_maps=params["amplitude_maps"],
+            forbidden_factor=(params["forbidden_factor"]
+                              if (params["forbidden_draw"] or params["forbidden_exclude"])
+                              else None),
+            forbidden_draw=params["forbidden_draw"],
+            forbidden_excluded=params["forbidden_exclude"],
             plot_amplitudes_overview=params["plot_amplitudes"],
             save=True, show=params["show"],
             ask_before_save=params["ask_before_save"],
@@ -619,6 +1028,11 @@ def main():
             valley_traces=params["valley_traces"],
             valley_fit_line=params["valley_fit_line"],
             valley_path_mode=params["valley_path_mode"],
+            valley_select=params["valley_select"],
+            valley_guide_follow=params["valley_guide_follow"],
+            valley_guide_halfwidth=params["valley_guide_halfwidth"],
+            valley_waist_range=params["valley_waist_range"],
+            valley_width_range=params["valley_width_range"],
         )
     except Exception as exc:
         QMessageBox.critical(None, "Auswertung fehlgeschlagen", f"{exc!r}")
@@ -626,6 +1040,17 @@ def main():
 
     lines = [f"Auswertung fertig ({combine.KIND_LABELS.get(out['kind'], out['kind'])}).", ""]
     lines.append(f"Plots: {paths.FIT_PLOTS_DIR}")
+    if params["forbidden_draw"] or params["forbidden_exclude"]:
+        grenze = combine.forbidden_boundary(results, params["forbidden_factor"])
+        lines.append("")
+        if grenze is None:
+            lines.append("Verbotener Bereich: bei diesem Datensatz gibt es keine "
+                         "zwei Eck-Spots.")
+        else:
+            lines.append(f"Verbotener Bereich (k = {params['forbidden_factor']:g}): "
+                         f"width/MHz > {grenze['slope']:.5f} * waist/µm")
+            if n_verboten is not None:
+                lines.append(f"   {n_verboten} Gitterpunkte ausgeschlossen")
     if params["do_valley"]:
         lines.append("")
         lines.append(f"Schnitt entlang: "

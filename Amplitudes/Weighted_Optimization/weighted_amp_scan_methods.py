@@ -128,7 +128,11 @@ def scan_win_width_weighted_uniformity(self, win_input_range, width_range,
 
     resumed = scan_checkpoint.load_resumable(
         checkpoint_path, win_input_range, width_range, n_win_input, n_width,
-        self.N_x, self.N_y, extra_match=dict(amps=amps, alpha=alpha), verbose=verbose,
+        self.N_x, self.N_y, extra_match=dict(amps=amps, alpha=alpha),
+        airy_scale_factor=self.airy_scale_factor,
+        optics_match=dict(n_grid=self.n_grid, weighted_n_grid=self.weighted_n_grid,
+                          atom_offset_x=self.atom_offset_x,
+                          atom_offset_y=self.atom_offset_y), verbose=verbose,
     )
     if resumed is not None:
         uniformity_weighted_grid = np.asarray(resumed['uniformity_weighted_grid'], dtype=float).copy()
@@ -157,6 +161,11 @@ def scan_win_width_weighted_uniformity(self, win_input_range, width_range,
             N_x=self.N_x, N_y=self.N_y, f1=self.f1, f2=self.f2, fLO=self.fLO,
             lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
             profile=self.profile,
+            airy_scale_factor=self.airy_scale_factor,
+            # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
+            # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
+            # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
+            n_grid=self.n_grid, weighted_n_grid=self.weighted_n_grid,
             atom_mass=self.atom_mass, atom_temperature=self.atom_temperature, trap_freq_r=self.trap_freq_r,
             atom_offset_x=self.atom_offset_x, atom_offset_y=self.atom_offset_y, pitch=self.pitch,
         )
@@ -246,6 +255,11 @@ def get_scan_weighted_results(self):
         f1=self.f1, f2=self.f2, fLO=self.fLO,
         lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
         profile=self.profile,
+        airy_scale_factor=self.airy_scale_factor,
+        # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
+        # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
+        # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
+        n_grid=self.n_grid, weighted_n_grid=self.weighted_n_grid,
         atom_mass=self.atom_mass, atom_temperature=self.atom_temperature, trap_freq_r=self.trap_freq_r,
         atom_offset_x=self.atom_offset_x, atom_offset_y=self.atom_offset_y, pitch=self.pitch,
     )
@@ -360,7 +374,11 @@ def scan_win_width_amplitude_dependence_weighted(self, win_input_range, width_ra
 
     resumed = scan_checkpoint.load_resumable(
         checkpoint_path, win_input_range, width_range, n_win_input, n_width,
-        self.N_x, self.N_y, extra_match=dict(alpha=alpha, r_bounds=r_bounds), verbose=verbose,
+        self.N_x, self.N_y, extra_match=dict(alpha=alpha, r_bounds=r_bounds),
+        airy_scale_factor=self.airy_scale_factor,
+        optics_match=dict(n_grid=self.n_grid, weighted_n_grid=self.weighted_n_grid,
+                          atom_offset_x=self.atom_offset_x,
+                          atom_offset_y=self.atom_offset_y), verbose=verbose,
     )
     if resumed is not None:
         uniformity_weighted_grid = np.asarray(resumed['uniformity_weighted_grid'], dtype=float).copy()
@@ -388,6 +406,11 @@ def scan_win_width_amplitude_dependence_weighted(self, win_input_range, width_ra
             N_x=self.N_x, N_y=self.N_y, f1=self.f1, f2=self.f2, fLO=self.fLO,
             lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
             profile=self.profile,
+            airy_scale_factor=self.airy_scale_factor,
+            # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
+            # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
+            # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
+            n_grid=self.n_grid, weighted_n_grid=self.weighted_n_grid, atom_offset_x=self.atom_offset_x, atom_offset_y=self.atom_offset_y,
             atom_mass=self.atom_mass, atom_temperature=self.atom_temperature, trap_freq_r=self.trap_freq_r,
         )
 
@@ -587,6 +610,11 @@ def get_scan_amp_results_weighted(self):
         f1=self.f1, f2=self.f2, fLO=self.fLO,
         lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
         profile=self.profile,
+        airy_scale_factor=self.airy_scale_factor,
+        # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
+        # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
+        # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
+        n_grid=self.n_grid, weighted_n_grid=self.weighted_n_grid, atom_offset_x=self.atom_offset_x, atom_offset_y=self.atom_offset_y,
         atom_mass=self.atom_mass, atom_temperature=self.atom_temperature, trap_freq_r=self.trap_freq_r,
     )
     return res

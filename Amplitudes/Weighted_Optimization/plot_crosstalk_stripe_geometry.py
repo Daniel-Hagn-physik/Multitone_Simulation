@@ -62,12 +62,20 @@ WEIGHTED_N_GRID = 81
 
 AMPLITUDES = None                     # None = alle Amplituden 1
 
+# Airy-Skalenfaktor, siehe airy_scale.py. None = AIRY_SCALE_DIALOG_DEFAULT
+# (1.482951). Der Dateiname bekommt bei jedem Faktor ausser 1.19 ein
+# Kuerzel, damit nicht vergleichbare Abbildungen sich nicht ueberschreiben.
+AIRY_SCALE_FACTOR = None
+
 OUT_DIR = "Bilder"
 OUT_NAME = "crosstalk_stripe_geometry"
 OUT_NAME_TERMS = "crosstalk_terms_vs_width"   # zweite Abbildung: Zaehler/Nenner
 WAIST_CUTS = (0.87e-6, 1.31e-6)               # Waists fuer die zweite Abbildung
 OUT_NAME_BAND = "crosstalk_band_trajectory"   # dritte Abbildung: Bandverlauf
-BAND_START_UM = 1.119                         # welches Band verfolgt wird (Startwert am unteren Rand)
+BAND_START_UM = None                          # welches Band verfolgt wird (Startwert am unteren
+                                              # Rand, in um). None = automatisch das mittlere
+                                              # Minimum der untersten width-Zeile - noetig, weil
+                                              # die Baender mit dem Airy-Skalenfaktor wandern.
 SAVE_PNG = True
 SHOW = False
 
@@ -96,6 +104,13 @@ J1_FIRST_ZERO = 3.83170597
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, OPT_DIR if OPT_DIR else _here)
 import weighted_multitone_flattop_optimizer as wmfo  # noqa: E402
+import airy_scale  # noqa: E402
+
+
+def resolved_scale_factor():
+    """Der tatsaechlich verwendete Airy-Skalenfaktor."""
+    return (airy_scale.AIRY_SCALE_DIALOG_DEFAULT if AIRY_SCALE_FACTOR is None
+            else float(AIRY_SCALE_FACTOR))
 
 
 # ======================================================================
@@ -213,6 +228,9 @@ def make_figure(waists, widths, num, mod_one, mod_all):
                 sp.set_color(COL_MUTED)
             ax.tick_params(colors=COL_MUTED)
             ax.xaxis.label.set_color("#1b1b1b")
+        axes[2].annotate(r"Airy scale $k = %.4g$" % resolved_scale_factor(),
+                         (0.97, 0.03), xycoords="axes fraction", ha="right",
+                         color="white", fontsize=8)
         axes[0].set_ylabel("Width (MHz)")
         axes[0].yaxis.label.set_color("#1b1b1b")
         axes[0].set_xlim(wu.min(), wu.max())
@@ -222,11 +240,12 @@ def make_figure(waists, widths, num, mod_one, mod_all):
 
         out_dir = OUT_DIR if os.path.isabs(OUT_DIR) else os.path.join(_here, OUT_DIR)
         os.makedirs(out_dir, exist_ok=True)
-        pdf_path = os.path.join(out_dir, OUT_NAME + ".pdf")
+        stem = OUT_NAME + airy_scale.scale_tag(resolved_scale_factor())
+        pdf_path = os.path.join(out_dir, stem + ".pdf")
         fig.savefig(pdf_path)
         print("gespeichert:", pdf_path)
         if SAVE_PNG:
-            png_path = os.path.join(out_dir, OUT_NAME + ".png")
+            png_path = os.path.join(out_dir, stem + ".png")
             fig.savefig(png_path, dpi=200)
             print("gespeichert:", png_path)
         if SHOW:
@@ -273,7 +292,15 @@ def make_band_figure(waists, widths, num, mod_one, mod_all):
     lange fast senkrechte Stuecke, unterbrochen von wenigen Spruengen.
     """
     wd = widths / 1e6
-    start = BAND_START_UM * 1e-6
+    if BAND_START_UM is None:
+        cand = subpixel_minima(num[0], waists)
+        if len(cand) == 0:
+            print("kein Band in der untersten width-Zeile gefunden - Abbildung uebersprungen")
+            return
+        start = float(cand[len(cand) // 2])
+        print("verfolgtes Band startet bei w_0 = %.3f um (automatisch gewaehlt)" % (start * 1e6))
+    else:
+        start = BAND_START_UM * 1e-6
     curves = [
         (track_band(mod_one, waists, start), COL_DEN, "model, nearest spot only"),
         (track_band(mod_all, waists, start), COL_NUM, "model, all neighbour spots"),
@@ -285,7 +312,8 @@ def make_band_figure(waists, widths, num, mod_one, mod_all):
             ax.plot(pos * 1e6, wd, lw=1.8, color=col, label=lab)
         ax.set_xlabel(r"Band position, waist $w_0$ ($\mu$m)")
         ax.set_ylabel("Width (MHz)")
-        ax.set_title("Same total shift, different shape")
+        ax.set_title(r"Same total shift, different shape ($k = %.4g$)"
+                     % resolved_scale_factor())
         ax.grid(True, lw=0.4, color="0.9")
         ax.set_axisbelow(True)
         ax.legend(loc="lower left")
@@ -300,11 +328,12 @@ def make_band_figure(waists, widths, num, mod_one, mod_all):
         ax.yaxis.label.set_color("#1b1b1b")
 
         out_dir = OUT_DIR if os.path.isabs(OUT_DIR) else os.path.join(_here, OUT_DIR)
-        pdf_path = os.path.join(out_dir, OUT_NAME_BAND + ".pdf")
+        stem = OUT_NAME_BAND + airy_scale.scale_tag(resolved_scale_factor())
+        pdf_path = os.path.join(out_dir, stem + ".pdf")
         fig.savefig(pdf_path)
         print("gespeichert:", pdf_path)
         if SAVE_PNG:
-            fig.savefig(os.path.join(out_dir, OUT_NAME_BAND + ".png"), dpi=200)
+            fig.savefig(os.path.join(out_dir, stem + ".png"), dpi=200)
         if SHOW:
             plt.show()
         else:
@@ -360,11 +389,12 @@ def make_terms_figure(waists, widths, num, den):
 
         out_dir = OUT_DIR if os.path.isabs(OUT_DIR) else os.path.join(_here, OUT_DIR)
         os.makedirs(out_dir, exist_ok=True)
-        pdf_path = os.path.join(out_dir, OUT_NAME_TERMS + ".pdf")
+        stem = OUT_NAME_TERMS + airy_scale.scale_tag(resolved_scale_factor())
+        pdf_path = os.path.join(out_dir, stem + ".pdf")
         fig.savefig(pdf_path)
         print("gespeichert:", pdf_path)
         if SAVE_PNG:
-            fig.savefig(os.path.join(out_dir, OUT_NAME_TERMS + ".png"), dpi=200)
+            fig.savefig(os.path.join(out_dir, stem + ".png"), dpi=200)
         if SHOW:
             plt.show()
         else:
@@ -379,7 +409,10 @@ def make_terms_figure(waists, widths, num, den):
 
 def main():
     opt = wmfo.MultitoneFlatTopOptimizer(out_dir=os.path.join(_here, OUT_DIR),
-                                         weighted_n_grid=WEIGHTED_N_GRID)
+                                         weighted_n_grid=WEIGHTED_N_GRID,
+                                         airy_scale_factor=resolved_scale_factor())
+    print("airy_scale_factor = %.6g" % opt.airy_scale_factor)
+    print(airy_scale.describe(opt.airy_scale_factor))
     win_input = np.linspace(*WIN_INPUT_RANGE, N_WAIST)
     waists = (opt.f1 / opt.f2) * (opt.lambda_opt * opt.fLO) / (np.pi * win_input)
     widths = np.linspace(*WIDTH_RANGE, N_WIDTH)

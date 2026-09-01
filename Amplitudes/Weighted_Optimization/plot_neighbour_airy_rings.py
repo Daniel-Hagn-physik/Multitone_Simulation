@@ -73,6 +73,16 @@ WAIST_MAX_M = None
 
 AMPLITUDES = None          # None = alle Amplituden 1; sonst Array der Laenge N_x+N_y
 
+# Airy-Skalenfaktor: first_zero_radius = AIRY_SCALE_FACTOR * waist.
+# None = airy_scale.AIRY_SCALE_DIALOG_DEFAULT, also 1.482951 ("1/e^2 der
+# Airy-Hauptkeule liegt bei waist") - derselbe Default wie in den
+# Scan-Startdialogen seit 2026-09-01. Fuer den Vergleich mit aelteren
+# Datensaetzen hier airy_scale.AIRY_SCALE_LEGACY (1.19) eintragen; der
+# Dateiname bekommt dann automatisch wieder KEIN Kuerzel, waehrend jeder
+# andere Faktor eines bekommt (z.B. "_k1.483"), damit sich zwei nicht
+# vergleichbare Abbildungen nie gegenseitig ueberschreiben.
+AIRY_SCALE_FACTOR = None
+
 OUT_DIR = "Bilder"
 OUT_NAME = "neighbour_airy_rings"   # ohne Endung; es werden .pdf und .png geschrieben
 SAVE_PNG = True
@@ -108,6 +118,13 @@ COL_MUTED = "#6b6b6b"
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, OPT_DIR if OPT_DIR else _here)
 import weighted_multitone_flattop_optimizer as wmfo  # noqa: E402
+import airy_scale  # noqa: E402
+
+
+def resolved_scale_factor():
+    """Der tatsaechlich verwendete Airy-Skalenfaktor."""
+    return (airy_scale.AIRY_SCALE_DIALOG_DEFAULT if AIRY_SCALE_FACTOR is None
+            else float(AIRY_SCALE_FACTOR))
 
 
 def waist_from_win_input(opt, win_input):
@@ -178,6 +195,7 @@ def pick_extrema(waists, eta):
 # ======================================================================
 
 def make_figure(opt, waists, eta, waist_min, waist_max, width_hz, x_rel, amps=None):
+    k = opt.airy_scale_factor
     cut_min = neighbour_cut(opt, waist_min, width_hz, x_rel, amps)
     cut_max = neighbour_cut(opt, waist_max, width_hz, x_rel, amps)
     # BEWUSST NICHT normiert: die Airy-Funktion (2*J1(u)/u)^2 hat bei u -> 0 den
@@ -226,6 +244,9 @@ def make_figure(opt, waists, eta, waist_min, waist_max, width_hz, x_rel, amps=No
         axL.set_xlabel(r"$x$ ($\mu$m), $0 =$ atom, %.2f $=$ neighbour site" % pitch_um)
         axL.set_ylabel(r"Neighbour intensity (single-spot peak $= 1$)")
         axL.set_title("Airy rings of the neighbour site at the atom")
+        axL.annotate(r"Airy scale $k = %.4g$  ($R_1 = k\,w_0$)" % k,
+                     (0.985, 0.045), xycoords="axes fraction", ha="right",
+                     color=COL_MUTED, fontsize=8)
         axL.legend(loc="upper left")
 
         # --- rechts: eta_w(waist) -------------------------------------
@@ -252,11 +273,12 @@ def make_figure(opt, waists, eta, waist_min, waist_max, width_hz, x_rel, amps=No
 
         out_dir = OUT_DIR if os.path.isabs(OUT_DIR) else os.path.join(_here, OUT_DIR)
         os.makedirs(out_dir, exist_ok=True)
-        pdf_path = os.path.join(out_dir, OUT_NAME + ".pdf")
+        stem = OUT_NAME + airy_scale.scale_tag(k)
+        pdf_path = os.path.join(out_dir, stem + ".pdf")
         fig.savefig(pdf_path)
         print("gespeichert:", pdf_path)
         if SAVE_PNG:
-            png_path = os.path.join(out_dir, OUT_NAME + ".png")
+            png_path = os.path.join(out_dir, stem + ".png")
             fig.savefig(png_path, dpi=200)
             print("gespeichert:", png_path)
         if SHOW:
@@ -269,9 +291,12 @@ def make_figure(opt, waists, eta, waist_min, waist_max, width_hz, x_rel, amps=No
 
 
 def main():
-    opt = wmfo.MultitoneFlatTopOptimizer(out_dir=os.path.join(_here, OUT_DIR))
-    print("pitch = %.3f um, sigma_atom = %.1f nm, Profil = %s, airy_scale_factor = %.2f"
+    k = resolved_scale_factor()
+    opt = wmfo.MultitoneFlatTopOptimizer(out_dir=os.path.join(_here, OUT_DIR),
+                                         airy_scale_factor=k)
+    print("pitch = %.3f um, sigma_atom = %.1f nm, Profil = %s, airy_scale_factor = %.6g"
           % (opt.pitch * 1e6, opt.sigma_atom * 1e9, opt.profile, opt.airy_scale_factor))
+    print(airy_scale.describe(opt.airy_scale_factor))
     print("Ringabstand in Ortskoordinaten: dr = pi*%.2f*w_0/3.8317 = %.3f*w_0"
           % (opt.airy_scale_factor, np.pi * opt.airy_scale_factor / 3.83170597))
 

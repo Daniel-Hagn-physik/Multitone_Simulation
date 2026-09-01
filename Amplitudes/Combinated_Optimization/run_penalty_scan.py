@@ -40,7 +40,8 @@ from pathlib import Path as FilePath
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QFormLayout, QVBoxLayout, QHBoxLayout,
     QLabel, QSpinBox, QDoubleSpinBox, QPushButton, QGroupBox, QMessageBox,
-    QProgressDialog, QFileDialog, QCheckBox, QLineEdit, QScrollArea, QWidget,
+    QProgressDialog, QFileDialog, QCheckBox, QLineEdit, QComboBox, QScrollArea,
+    QWidget,
 )
 from PyQt5.QtCore import Qt
 
@@ -50,6 +51,7 @@ sys.path.insert(0, str(FilePath(__file__).resolve().parent))
 # die Zwischenspeicherung, die eigentlich in ../Weighted_Optimization liegen
 # (lib/penalty_scan.py kapselt sie, siehe Hinweis in lib/paths.py).
 from lib import paths, combine, penalty_scan, report  # noqa: E402
+import resume_picker            # aus ../Weighted_Optimization (siehe lib/paths.py)
 
 
 N_X_FIXED = 3
@@ -73,6 +75,16 @@ class PenaltyScanDialog(QDialog):
         main_layout = QVBoxLayout(content)
         scroll_area.setWidget(content)
         outer_layout.addWidget(scroll_area)
+
+        # -- Fortsetzen: unfertigen Datensatz auswaehlen --
+        # Steht bewusst GANZ OBEN: die Entscheidung "neu oder fortsetzen"
+        # kommt vor allen Parametern, denn beim Fortsetzen kommen die
+        # Parameter aus der Datei und die Felder darunter werden gesperrt.
+        self.resume_group = resume_picker.ResumePickerGroup(
+            paths.DEFAULT_RESULTS_DIR, kind=resume_picker.KIND_PENALTY,
+            on_change=self._on_resume_changed)
+        main_layout.addWidget(self.resume_group)
+
 
         info = QLabel(
             f"Fest: f1 = 75 mm, f2 = 750 mm, N_x = {N_X_FIXED}, N_y = {N_Y_FIXED}\n"
@@ -155,6 +167,58 @@ class PenaltyScanDialog(QDialog):
         grid_layout.addRow("n_grid:", self.n_grid)
         grid_group.setLayout(grid_layout)
         main_layout.addWidget(grid_group)
+
+        # -- Strahlprofil --
+        profile_group = QGroupBox("Strahlprofil (Airy)")
+        profile_layout = QFormLayout()
+        profile_info = QLabel(
+            "Das Profil in der Ebene ist Airy. Der Skalenfaktor uebersetzt den\n"
+            "Scan-Parameter waist in die Airy-Skala:\n"
+            "    first_zero_radius = Faktor * waist")
+        profile_info.setStyleSheet("font-style: italic;")
+        profile_layout.addRow(profile_info)
+        self.airy_scale_mode = QComboBox()
+        for _key, label, _wert in combine.AIRY_SCALE_CHOICES:
+            self.airy_scale_mode.addItem(label)
+        self.airy_scale_mode.setToolTip(
+            "Was die Zahl 'waist' physikalisch bedeuten soll.\n\n"
+            "  wie bisher (1.19): der historische Default. Der tatsaechliche\n"
+            "  1/e^2-Radius des Airy-Profils liegt dann bei 0.8025 * waist.\n\n"
+            "  1/e^2 der Airy-Hauptkeule = waist (1.4830): der Waist bedeutet\n"
+            "  dann bei Airy dasselbe wie bei einem Gauss-Strahl.\n\n"
+            "  frei eingeben: eigener Wert im Feld darunter.")
+        self.airy_scale_mode.currentIndexChanged.connect(
+            lambda _i: self._sync_airy_mode())
+        profile_layout.addRow("Parametrisierung:", self.airy_scale_mode)
+        self.airy_scale_factor = self._make_spin(1.19, 0.1, 5.0, 0.01)
+        self.airy_scale_factor.setDecimals(6)
+        self.airy_scale_factor.setToolTip(
+            "first_zero_radius = Faktor * waist. Der Faktor setzt die physikalische\n"
+            "Spotgroesse und damit JEDE Metrik dieses Scans - nicht nur den verbotenen\n"
+            "Bereich in der Auswertung.\n"
+            "\n"
+            "Der bisherige Default 1.19 entspricht KEINER der gaengigen Konventionen\n"
+            "(nachgerechnet):\n"
+            "   gleicher 1/e^2-Radius wie ein Gauss  -> 1.4830\n"
+            "   bester Gauss-Fit an die Hauptkeule   -> 1.4499\n"
+            "   gleiche FWHM                         -> 1.3956\n"
+            "   gleicher Radius fuer 50 % Leistung   -> 1.3425\n"
+            "\n"
+            "Bei 1.19 liegt der tatsaechliche 1/e^2-Radius des Airy-Profils bei\n"
+            "0.8025 * waist, also 20 % unter der Zahl, die spaeter 'waist' heisst.\n"
+            "\n"
+            "Der gewaehlte Wert wird in die .pkl geschrieben; run_hard_check.py\n"
+            "uebernimmt ihn von dort, damit nicht zwei verschiedene Optiken\n"
+            "verglichen werden.")
+        profile_layout.addRow("airy_scale_factor:", self.airy_scale_factor)
+        self.airy_scale_hint = QLabel("")
+        self.airy_scale_hint.setWordWrap(True)
+        self.airy_scale_hint.setStyleSheet("color: gray;")
+        profile_layout.addRow(self.airy_scale_hint)
+        self.airy_scale_factor.valueChanged.connect(lambda _v: self._sync_airy_hint())
+        profile_group.setLayout(profile_layout)
+        main_layout.addWidget(profile_group)
+        self._sync_airy_mode()
 
         # -- Atom-Gewichtung --
         atom_group = QGroupBox("Atom-Gewichtung (fuer den gewichteten Anteil)")
@@ -242,6 +306,29 @@ class PenaltyScanDialog(QDialog):
         avail = screen.availableGeometry().height() if screen is not None else 900
         self.resize(660, min(760, int(avail * 0.85)))
 
+    def _sync_airy_mode(self):
+        """Bei einer benannten Konvention steht der Wert fest - das Feld
+        zeigt ihn dann nur an. Nur 'frei eingeben' laesst ihn tippen."""
+        _key, _label, wert = combine.AIRY_SCALE_CHOICES[
+            self.airy_scale_mode.currentIndex()]
+        if wert is None:
+            self.airy_scale_factor.setEnabled(True)
+        else:
+            self.airy_scale_factor.setEnabled(False)
+            self.airy_scale_factor.setValue(float(wert))
+        self._sync_airy_hint()
+
+    def _sync_airy_hint(self):
+        """Was der eingestellte Faktor konkret bedeutet - damit man den Wert
+        nicht gegen eine Tabelle im README pruefen muss."""
+        f = self.airy_scale_factor.value()
+        e2 = combine.airy_e2_radius_factor(f)
+        self.airy_scale_hint.setText(
+            f"Bei Faktor {f:.4f}: erste Nullstelle bei {f:.4f} x waist, "
+            f"tatsaechlicher 1/e^2-Radius bei {e2:.4f} x waist. "
+            f"Zwei Spots beruehren sich mit ihren Hauptkeulen bei einem "
+            f"Abstand von {2 * f:.4f} x waist (= k im verbotenen Bereich).")
+
     @staticmethod
     def _make_spin(value, minimum, maximum, step):
         box = QDoubleSpinBox()
@@ -269,6 +356,31 @@ class PenaltyScanDialog(QDialog):
             self.save_path_edit.setText(path)
             self._save_path_auto = False
 
+    def _on_resume_changed(self, entry):
+        """Auswahl im Fortsetzen-Feld hat sich geaendert.
+
+        Wird schon beim Aufbau der Gruppe einmal aufgerufen, also bevor die
+        uebrigen Felder ueberhaupt existieren - deshalb die hasattr-Pruefung.
+        """
+        if not hasattr(self, "save_path_edit"):
+            return
+        if entry is None:
+            resume_picker.set_inputs_locked(self, False, self.resume_group)
+            self._save_path_auto = True
+            self._update_default_save_path()
+            return
+        # Werte aus der Datei anzeigen, dann sperren. Massgeblich ist
+        # ohnehin resume_group.apply() in get_values().
+        resume_picker.apply_display(self, entry["results"])
+        resume_picker.set_inputs_locked(self, True, self.resume_group)
+        self._save_path_auto = False
+        self.save_path_edit.setText(entry["path"])
+
+    def get_values(self):
+        """Wie _get_values_raw(), aber beim Fortsetzen aus dem gewaehlten
+        Datensatz ueberschrieben - siehe resume_picker.apply_to_params()."""
+        return self.resume_group.apply(self._get_values_raw())
+
     def _on_accept(self):
         if self.win_input_min.value() >= self.win_input_max.value():
             QMessageBox.warning(self, "Ungueltiger Bereich",
@@ -288,7 +400,7 @@ class PenaltyScanDialog(QDialog):
             return
         self.accept()
 
-    def get_values(self):
+    def _get_values_raw(self):
         return dict(
             win_input_range=(self.win_input_min.value() * 1e-3, self.win_input_max.value() * 1e-3),
             width_range=(self.width_min.value() * 1e6, self.width_max.value() * 1e6),
@@ -298,6 +410,7 @@ class PenaltyScanDialog(QDialog):
             combo_lambda=self.combo_lambda.value(),
             combo_percentile=self.combo_percentile.value(),
             n_grid=self.n_grid.value(),
+            airy_scale_factor=self.airy_scale_factor.value(),
             atom_temperature=self.atom_temperature_uK.value() * 1e-6,
             trap_freq_r=self.trap_freq_r_kHz.value() * 1e3,
             weighted_n_grid=self.weighted_n_grid.value(),
@@ -328,6 +441,7 @@ def main():
     opt = penalty_scan.make_optimizer(
         f1=75e-3, f2=750e-3, N_x=N_X_FIXED, N_y=N_Y_FIXED,
         n_grid=params["n_grid"],
+        airy_scale_factor=params["airy_scale_factor"],
         atom_temperature=params["atom_temperature"],
         trap_freq_r=params["trap_freq_r"],
         weighted_n_grid=params["weighted_n_grid"],
@@ -341,7 +455,10 @@ def main():
             save_path, params["win_input_range"], params["width_range"],
             params["n_points"], N_X_FIXED, N_Y_FIXED,
             alpha=params["alpha"], r_bounds=params["r_bounds"],
-            combo_lambda=params["combo_lambda"])
+            combo_lambda=params["combo_lambda"],
+            airy_scale_factor=params["airy_scale_factor"],
+            optics_match=dict(n_grid=params["n_grid"],
+                              weighted_n_grid=params["weighted_n_grid"]))
         if resumable is not None:
             n_done, total_pts = resumable
             QMessageBox.information(

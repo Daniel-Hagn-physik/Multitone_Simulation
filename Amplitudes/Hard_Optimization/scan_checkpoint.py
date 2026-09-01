@@ -123,8 +123,15 @@ def _values_equal(a, b):
         return a == b
 
 
+# Airy-Skalenfaktor, der galt, bevor er einstellbar war (vor 2026-09-01).
+# Zwischenstaende aus dieser Zeit fuehren das Feld nicht mit - fuer sie gilt
+# dieser Wert, damit ein damals abgebrochener Scan weiterhin fortsetzbar ist.
+AIRY_SCALE_LEGACY_DEFAULT = 1.19
+
+
 def load_resumable(checkpoint_path, win_input_range, width_range, n_win_input, n_width,
-                    N_x, N_y, extra_match=None, verbose=True):
+                    N_x, N_y, extra_match=None, airy_scale_factor=None,
+                    optics_match=None, verbose=True):
     """Prueft, ob unter checkpoint_path bereits eine zu den AKTUELLEN
     Scan-Parametern passende (Teil- oder fertige) Ergebnis-Datei liegt,
     und laedt sie in diesem Fall. Gibt das geladene dict zurueck, oder
@@ -134,6 +141,22 @@ def load_resumable(checkpoint_path, win_input_range, width_range, n_win_input, n
     extra_match: optionales dict zusaetzlicher Schluessel/Werte, die
     ebenfalls uebereinstimmen muessen (z.B. amps, alpha, r_bounds) - siehe
     _values_equal() fuer den Vergleich.
+
+    airy_scale_factor: der Faktor des JETZT laufenden Scans. Ist er gesetzt,
+    wird er gegen den im Zwischenstand gespeicherten geprueft und bei
+    Abweichung NICHT fortgesetzt. Das ist wichtig: der Faktor legt die
+    physikalische Spotgroesse fest (first_zero_radius = Faktor * waist), ein
+    fortgesetzter Scan mit anderem Faktor haette also zwei verschiedene
+    Optiken in EINEM Datensatz - ohne diese Pruefung waere das von aussen
+    nicht mehr erkennbar. Zwischenstaende von vor dem 2026-09-01 fuehren das
+    Feld nicht; dort wird der damalige Optimierer-Default 1.19 angenommen.
+
+    optics_match: optionales dict {Schluessel: aktueller Wert} fuer Groessen,
+    die WIE FEIN gerechnet wurde festlegen - n_grid, weighted_n_grid,
+    atom_offset_x/y. Steht der Schluessel im Zwischenstand, muss er
+    uebereinstimmen, sonst wird nicht fortgesetzt (sonst haette der Datensatz
+    zwei verschiedene Aufloesungen). Fehlt er (Datei von vor dem 2026-09-01),
+    ist er nicht pruefbar - dann wird fortgesetzt, aber deutlich gewarnt.
     """
     checkpoint_path = Path(checkpoint_path) if checkpoint_path else None
     if checkpoint_path is None or not checkpoint_path.exists():
@@ -154,6 +177,24 @@ def load_resumable(checkpoint_path, win_input_range, width_range, n_win_input, n
         win_ok = _values_equal(saved.get("win_input_vals"), expected_win)
         width_ok = _values_equal(saved.get("width_vals"), expected_width)
         n_ok = saved.get("N_x") == N_x and saved.get("N_y") == N_y
+        scale_ok = True
+        if airy_scale_factor is not None:
+            saved_scale = saved.get("airy_scale_factor")
+            if saved_scale is None:
+                saved_scale = AIRY_SCALE_LEGACY_DEFAULT   # Datei von vor 2026-09-01
+            scale_ok = abs(float(saved_scale) - float(airy_scale_factor)) <= 1e-9
+        optics_ok = True
+        optics_problem = None
+        optics_unknown = []
+        if optics_match:
+            for key, value in optics_match.items():
+                if key not in saved or saved.get(key) is None:
+                    optics_unknown.append(key)      # Datei von vor 2026-09-01
+                    continue
+                if not _values_equal(saved.get(key), value):
+                    optics_ok = False
+                    optics_problem = (key, saved.get(key), value)
+                    break
         extra_ok = True
         if extra_match:
             for key, value in extra_match.items():
@@ -161,10 +202,35 @@ def load_resumable(checkpoint_path, win_input_range, width_range, n_win_input, n
                     extra_ok = False
                     break
     except Exception:
-        win_ok = width_ok = n_ok = extra_ok = False
+        win_ok = width_ok = n_ok = extra_ok = scale_ok = optics_ok = False
+        optics_problem = None
+        optics_unknown = []
 
-    if not (win_ok and width_ok and n_ok and extra_ok):
-        if verbose:
+    if not scale_ok and verbose:
+        saved_scale = saved.get("airy_scale_factor", AIRY_SCALE_LEGACY_DEFAULT)
+        print(f"[Checkpoint] '{checkpoint_path}' wurde mit airy_scale_factor="
+              f"{saved_scale} gerechnet, dieser Scan laeuft mit {airy_scale_factor} - "
+              f"NICHT fortgesetzt (das waeren zwei verschiedene Optiken in einem "
+              f"Datensatz). Bitte einen anderen Speicherpfad waehlen, sonst wird die "
+              f"vorhandene Datei beim naechsten Zwischenspeichern ueberschrieben.")
+
+    if not optics_ok and verbose and optics_problem is not None:
+        key, was, now = optics_problem
+        print(f"[Checkpoint] '{checkpoint_path}' wurde mit {key}={was} gerechnet, dieser "
+              f"Scan laeuft mit {key}={now} - NICHT fortgesetzt (der Datensatz haette "
+              f"sonst zwei verschiedene Aufloesungen). Bitte einen anderen Speicherpfad "
+              f"waehlen, sonst wird die vorhandene Datei beim naechsten "
+              f"Zwischenspeichern ueberschrieben.")
+
+    if optics_unknown and optics_ok and verbose:
+        print(f"[Checkpoint] WARNUNG: '{checkpoint_path}' fuehrt "
+              f"{', '.join(optics_unknown)} nicht mit (Datei von vor dem 2026-09-01) - "
+              f"es laesst sich also NICHT pruefen, ob dieser Scan mit derselben "
+              f"Aufloesung weiterrechnet. Wird fortgesetzt; bitte selbst darauf achten, "
+              f"dieselben Werte wie beim ersten Lauf einzustellen.")
+
+    if not (win_ok and width_ok and n_ok and extra_ok and scale_ok and optics_ok):
+        if verbose and scale_ok and optics_ok:
             print(f"[Checkpoint] '{checkpoint_path}' existiert bereits, passt aber NICHT zu den "
                   f"aktuellen Scan-Parametern (anderes Gitter/N_x/N_y/Einstellungen) - wird beim "
                   f"naechsten Speichern ueberschrieben, Scan startet komplett neu.")

@@ -47,7 +47,13 @@ from weighted_multitone_flattop_optimizer import (  # noqa: E402
 # Parameter, die aus einem gewichteten Scan-Datensatz uebernommen werden,
 # damit die Nachrechnung dieselbe Geometrie/Physik verwendet.
 INHERITED_KEYS = ('N_x', 'N_y', 'f1', 'f2', 'fLO', 'lambda_opt', 'theta_max',
-                  'f_band', 'profile', 'atom_mass', 'atom_temperature', 'trap_freq_r')
+                  'f_band', 'profile', 'airy_scale_factor',
+                  'atom_mass', 'atom_temperature', 'trap_freq_r')
+# airy_scale_factor MUSS mituebernommen werden: er setzt die physikalische
+# Spotgroesse. Rechnete die Nachrechnung mit einem anderen Faktor als der
+# gewichtete Scan, verglichen wir zwei verschiedene Optiken miteinander.
+# Datensaetze von vor dem 2026-09-01 fuehren ihn nicht - dort greift der
+# Optimierer-Default 1.19, also derselbe Wert, mit dem sie gerechnet wurden.
 
 
 def optimizer_from_results(results, n_grid=None, extra_params=None):
@@ -288,7 +294,9 @@ def run_hard_check(weighted_results, n_grid=None, n_jobs=1,
         consistency=crosstab,
         N_x=opt.N_x, N_y=opt.N_y, f1=opt.f1, f2=opt.f2, fLO=opt.fLO,
         lambda_opt=opt.lambda_opt, theta_max=opt.theta_max, f_band=opt.f_band,
-        profile=opt.profile, sigma_atom=opt.sigma_atom,
+        profile=opt.profile,
+        airy_scale_factor=getattr(opt, "airy_scale_factor", None),
+        sigma_atom=opt.sigma_atom,
         atom_mass=opt.atom_mass, atom_temperature=opt.atom_temperature,
         trap_freq_r=opt.trap_freq_r,
     )
