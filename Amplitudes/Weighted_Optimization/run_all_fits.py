@@ -86,6 +86,14 @@ falls die unten eingetragenen Namen nicht existieren.
 from datetime import date
 from pathlib import Path
 
+
+# Die Bibliothek dieses Ordners liegt seit dem Aufraeumen (2026-09-02) in
+# lib/. Der Import setzt den dafuer noetigen sys.path-Eintrag - erst danach
+# lassen sich die Module darunter unter ihrem blossen Namen importieren.
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib import paths  # noqa: E402,F401
+
 import fit_central_amplitudes as fca
 import fit_waist_width_relation as fww
 import fit_uniformity_valley_overview as fuv

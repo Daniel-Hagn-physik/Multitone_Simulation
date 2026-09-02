@@ -190,10 +190,22 @@ Wer immer denselben Datensatz auswertet, kann ihn oben im Skript bei
   Optimierung dort, also `run_penalty_only.py`.
 - **Gerade auch in den Metrik-Vergleich einzeichnen**: siehe Abschnitt
   *Talschnitt*; die dort gefittete Gerade wird zusaetzlich in die vier
-  Metrik-Karten gelegt - durchgezogen im gefitteten Bereich, gepunktet in
-  der Extrapolation. Die Legende der Figur hat dabei genau einen Eintrag
-  ("Linear model fit"); der extrapolierte Teil und der Stern bekommen
-  keinen.
+  Metrik-Karten gelegt, als EINE durchgezogene Linie ueber den ganzen
+  gescannten Bereich. Aus welchem Bereich sie bestimmt wurde, steht im
+  Bericht. Die Legende der Figur hat genau einen Eintrag ("Linear model
+  fit"); der Stern bekommt keinen.
+- **... ausserhalb des Fit-Bereichs gepunktet statt durchgezogen**: nur wer
+  den Unterschied im Bild sehen will, setzt diesen Haken - dann wird die
+  Gerade zweiteilig gezeichnet, durchgezogen im gefitteten Bereich und
+  gepunktet in der Verlaengerung. Der gepunktete Teil bekommt keinen eigenen
+  Legendeneintrag.
+- **Talpfad und ausgelassene/extrapolierte Punkte in die Karte zeichnen**
+  (Gruppe *Talschnitt*): ohne Haken zeigt die Karte im linken Panel des
+  Querschnitts nur den verbotenen Bereich und die Ausgleichsgerade. Die
+  einzelnen Pfadpunkte werden dann gar nicht erst gezeichnet, also auch nicht
+  in der Legende gefuehrt; ihre Anzahl steht im Bericht. Ausnahme: kommt gar
+  keine Gerade zustande, waere die Karte sonst leer - dann wird der Talpfad
+  auch ohne Haken gezeichnet.
 - **Metrik-Vergleich zusaetzlich mit Amplituden (6 Karten, eigene PDF)**:
   schreibt neben `..._metric_comparison.pdf` eine zweite Datei
   `..._metric_comparison_amp.pdf` mit denselben vier Metrik-Karten plus `r_x`

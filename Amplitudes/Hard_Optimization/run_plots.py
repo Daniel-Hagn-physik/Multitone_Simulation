@@ -5,37 +5,37 @@ run_plots.py  -  VORHANDENE DATENSAETZE PLOTTEN UND AUSWERTEN
     ==> Dieses Skript ausfuehren, wenn ein Datensatz bereits vorliegt
     ==> und nur Plots und Bericht (neu) erzeugt werden sollen.
 
-Versteht beide Datensatz-Arten aus diesem Ordner und erkennt automatisch,
+Versteht beide Datensatz-Arten dieses Ordners und erkennt automatisch,
 welche vorliegt:
 
-  - Penalty-Scan   (scan_amp_data_combined_*.pkl, aus run_penalty_scan.py -
-                    auch die bereits vorhandenen Datensaetze)
-  - Hard-Check     (hard_check_*.pkl, aus run_hard_check.py)
+  - Amplituden-Scan       (scan_amp_data*.pkl, aus run_amp_scan.py):
+                          pro Gitterpunkt eine eigene (r_x, r_y)-Optimierung
+  - Fest-Amplituden-Scan  (scan_data*.pkl, aus run_scan.py):
+                          feste Amplituden, nur win_input und width variiert
 
 Erzeugt in Fit_Plots/ bzw. Fit_Results/:
 
-  {Praefix}_metric_comparison.pdf   hart vs. atom-gewichtet, 2x2 (auf Wunsch
-                                    mit eingezeichneter Talpfad-Geraden)
-  {Praefix}_region.pdf              Score-Karte mit Region und bestem Punkt
-  {Praefix}_agreement.pdf           nur Hard-Check: Uebereinstimmungs-Karte
-  {Praefix}_score_scatter.pdf       nur Hard-Check: gewichtet vs. hart
-  {Praefix}_valley_{X}_over_{Y}.pdf Querschnitt entlang des Minimums von X,
-                                    aufgetragen ueber Y (Waist oder width),
-                                    auf Wunsch mit Gerade durch den Talpfad
-  {Praefix}_line_{X}_over_{Y}.pdf   derselbe Querschnitt, aber entlang der
-                                    Geraden statt entlang des Minimums
-  {Praefix}_Report.md               Bericht mit allen Kennzahlen
-  (optional) die 6-Panel-Uebersicht und die Schnitte des AmplitudeScanPlotter
+  {Praefix}_metric_comparison.pdf     Uniformity und Crosstalk nebeneinander
+                                      (auf Wunsch mit der Talpfad-Geraden)
+  {Praefix}_metric_comparison_amp.pdf dieselben plus r_x und r_y (2x2)
+  {Praefix}_region.pdf                Score-Karte mit Arbeitspunkt
+  {Praefix}_valley_{X}_over_{Y}.pdf   Querschnitt entlang des Minimums von X,
+                                      aufgetragen ueber Y (Waist oder width),
+                                      auf Wunsch mit Gerade durch den Talpfad
+  {Praefix}_line_{X}_over_{Y}.pdf     derselbe Querschnitt, aber entlang der
+                                      Geraden statt entlang des Minimums
+  {Praefix}_Report.md                 Bericht mit allen Kennzahlen
+  (optional) die PNG-Uebersicht des jeweiligen Scan-Plotters
 
-alpha, combo_lambda und das Perzentil koennen hier neu gesetzt werden -
-Score, Region und (beim Hard-Check) die Vierfeldertafel werden dann aus
-den vorhandenen Grids neu berechnet, OHNE den teuren Scan zu wiederholen.
-Der Datensatz selbst wird dabei nicht veraendert; auf Wunsch laesst sich
-die neu berechnete Fassung unter neuem Namen speichern.
+alpha und das Perzentil koennen hier neu gesetzt werden - Score, bester
+Punkt und Region werden dann aus den vorhandenen Grids neu berechnet, OHNE
+den teuren Scan zu wiederholen. Der Datensatz auf der Platte wird dabei nicht
+veraendert; auf Wunsch laesst sich die neu berechnete Fassung unter neuem
+Namen speichern.
 
-Die anderen beiden Hauptskripte:
-    run_penalty_scan.py  -  neuen Datensatz mit der Penalty-Methode scannen
-    run_hard_check.py    -  vorhandenen GEWICHTETEN Scan hart nachrechnen
+Die anderen Haupt-Skripte dieses Ordners:
+    run_scan.py      -  neuer Scan bei FESTEN Amplituden
+    run_amp_scan.py  -  neuer Scan MIT Amplituden-Optimierung je Gitterpunkt
 """
 
 import math
@@ -51,7 +51,7 @@ from PyQt5.QtWidgets import (
 sys.path.insert(0, str(FilePath(__file__).resolve().parent))
 
 from lib import paths  # noqa: E402
-from lib import combine, hard_check, report  # noqa: E402
+from lib import report, scan_data  # noqa: E402
 
 
 # ======================================================================
@@ -62,11 +62,7 @@ from lib import combine, hard_check, report  # noqa: E402
 #
 # Oder hier fest eintragen, dann ist dieser Datensatz beim Start bereits
 # ausgewaehlt. Es genuegt der Dateiname (wird in Results/ gesucht), ein
-# vollstaendiger Pfad geht auch:
-#
-#   PKL_DATEI = "scan_amp_data_combined_N3x4_21x21pts_Airy.pkl"
-#   PKL_DATEI = r"C:\...\Results\hard_check_N3x4_10x10pts_Airy.pkl"
-#
+# vollstaendiger Pfad geht auch.
 PKL_DATEI = ""
 # ======================================================================
 
@@ -76,7 +72,19 @@ WIN_AXIS_CHOICES = [
     ("effektiver Waist, µm nach der Linse", "after_lens"),
 ]
 
-NO_SELECTION = "\u2014 bitte auswaehlen \u2014"
+NO_SELECTION = "— bitte auswaehlen —"
+
+# Klartext fuer die Kurven-Checkboxen des Talschnitts. Der Zusatz haengt an
+# der Metrik-Familie dieses Ordners (paths.FLAVOR) - dadurch bleibt diese
+# Datei in Hard_Optimization und Weighted_Optimization buchstabengleich.
+_FAM = " (atom-gewichtet)" if paths.FLAVOR == "weighted" else " (hart, globale Maske)"
+TRACE_LABELS = {
+    "uniformity": "Uniformity" + _FAM,
+    "crosstalk": "Crosstalk" + _FAM,
+    "score": "J = alpha*Uniformity + (1-alpha)*Crosstalk (Score)",
+    "r_x": "r_x (Amplituden-Verhaeltnis x)",
+    "r_y": "r_y (Amplituden-Verhaeltnis y)",
+}
 
 
 class PlotsDialog(QDialog):
@@ -95,8 +103,8 @@ class PlotsDialog(QDialog):
         outer_layout.addWidget(scroll_area)
 
         info = QLabel(
-            "Datensatz waehlen - die Art (Penalty-Scan oder Hard-Check) wird automatisch\n"
-            "erkannt und bestimmt, welche Plots und welcher Bericht erzeugt werden."
+            "Datensatz waehlen - die Art (Amplituden-Scan oder Fest-Amplituden-Scan)\n"
+            "wird automatisch erkannt und bestimmt, welche Plots erzeugt werden."
         )
         info.setStyleSheet("font-style: italic;")
         main_layout.addWidget(info)
@@ -135,6 +143,7 @@ class PlotsDialog(QDialog):
         display_layout.addRow("Waist-Achse:", self.win_axis)
         self.legend_fontsize = self._make_spin(9.0, 4.0, 24.0, 1.0, decimals=0)
         display_layout.addRow("Schriftgroesse Legenden:", self.legend_fontsize)
+
         self.draw_best_point = QCheckBox("Punkt als Stern einzeichnen")
         self.draw_best_point.setChecked(True)
         self.draw_best_point.toggled.connect(self._on_draw_best_point_toggled)
@@ -142,23 +151,24 @@ class PlotsDialog(QDialog):
             "Markiert einen Punkt in den Karten als roten Stern. WELCHEN, bestimmt\n"
             "das Dropdown darunter - der beste Punkt nach einer Groesse, oder ein\n"
             "selbst vorgegebener. Ohne Haken bleiben die Heatmaps voellig frei.\n\n"
-            "Das groesste Rechteck (\"Region\") wird nicht mehr eingezeichnet; seine\n"
-            "Grenzen stehen weiterhin im Bericht.")
+            "Das groesste Rechteck (\"Region\") wird nicht eingezeichnet; seine\n"
+            "Grenzen stehen im Bericht.")
         display_layout.addRow(self.draw_best_point)
+
         self.best_point_follow = QComboBox()
         self.best_point_follow.setToolTip(
             "Nach welcher Groesse der Stern gesetzt wird.\n\n"
-            "\"wie im Datensatz gespeichert\" ist der Punkt, den auch der Bericht\n"
-            "unter \"Bester Einzelpunkt\" nennt - Stern und Bericht zeigen dann\n"
-            "ohne Zutun dasselbe.\n\n"
+            "\"bester Gitterpunkt nach dem Score\" ist der Punkt, den auch der\n"
+            "Bericht unter \"Bester Einzelpunkt\" nennt - Stern und Bericht zeigen\n"
+            "dann ohne Zutun dasselbe.\n\n"
             "Waehlt man etwas anderes, bekommt der Bericht einen eigenen Abschnitt\n"
-            "dazu. Vorsicht beim rohen J: dessen Minimum liegt in beiden\n"
-            "vorhandenen Datensaetzen auf width = 0.200 MHz, also auf dem unteren\n"
-            "Rand des Scan-Fensters. Solche Punkte werden als OFFENER Stern\n"
+            "dazu. Punkte am Rand des Scan-Fensters werden als OFFENER Stern\n"
             "gezeichnet - sie sind kein Optimum, sondern nur das Ende des Scans.\n\n"
-            "Die beiden letzten Eintraege sind etwas anderes: dort gibst DU eine\n"
-            "Koordinate vor, die zweite kommt aus der Talpfad-Geraden. Der Punkt\n"
-            "liegt dann exakt auf der Geraden - auch zwischen den Gitterpunkten.")
+            "Die drei letzten Eintraege sind etwas anderes: dort gibst DU den Punkt\n"
+            "vor. Bei den beiden \"nur ...\"-Varianten genuegt eine Koordinate, die\n"
+            "zweite kommt aus der Talpfad-Geraden - die gibt es aber nur, wenn sich\n"
+            "fuer den Datensatz ueberhaupt eine legen laesst. Sonst sind sie\n"
+            "ausgegraut und es bleibt \"Waist UND Width vorgeben\".")
         self.best_point_follow.currentIndexChanged.connect(
             lambda _i: self._sync_manual_point())
         display_layout.addRow("Punkt:", self.best_point_follow)
@@ -166,17 +176,51 @@ class PlotsDialog(QDialog):
         self.best_point_value = self._make_spin(1.0, 0.0001, 1000.0, 0.01, decimals=4)
         self.best_point_value.setToolTip(
             "Der selbst vorgegebene Wert - Waist in µm oder width in MHz, je nach\n"
-            "Auswahl darueber. Die jeweils andere Koordinate wird aus der\n"
-            "Talpfad-Geraden berechnet.\n\n"
+            "Auswahl darueber.\n\n"
             "Liegt der Punkt ausserhalb des gescannten Fensters, wird er trotzdem\n"
             "gezeichnet - der Bericht sagt dann, dass es dort keine Daten gibt.")
         self.best_point_value_label = QLabel("Vorgabe:")
         display_layout.addRow(self.best_point_value_label, self.best_point_value)
+
+        # Zweites Feld: nur fuer "Waist UND Width vorgeben". Das ist der Weg,
+        # wenn sich keine Talpfad-Gerade legen laesst - dann waere die zweite
+        # Koordinate sonst gar nicht bestimmbar.
+        self.best_point_value2 = self._make_spin(0.25, 0.0001, 1000.0, 0.005, decimals=4)
+        self.best_point_value2.setToolTip(
+            "Die width des selbst vorgegebenen Punktes, in MHz.\n\n"
+            "Dieses Feld gibt es nur bei \"Waist UND Width vorgeben\" - dort wird\n"
+            "keine Gerade gebraucht, der Punkt steht einfach da, wo Du ihn hinsetzt.")
+        self.best_point_value2_label = QLabel("Vorgabe width (MHz):")
+        display_layout.addRow(self.best_point_value2_label, self.best_point_value2)
+
+        self.point_cuts = QCheckBox(
+            "Querschnitt durch den markierten Punkt (r_x, r_y) als PDF")
+        self.point_cuts.setToolTip(
+            "Zwei Schnitte durch den Stern, nebeneinander in einer PDF\n"
+            "(..._point_cuts.pdf): links r_x und r_y bei FESTER width entlang des\n"
+            "Waists, rechts bei FESTEM Waist entlang der width. Der Punkt selbst\n"
+            "ist in beiden Panels als senkrechte rote Linie markiert.\n\n"
+            "Beantwortet eine andere Frage als der Talschnitt weiter unten: nicht\n"
+            "\"wie laeuft das Minimum?\", sondern \"wie empfindlich sind die\n"
+            "Amplituden an meinem Arbeitspunkt?\"\n\n"
+            "Gezeigt werden nur r_x und r_y, im gewohnten Aussehen der alten\n"
+            "Amplituden-Schnitte: r_x blau mit Kreisen, r_y orange mit Quadraten,\n"
+            "beide auf einer Achse. Uniformity und Crosstalk haben ihren Platz in\n"
+            "den Karten und im Talschnitt.\n\n"
+            "Gelesen wird auf dem Gitter. Liegt der Stern zwischen den Gitterpunkten\n"
+            "(selbst vorgegebener Punkt), laufen die Schnitte durch die naechste\n"
+            "Zeile bzw. Spalte - das steht dann im Titel. Interpolieren waere hier\n"
+            "irrefuehrend: r_x/r_y sind Optimierungs-Ergebnisse, keine glatten\n"
+            "Funktionen.\n\n"
+            "Gibt es nur beim Amplituden-Scan.")
+        display_layout.addRow(self.point_cuts)
+
         self.fit_line_on_maps = QCheckBox(
-            "Gerade auch in den Metrik-Vergleich einzeichnen (2x2-Karten)")
+            "Gerade auch in den Metrik-Vergleich einzeichnen")
         self.fit_line_on_maps.setToolTip(
             "Zeichnet die Gerade, die unten durch den Talpfad gelegt wird, zusaetzlich\n"
-            "in alle Karten von ..._metric_comparison.pdf.\n\n"
+            "in die Karten von ..._metric_comparison.pdf - durchgezogen im gefitteten\n"
+            "Bereich, gepunktet in der Extrapolation.\n\n"
             "Welche Groesse gefittet wird, bestimmt \"Groesse fuer Talpfad/Gerade\"\n"
             "in der Talschnitt-Gruppe. Die Gerade ist immer die ueber dem effektiven\n"
             "Waist in µm - auf einer mm-Achse erscheint sie deshalb leicht gekruemmt,\n"
@@ -199,29 +243,29 @@ class PlotsDialog(QDialog):
             "keinen eigenen Legendeneintrag - der Unterschied steckt allein im\n"
             "Linienformat.")
         display_layout.addRow(self.fit_line_dashed)
+
         self.amplitude_maps = QCheckBox(
-            "Metrik-Vergleich zusaetzlich mit Amplituden (6 Karten, eigene PDF)")
+            "Metrik-Vergleich zusaetzlich mit Amplituden (4 Karten, eigene PDF)")
         self.amplitude_maps.setToolTip(
             "Schreibt neben ..._metric_comparison.pdf eine zweite Datei\n"
-            "..._metric_comparison_amp.pdf: dieselben vier Metrik-Karten, plus\n"
-            "r_x und r_y - also die Amplituden, bei denen die Metriken darueber\n"
-            "ausgewertet wurden. Stern und Gerade werden in allen sechs Karten\n"
-            "genauso gezeichnet wie in der 2x2-Fassung, die unveraendert\n"
-            "erhalten bleibt.\n\n"
-            "r_x und r_y teilen sich eine logarithmische Farbskala (Verhaelt-\n"
-            "nisse, und die Verteilung hat einen langen Schwanz). Punkte, deren\n"
-            "Amplitude auf einer r_bounds-Schranke klemmt, sind grau: dort steht\n"
-            "kein freies Optimum. Ihr Anteil erscheint auf der Konsole.\n\n"
-            "NICHT zu verwechseln mit dem Haken darunter: der erzeugt die\n"
-            "PNG-Uebersicht und die Schnitte des AmplitudeScanPlotter.")
+            "..._metric_comparison_amp.pdf: dieselben zwei Metrik-Karten, plus r_x\n"
+            "und r_y - also die Amplituden, bei denen die Metriken darueber\n"
+            "ausgewertet wurden.\n\n"
+            "r_x und r_y teilen sich eine logarithmische Farbskala (Verhaeltnisse,\n"
+            "und die Verteilung hat einen langen Schwanz). Punkte, deren Amplitude\n"
+            "auf einer r_bounds-Schranke klemmt, sind grau: dort steht kein freies\n"
+            "Optimum. Ihr Anteil erscheint auf der Konsole.\n\n"
+            "Gibt es nur beim Amplituden-Scan - ein Fest-Amplituden-Scan hat keine\n"
+            "r_x/r_y-Gitter.")
         display_layout.addRow(self.amplitude_maps)
-        self.plot_amplitudes = QCheckBox("Amplituden-Uebersicht und Schnitte mitzeichnen")
-        self.plot_amplitudes.setChecked(True)
-        self.plot_amplitudes.setToolTip(
-            "Die 6-Panel-Uebersicht (Uniformity/Crosstalk je hart und gewichtet, plus\n"
-            "r_x/r_y) und die waist-/width-Schnitte des AmplitudeScanPlotter - als PNG."
-        )
-        display_layout.addRow(self.plot_amplitudes)
+
+        self.plot_overview = QCheckBox("PNG-Uebersicht des Scan-Plotters mitzeichnen")
+        self.plot_overview.setToolTip(
+            "Beim Amplituden-Scan die 6-Panel-Uebersicht und die waist-/width-\n"
+            "Schnitte des AmplitudeScanPlotter, beim Fest-Amplituden-Scan die\n"
+            "beiden Heatmaps - als PNG, im gewohnten Aussehen der Scan-Skripte.")
+        display_layout.addRow(self.plot_overview)
+
         self.show_interactive = QCheckBox("Plots zusaetzlich interaktiv anzeigen")
         display_layout.addRow(self.show_interactive)
         display_group.setLayout(display_layout)
@@ -258,23 +302,21 @@ class PlotsDialog(QDialog):
             "wurde - ueber den GANZEN gescannten Bereich, also auch weit ausserhalb\n"
             "der Punkte, aus denen sie bestimmt wurde (dort extrapoliert, im Plot mit\n"
             "offenen Kreisen markiert). Da die Gerade die Gitterpunkte nicht trifft,\n"
-            "werden die Werte zwischen den beiden Nachbarzeilen linear interpoliert."
-        )
+            "werden die Werte zwischen den beiden Nachbarzeilen linear interpoliert.")
         self.valley_path_mode.currentIndexChanged.connect(
             lambda _i: self._sync_valley_fit_state())
         valley_form.addRow("Schnitt entlang:", self.valley_path_mode)
+
         self.valley_follow = QComboBox()
         for _key, label in report.FOLLOW_CHOICES:
             self.valley_follow.addItem(label)
         self.valley_follow.setToolTip(
             "Welcher Groesse der Talpfad folgt - und damit auch, worauf die Gerade\n"
             "gefittet wird.\n\n"
-            "ROH (J) ist die Zielfunktion, die der Scan an jedem Gitterpunkt ueber\n"
-            "(r_x, r_y) minimiert hat - und zugleich der Score von Region und\n"
-            "Bestpunkt. Keine Normierung, haengt damit auch nicht am gescannten\n"
-            "Fenster.\n\n"
-            "Welche Groesse gemeint war, steht im Bericht und im Dateinamen."
-        )
+            "J ist die Zielgroesse, die auch der Optimierer minimiert, und zugleich\n"
+            "der Score von Region und Bestpunkt. Roh, ohne Normierung, haengt damit\n"
+            "auch nicht am gescannten Fenster.\n\n"
+            "Welche Groesse gemeint war, steht im Bericht und im Dateinamen.")
         valley_form.addRow("Groesse fuer Talpfad/Gerade:", self.valley_follow)
 
         self.valley_select = QComboBox()
@@ -283,11 +325,9 @@ class PlotsDialog(QDialog):
         self.valley_select.setToolTip(
             "WIE der Talpunkt je Spalte gewaehlt wird - der Schalter mit dem\n"
             "groessten Einfluss auf die Steigung.\n\n"
-            "  Globales Minimum: der kleinste Wert der Spalte. Einfach, aber beim\n"
-            "  rohen J unbrauchbar - dessen globales Minimum liegt am Rand des\n"
-            "  Scan-Fensters bzw. direkt an der Grenze des verbotenen Bereichs.\n"
-            "  (Gemessen: nach Ausschluss des verbotenen Bereichs hat die Gerade\n"
-            "  die Steigung 0.2241 - die Grenze selbst hat 0.2239.)\n\n"
+            "  Globales Minimum: der kleinste Wert der Spalte. Einfach, aber\n"
+            "  unbrauchbar, sobald das Minimum am Rand des Scan-Fensters oder an der\n"
+            "  Grenze des verbotenen Bereichs klebt.\n\n"
             "  Lokales Minimum nahe einer Leitgeraden: pro Spalte das lokale\n"
             "  Minimum, das der Leitgeraden am naechsten liegt. Lokal heisst: beide\n"
             "  Nachbarn vorhanden und groesser - Punkte am Scan-Rand und Punkte, die\n"
@@ -307,9 +347,8 @@ class PlotsDialog(QDialog):
         self.valley_guide_follow.setCurrentIndex(vorgabe)
         self.valley_guide_follow.setToolTip(
             "Welche Groesse die Leitgerade liefert. Voreingestellt ist die\n"
-            "atom-gewichtete Uniformity: ihr Talpfad ist der stabilste im Projekt\n"
-            "(R² = 0.995) und liefert die Steigung, an der sich der Fit im rohen J\n"
-            "orientieren soll.\n\n"
+            "Uniformity: ihr Talpfad ist der glatteste, und er liefert die Steigung,\n"
+            "an der sich der Fit orientieren soll.\n\n"
             "Die Leitgerade wird immer mit dem GLOBALEN Minimum bestimmt - sonst\n"
             "braeuchte sie selbst wieder eine Leitgerade.")
         valley_form.addRow("Leitgroesse:", self.valley_guide_follow)
@@ -319,20 +358,19 @@ class PlotsDialog(QDialog):
         self.valley_guide_halfwidth.setToolTip(
             "Halbe Breite des Korridors um die Leitgerade, in MHz. Lokale Minima\n"
             "weiter weg werden nicht in Betracht gezogen.\n\n"
-            "Am 41x41-Datensatz aendert sich das Ergebnis zwischen 0.010 und 0.100\n"
-            "MHz ueberhaupt nicht (a = 0.28316) - diese Unempfindlichkeit ist das\n"
-            "eigentliche Argument fuer das Verfahren. Beim groberen 21x21-Gitter\n"
-            "reagiert es dagegen merklich; dort lohnt es, zwei Werte zu vergleichen.")
+            "Bei feinen Gittern ist das Ergebnis ueber einen weiten Bereich\n"
+            "unempfindlich gegen diesen Wert - das ist das eigentliche Argument fuer\n"
+            "das Verfahren. Bei groben Gittern lohnt es, zwei Werte zu vergleichen.")
         valley_form.addRow("Korridor um die Leitgerade (+- MHz):",
                            self.valley_guide_halfwidth)
+
         self.valley_axis = QComboBox()
         for _key, label in report.VALLEY_AXIS_CHOICES:
             self.valley_axis.addItem(label)
         self.valley_axis.setToolTip(
             "Bei Waist: pro Waist-Spalte wird ueber width minimiert.\n"
             "Bei width: pro width-Zeile wird ueber den Waist minimiert.\n\n"
-            + report.valley_fit_axis_hint()
-        )
+            + report.valley_fit_axis_hint())
         self.valley_axis.currentIndexChanged.connect(
             lambda _i: self._sync_valley_fit_state())
         valley_form.addRow("Aufgetragen ueber:", self.valley_axis)
@@ -371,7 +409,6 @@ class PlotsDialog(QDialog):
             "leer - dann wird der Talpfad auch ohne Haken gezeichnet.")
         valley_layout.addWidget(self.valley_map_show_path)
 
-
         traces_label = QLabel("Welche Groessen sollen entlang dieses Wegs gezeigt werden?")
         valley_layout.addWidget(traces_label)
 
@@ -379,25 +416,15 @@ class PlotsDialog(QDialog):
         self.trace_boxes = {}
         traces_grid = QGridLayout()
         for position, key in enumerate(report.TRACE_ORDER):
-            klartext = {
-                "uniformity_weighted": "Uniformity, atom-gewichtet",
-                "crosstalk_weighted": "Crosstalk, atom-gewichtet",
-                "uniformity_hard": "Uniformity, hart",
-                "crosstalk_hard": "Crosstalk, hart",
-                "penalty_raw": "Penalty ROH (J der Optimierung, = Score)",
-                "r_x": "r_x (Amplituden-Verhaeltnis x)",
-                "r_y": "r_y (Amplituden-Verhaeltnis y)",
-            }[key]
-            box = QCheckBox(klartext)
+            box = QCheckBox(TRACE_LABELS[key])
             box.setChecked(True)
             self.trace_boxes[key] = box
             traces_grid.addWidget(box, position // 2, position % 2)
         valley_layout.addLayout(traces_grid)
 
         traces_hint = QLabel(
-            "Je mehr Haken, desto mehr y-Achsen - mit allen sieben wird es voll. "
-            "Die Fuehrungsgroesse wird immer mitgezeichnet, auch ohne Haken."
-        )
+            "Je mehr Haken, desto mehr y-Achsen. Die Fuehrungsgroesse wird immer "
+            "mitgezeichnet, auch ohne Haken.")
         traces_hint.setWordWrap(True)
         traces_hint.setStyleSheet("color: gray;")
         valley_layout.addWidget(traces_hint)
@@ -411,8 +438,7 @@ class PlotsDialog(QDialog):
             "welcher gemeint ist.\n\n"
             "Minima, die am Rand des eingestellten Bereichs liegen, zaehlen wie\n"
             "Minima am Rand des Scan-Fensters und fallen aus dem Fit heraus -\n"
-            "sonst wuerde die Einschraenkung selbst kuenstliche Talpunkte\n"
-            "erzeugen.\n\n"
+            "sonst wuerde die Einschraenkung selbst kuenstliche Talpunkte erzeugen.\n\n"
             "Der Bereich gilt AUCH fuer die Leitgerade des gefuehrten Modus.")
         self.valley_limit.toggled.connect(lambda _b: self._sync_valley_limit())
         valley_layout.addWidget(self.valley_limit)
@@ -461,10 +487,9 @@ class PlotsDialog(QDialog):
 
         self.forbidden_draw = QCheckBox("Verbotenen Bereich in die Karten einzeichnen")
         self.forbidden_draw.setToolTip(
-            "Grenzgerade plus schraffierte Flaeche darunter, in allen Karten\n"
-            "(Metrik-Vergleich, Region, Talschnitt, beim Hard-Check auch die\n"
-            "Uebereinstimmungs-Karte). Auf der mm-Achse ist die Grenze gekruemmt,\n"
-            "weil win_input und effektiver Waist reziprok zusammenhaengen.\n\n"
+            "Grenzgerade plus schraffierte Flaeche darunter, in allen Karten.\n"
+            "Auf der mm-Achse ist die Grenze gekruemmt, weil win_input und\n"
+            "effektiver Waist reziprok zusammenhaengen.\n\n"
             "Aendert keine einzige Zahl - dafuer ist der Haken darunter da.")
         self.forbidden_draw.toggled.connect(self._sync_forbidden_state)
         forbidden_layout.addWidget(self.forbidden_draw)
@@ -475,16 +500,15 @@ class PlotsDialog(QDialog):
             "Setzt alle Gitter im verbotenen Bereich auf NaN und rechnet Score,\n"
             "Region und Bestpunkt daraus neu. Talpfad und Geradenfit sehen diese\n"
             "Punkte dann nicht mehr.\n\n"
-            "Achtung: die Min-Max-Normierung laeuft ueber das ganze Gitter - der\n"
-            "Score ist das rohe J und punktweise definiert - er aendert sich durch\n"
-            "den Ausschluss nur im verbotenen Bereich, nicht anderswo.\n\n"
+            "Der Score ist das rohe J und damit punktweise definiert - er aendert\n"
+            "sich durch den Ausschluss nur im verbotenen Bereich, nicht anderswo.\n\n"
             "Der Original-Datensatz auf der Platte wird nicht angefasst.")
         self.forbidden_exclude.toggled.connect(self._sync_forbidden_state)
         forbidden_layout.addWidget(self.forbidden_exclude)
 
         forbidden_form = QFormLayout()
         self.forbidden_factor = self._make_spin(
-            combine.FORBIDDEN_FACTOR_DEFAULT, 0.1, 20.0, 0.1, decimals=3)
+            scan_data.FORBIDDEN_FACTOR_DEFAULT, 0.1, 20.0, 0.1, decimals=3)
         self.forbidden_factor.setToolTip(
             "k in der Bedingung Abstand > k * waist.\n\n"
             "k = 2: die gaussaequivalenten Radien (1/e^2) beruehren sich gerade.\n"
@@ -503,46 +527,61 @@ class PlotsDialog(QDialog):
         main_layout.addWidget(forbidden_group)
 
         # -- Neuberechnung --
-        recombine_group = QGroupBox("Score und Region neu berechnen (optional)")
-        recombine_layout = QFormLayout()
-        recombine_info = QLabel(
-            "Ohne Haken werden die im Datensatz gespeicherten Werte verwendet.\n"
-            "Mit Haken werden Score, Region und (beim Hard-Check) die Vierfeldertafel\n"
-            "aus den vorhandenen Grids neu berechnet - kein erneuter Scan noetig."
+        recompute_group = QGroupBox("Score und Region neu berechnen (optional)")
+        recompute_layout = QFormLayout()
+        recompute_info = QLabel(
+            "Ohne Haken gelten die im Datensatz gespeicherten Werte fuer alpha und das\n"
+            "Perzentil. Mit Haken werden Score, bester Punkt und Region daraus neu\n"
+            "berechnet - kein erneuter Scan noetig, der Datensatz bleibt unveraendert."
         )
-        recombine_info.setStyleSheet("font-style: italic;")
-        recombine_layout.addRow(recombine_info)
-        self.do_recombine = QCheckBox("Mit abweichenden Parametern neu berechnen")
-        self.do_recombine.toggled.connect(self._on_recombine_toggled)
-        recombine_layout.addRow(self.do_recombine)
+        recompute_info.setStyleSheet("font-style: italic;")
+        recompute_layout.addRow(recompute_info)
+        self.do_recompute = QCheckBox("Mit abweichenden Parametern neu berechnen")
+        self.do_recompute.toggled.connect(self._on_recompute_toggled)
+        recompute_layout.addRow(self.do_recompute)
         self.alpha = self._make_spin(0.7, 0.0, 1.0, 0.05)
-        recombine_layout.addRow("alpha:", self.alpha)
-        self.combo_lambda = self._make_spin(0.75, 0.0, 5.0, 0.05)
-        recombine_layout.addRow("combo_lambda (Penalty-Gewicht):", self.combo_lambda)
-        self.combo_percentile = self._make_spin(25.0, 1.0, 100.0, 5.0)
-        recombine_layout.addRow("Perzentil (% beste Punkte):", self.combo_percentile)
-        self.save_recombined = QCheckBox("Neu berechnete Fassung als eigene Datei speichern")
-        self.save_recombined.setToolTip(
-            "Legt eine neue .pkl neben dem Original an (Suffix _recombined).\n"
-            "Der urspruengliche Datensatz bleibt unveraendert."
-        )
-        recombine_layout.addRow(self.save_recombined)
-        recombine_group.setLayout(recombine_layout)
-        main_layout.addWidget(recombine_group)
-        self._on_recombine_toggled(False)
+        self.alpha.setToolTip(
+            "Gewicht der Uniformity im Score J = alpha*U + (1-alpha)*Crosstalk.\n"
+            "alpha = 1 waere reine Uniformity, alpha = 0 reiner Crosstalk.")
+        recompute_layout.addRow("alpha:", self.alpha)
+        self.percentile = self._make_spin(scan_data.DEFAULT_PERCENTILE, 1.0, 100.0, 5.0)
+        self.percentile.setToolTip(
+            "Wieviel Prozent der besten Gitterpunkte als \"Region\" gelten.\n"
+            "Daraus wird das groesste achsenparallele Rechteck bestimmt; seine\n"
+            "Grenzen stehen im Bericht.")
+        recompute_layout.addRow("Perzentil (% beste Punkte):", self.percentile)
+        self.save_recomputed = QCheckBox("Neu berechnete Fassung als eigene Datei speichern")
+        self.save_recomputed.setToolTip(
+            "Legt eine neue .pkl neben dem Original an (Suffix _recomputed).\n"
+            "Der urspruengliche Datensatz bleibt unveraendert.")
+        recompute_layout.addRow(self.save_recomputed)
+        recompute_group.setLayout(recompute_layout)
+        main_layout.addWidget(recompute_group)
+
+        self._on_recompute_toggled(False)
         self._sync_fit_line_style()
         self._sync_forbidden_state()
         self._sync_guide_state()
         self._fill_best_point_combo()
         self._sync_valley_limit()
 
+        # Ob es eine Talpfad-Gerade gibt, haengt an genau diesen Einstellungen -
+        # und davon haengt ab, ob die beiden Ein-Koordinaten-Vorgaben ueberhaupt
+        # waehlbar sind. Deshalb bei jeder Aenderung nachziehen.
+        for widget in (self.valley_follow, self.valley_select, self.valley_guide_follow):
+            widget.currentIndexChanged.connect(lambda _i: self._sync_manual_point())
+        self.valley_guide_halfwidth.valueChanged.connect(
+            lambda _v: self._sync_manual_point())
+        for widget in (self.waist_von, self.waist_bis, self.width_von, self.width_bis):
+            widget.valueChanged.connect(lambda _v: self._sync_manual_point())
+        self.valley_limit.toggled.connect(lambda _b: self._sync_manual_point())
+
         self.ask_before_save = QCheckBox("Vor dem Ueberschreiben vorhandener Plots nachfragen")
         self.ask_before_save.setChecked(False)
         self.ask_before_save.setToolTip(
             "Ohne Haken werden gleichnamige Plots des heutigen Tages ohne Rueckfrage\n"
             "ueberschrieben (sie sind aus dem Datensatz jederzeit reproduzierbar).\n"
-            "Achtung: die Rueckfrage laeuft ueber die Konsole, nicht ueber ein Fenster."
-        )
+            "Achtung: die Rueckfrage laeuft ueber die Konsole, nicht ueber ein Fenster.")
         main_layout.addWidget(self.ask_before_save)
 
         btn_layout = QHBoxLayout()
@@ -571,6 +610,9 @@ class PlotsDialog(QDialog):
         box.setValue(value)
         return box
 
+    # ------------------------------------------------------------------
+    # Zustandspflege
+    # ------------------------------------------------------------------
     def _on_valley_toggled(self, checked):
         for widget in [self.valley_path_mode, self.valley_follow, self.valley_axis,
                        self.valley_select, self.valley_guide_follow,
@@ -593,8 +635,7 @@ class PlotsDialog(QDialog):
           gesetzt und gesperrt.
 
         Was der Nutzer zuletzt selbst eingestellt hat, wird gemerkt und
-        wiederhergestellt, sobald der Haken wieder frei ist.
-        """
+        wiederhergestellt, sobald der Haken wieder frei ist."""
         if self.valley_fit_line.isEnabled():
             self._fit_line_gemerkt = self.valley_fit_line.isChecked()
 
@@ -647,9 +688,9 @@ class PlotsDialog(QDialog):
                 (float(width.min()), float(width.max())))
 
     def _fill_valley_limit(self):
-        """Grenzen mit dem vollen Bereich des Datensatzes vorbelegen -
-        aber nur, solange der Haken aus ist (sonst wuerde man dem Nutzer
-        seine Eingabe ueberschreiben)."""
+        """Grenzen mit dem vollen Bereich des Datensatzes vorbelegen - aber
+        nur, solange der Haken aus ist (sonst wuerde man dem Nutzer seine
+        Eingabe ueberschreiben)."""
         voll = self._dataset_ranges()
         if voll is None or self.valley_limit.isChecked():
             self._sync_valley_limit()
@@ -665,8 +706,8 @@ class PlotsDialog(QDialog):
 
     def _current_valley_ranges(self):
         """(waist_range, width_range) fuer report - None, wo nicht
-        eingeschraenkt wird. Ein Bereich, der den ganzen Scan umfasst,
-        wird als 'keine Einschraenkung' behandelt."""
+        eingeschraenkt wird. Ein Bereich, der den ganzen Scan umfasst, wird
+        als 'keine Einschraenkung' behandelt."""
         if not self.valley_limit.isChecked():
             return None, None
         voll = self._dataset_ranges()
@@ -684,8 +725,7 @@ class PlotsDialog(QDialog):
 
     def _sync_guide_state(self):
         """Leitgroesse und Korridor nur im gefuehrten Modus bedienbar."""
-        aktiv = (self.do_valley.isChecked()
-                 and self._current_select() == "guided")
+        aktiv = self.do_valley.isChecked() and self._current_select() == "guided"
         self.valley_guide_follow.setEnabled(aktiv)
         self.valley_guide_halfwidth.setEnabled(aktiv)
 
@@ -719,16 +759,19 @@ class PlotsDialog(QDialog):
             box.setEnabled(aktiv and verfuegbar)
             if not verfuegbar:
                 box.setChecked(False)
-                box.setToolTip("In diesem Datensatz nicht enthalten.")
+                box.setToolTip("In diesem Datensatz nicht enthalten "
+                               "(Fest-Amplituden-Scans haben kein r_x/r_y).")
+        # Amplituden-Karten gibt es nur beim Amplituden-Scan.
+        hat_amps = scan_data.has_amplitudes(self.loaded)
+        self.amplitude_maps.setEnabled(hat_amps)
+        self.point_cuts.setEnabled(hat_amps)
+        if not hat_amps:
+            self.amplitude_maps.setChecked(False)
+            self.point_cuts.setChecked(False)
+            self.point_cuts.setToolTip(
+                "Nur beim Amplituden-Scan - ein Fest-Amplituden-Scan hat keine "
+                "r_x/r_y-Gitter, durch die man schneiden koennte.")
         self._sync_valley_fit_state()
-
-    def _sync_fit_line_style(self, _checked=None):
-        """Der Punktier-Haken ergibt nur Sinn, wenn ueberhaupt eine Gerade in
-        die Karten gezeichnet wird."""
-        an = self.fit_line_on_maps.isChecked()
-        self.fit_line_dashed.setEnabled(an)
-        if not an:
-            self.fit_line_dashed.setChecked(False)
 
     def _sync_forbidden_state(self, _checked=None):
         aktiv = self.forbidden_draw.isChecked() or self.forbidden_exclude.isChecked()
@@ -743,19 +786,18 @@ class PlotsDialog(QDialog):
             self.forbidden_info.setText("Noch kein Datensatz geladen.")
             return
         faktor = self.forbidden_factor.value()
-        grenze = combine.forbidden_boundary(self.loaded, faktor)
+        grenze = scan_data.forbidden_boundary(self.loaded, faktor)
         if grenze is None:
             self.forbidden_info.setText(
                 "Dieser Datensatz hat keine zwei Eck-Spots - es kann nichts ueberlappen.")
             return
-        maske = combine.forbidden_mask(self.loaded, faktor)
+        maske = scan_data.forbidden_mask(self.loaded, faktor)
         n, gesamt = int(maske.sum()), int(maske.size)
         text = (f"Grenze: width/MHz > {grenze['slope']:.5f} * waist/µm "
                 f"({grenze['um_per_MHz']:.4f} µm/MHz). "
                 f"Betroffen: {n} von {gesamt} Gitterpunkten ({100.0 * n / gesamt:.1f}%).")
         # Beim Airy-Profil ist "die Hauptkeulen beruehren sich" ein konkreter
-        # k-Wert - und der haengt am Skalenfaktor des Datensatzes, nicht an
-        # einer festen Zahl.
+        # k-Wert - und der haengt am Skalenfaktor des Datensatzes.
         if str(self.loaded.get('profile')).lower() == "airy":
             skala = self.loaded.get('airy_scale_factor')
             quelle = "im Datensatz" if skala is not None else "Default, nicht gespeichert"
@@ -765,18 +807,27 @@ class PlotsDialog(QDialog):
                      f"die 1/e²-Radien bei k = {2 * 0.67433 * skala:.4f}.")
         self.forbidden_info.setText(text)
 
-    def _on_recombine_toggled(self, checked):
-        for widget in (self.alpha, self.combo_lambda, self.combo_percentile,
-                       self.save_recombined):
+    def _sync_fit_line_style(self, _checked=None):
+        """Der Punktier-Haken ergibt nur Sinn, wenn ueberhaupt eine Gerade in
+        die Karten gezeichnet wird."""
+        an = self.fit_line_on_maps.isChecked()
+        self.fit_line_dashed.setEnabled(an)
+        if not an:
+            self.fit_line_dashed.setChecked(False)
+
+    def _on_recompute_toggled(self, checked):
+        for widget in (self.alpha, self.percentile, self.save_recomputed):
             widget.setEnabled(bool(checked))
 
+    # ------------------------------------------------------------------
+    # Datensatz-Auswahl
+    # ------------------------------------------------------------------
     def _fill_file_combo(self):
         """Listet alle .pkl-Dateien aus Results/ auf, neueste zuerst.
 
         Vorausgewaehlt wird NUR, was oben in PKL_DATEI eingetragen ist -
-        sonst bleibt "bitte auswaehlen" stehen, damit nie versehentlich
-        der falsche Datensatz ausgewertet wird.
-        """
+        sonst bleibt "bitte auswaehlen" stehen, damit nie versehentlich der
+        falsche Datensatz ausgewertet wird."""
         self.file_combo.blockSignals(True)
         self.file_combo.clear()
         self.file_combo.addItem(NO_SELECTION, userData=None)
@@ -790,11 +841,10 @@ class PlotsDialog(QDialog):
         if not dateien:
             self.input_info.setText(
                 f"In {paths.DEFAULT_RESULTS_DIR} liegen keine .pkl-Dateien. "
-                f"Zuerst run_penalty_scan.py oder run_hard_check.py ausfuehren - "
-                f"oder ueber \"Andere Datei...\" einen Datensatz von anderswo waehlen.")
+                f"Zuerst run_scan.py oder run_amp_scan.py ausfuehren - oder ueber "
+                f"\"Andere Datei...\" einen Datensatz von anderswo waehlen.")
             return
 
-        # Vorauswahl nur, wenn oben im Skript etwas eingetragen ist.
         if PKL_DATEI:
             self._select_path(PKL_DATEI)
         else:
@@ -804,8 +854,8 @@ class PlotsDialog(QDialog):
                 f"bei PKL_DATEI eintragen.)")
 
     def _select_path(self, pfad):
-        """Waehlt den angegebenen Pfad im Dropdown aus - haengt ihn an,
-        falls er nicht aus Results/ stammt."""
+        """Waehlt den angegebenen Pfad im Dropdown aus - haengt ihn an, falls
+        er nicht aus Results/ stammt."""
         kandidat = FilePath(pfad)
         if not kandidat.is_absolute() and not kandidat.exists():
             kandidat = paths.DEFAULT_RESULTS_DIR / kandidat.name
@@ -828,7 +878,8 @@ class PlotsDialog(QDialog):
 
     def _on_browse_input(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Datensatz waehlen", str(paths.DEFAULT_RESULTS_DIR), "Pickle-Dateien (*.pkl)")
+            self, "Datensatz waehlen", str(paths.DEFAULT_RESULTS_DIR),
+            "Pickle-Dateien (*.pkl)")
         if path:
             self._select_path(path)
 
@@ -839,25 +890,22 @@ class PlotsDialog(QDialog):
             self.input_info.setText("Noch kein Datensatz gewaehlt.")
             return
         try:
-            results = combine.load_results(path)
+            results = scan_data.load_results(path)
         except Exception as exc:
             self.input_info.setText(f"Datei konnte nicht geladen werden: {exc!r}")
             return
-        kind = combine.dataset_kind(results)
-        if kind not in ("penalty", "hard_check"):
+        ok, fehlt = scan_data.looks_like_scan(results)
+        if not ok:
             self.input_info.setText(
-                "Diese Datei passt nicht zu diesem Ordner. Erwartet wird ein Penalty-Scan "
-                "(scan_amp_data_combined_*.pkl) oder ein Hard-Check (hard_check_*.pkl).\n"
-                "Ein rein GEWICHTETER Scan gehoert zuerst durch run_hard_check.py.")
+                "Diese Datei sieht nicht nach einem Scan dieses Projekts aus - es "
+                "fehlen: " + ", ".join(fehlt) + ".")
             return
         self.loaded = results
-        self.input_info.setText(combine.describe(results))
+        self.input_info.setText(scan_data.describe(results))
         if results.get('alpha') is not None:
             self.alpha.setValue(float(results['alpha']))
-        if results.get('combo_lambda') is not None:
-            self.combo_lambda.setValue(float(results['combo_lambda']))
         if results.get('combo_percentile') is not None:
-            self.combo_percentile.setValue(float(results['combo_percentile']))
+            self.percentile.setValue(float(results['combo_percentile']))
         self._sync_valley_options()
         self._sync_forbidden_state()
         self._fill_best_point_combo()
@@ -874,7 +922,7 @@ class PlotsDialog(QDialog):
         self.best_point_combo_keys = (
             [report.BEST_POINT_FOLLOW_STORED] if self.loaded is None
             else [k for k, _l in report.best_point_choices(self.loaded)])
-        labels = (["wie im Datensatz gespeichert (Score)"] if self.loaded is None
+        labels = (["bester Gitterpunkt nach dem Score"] if self.loaded is None
                   else [l for _k, l in report.best_point_choices(self.loaded)])
         self.best_point_follow.blockSignals(True)
         self.best_point_follow.clear()
@@ -885,22 +933,75 @@ class PlotsDialog(QDialog):
         self.best_point_follow.setEnabled(self.draw_best_point.isChecked())
         self._sync_manual_point()
 
+    def _line_available(self):
+        """Laesst sich mit den aktuellen Einstellungen ueberhaupt eine
+        Talpfad-Gerade legen? Ohne sie sind die beiden Eigenvorgaben, die
+        nur EINE Koordinate brauchen, nicht bestimmbar."""
+        if self.loaded is None:
+            return False
+        try:
+            wr, hr = self._current_valley_ranges()
+            fit = report.fit_valley_line(
+                self.loaded, axis=report.VALLEY_FIT_AXIS,
+                follow=report.FOLLOW_CHOICES[self.valley_follow.currentIndex()][0],
+                select=self._current_select(),
+                guide_follow=report.FOLLOW_CHOICES[
+                    self.valley_guide_follow.currentIndex()][0],
+                guide_halfwidth=self.valley_guide_halfwidth.value(),
+                waist_range=wr, width_range=hr)
+        except Exception:
+            return False
+        return fit is not None
+
     def _sync_manual_point(self):
-        """Das Wertfeld gibt es nur fuer die beiden Eigenvorgaben - und die
-        Einheit haengt daran, welche der beiden gewaehlt ist."""
+        """Die Wertfelder gibt es nur fuer die Eigenvorgaben - welches, haengt
+        an der gewaehlten Variante.
+
+        Zusaetzlich: die beiden Varianten mit nur EINER Koordinate brauchen
+        eine Talpfad-Gerade. Gibt es keine, werden sie ausgegraut und der
+        Eintrag faellt auf "Waist UND Width vorgeben" zurueck - dort wird nach
+        beiden Koordinaten gefragt."""
+        gerade = self._line_available()
+        for index, key in enumerate(getattr(self, "best_point_combo_keys", [])):
+            item = self.best_point_follow.model().item(index)
+            if item is None:
+                continue
+            erlaubt = gerade or key not in report.MANUAL_LINE_KEYS
+            item.setEnabled(erlaubt)
+            item.setToolTip("" if erlaubt else
+                            "Fuer diesen Datensatz (und diese Talschnitt-Einstellungen) "
+                            "laesst sich keine Gerade durch den Talpfad legen - ohne sie "
+                            "ist die zweite Koordinate nicht bestimmbar. Bitte "
+                            "\"Waist UND Width vorgeben\" nehmen.")
+
         key = self._current_best_point_follow()
-        manuell = key in report.MANUAL_POINT_KEYS
-        aktiv = manuell and self.draw_best_point.isChecked()
-        self.best_point_value.setEnabled(aktiv)
-        self.best_point_value_label.setEnabled(aktiv)
-        if key == report.BEST_POINT_MANUAL_WAIST:
-            self.best_point_value_label.setText("Vorgabe Waist (µm):")
-            self.best_point_value.setRange(0.0001, 100.0)
-            self.best_point_value.setSingleStep(0.01)
-        elif key == report.BEST_POINT_MANUAL_WIDTH:
+        if key in report.MANUAL_LINE_KEYS and not gerade:
+            # Nicht kommentarlos nichts zeichnen: auf die Variante umschalten,
+            # die ohne Gerade auskommt.
+            if report.BEST_POINT_MANUAL_BOTH in self.best_point_combo_keys:
+                self.best_point_follow.blockSignals(True)
+                self.best_point_follow.setCurrentIndex(
+                    self.best_point_combo_keys.index(report.BEST_POINT_MANUAL_BOTH))
+                self.best_point_follow.blockSignals(False)
+                key = report.BEST_POINT_MANUAL_BOTH
+
+        an = self.draw_best_point.isChecked()
+        eins = an and key in (report.BEST_POINT_MANUAL_WAIST,
+                              report.BEST_POINT_MANUAL_WIDTH,
+                              report.BEST_POINT_MANUAL_BOTH)
+        zwei = an and key == report.BEST_POINT_MANUAL_BOTH
+        self.best_point_value.setEnabled(eins)
+        self.best_point_value_label.setEnabled(eins)
+        self.best_point_value2.setEnabled(zwei)
+        self.best_point_value2_label.setEnabled(zwei)
+        if key == report.BEST_POINT_MANUAL_WIDTH:
             self.best_point_value_label.setText("Vorgabe width (MHz):")
             self.best_point_value.setRange(0.0001, 100.0)
             self.best_point_value.setSingleStep(0.005)
+        elif key in (report.BEST_POINT_MANUAL_WAIST, report.BEST_POINT_MANUAL_BOTH):
+            self.best_point_value_label.setText("Vorgabe Waist (µm):")
+            self.best_point_value.setRange(0.0001, 100.0)
+            self.best_point_value.setSingleStep(0.01)
         else:
             self.best_point_value_label.setText("Vorgabe:")
 
@@ -911,15 +1012,35 @@ class PlotsDialog(QDialog):
         i = self.best_point_follow.currentIndex()
         return keys[i] if 0 <= i < len(keys) else report.BEST_POINT_FOLLOW_STORED
 
+    # ------------------------------------------------------------------
     def _on_accept(self):
         self._try_load()
         if self.loaded is None:
             QMessageBox.warning(
                 self, "Kein gueltiger Datensatz",
-                "Bitte oben einen Datensatz auswaehlen - einen Penalty-Scan "
-                "(scan_amp_data_combined_*.pkl) oder einen Hard-Check "
-                "(hard_check_*.pkl).")
+                "Bitte oben einen Datensatz auswaehlen - einen Amplituden-Scan "
+                f"({paths.AMP_PKL_GLOB}) oder einen Fest-Amplituden-Scan "
+                f"({paths.FIXED_PKL_GLOB}).")
             return
+        punkt = self._current_best_point_follow()
+        if self.draw_best_point.isChecked() and punkt in report.MANUAL_LINE_KEYS \
+                and not self._line_available():
+            QMessageBox.warning(
+                self, "Keine Gerade fuer den eigenen Punkt",
+                "Fuer diesen Datensatz laesst sich mit den eingestellten "
+                "Talschnitt-Optionen keine Gerade durch den Talpfad legen. Damit "
+                "ist die zweite Koordinate nicht bestimmbar.\n\n"
+                "Bitte oben \"eigener Punkt: Waist UND Width vorgeben\" waehlen "
+                "und beide Werte eintragen.")
+            return
+        if self.draw_best_point.isChecked() and punkt == report.BEST_POINT_MANUAL_BOTH:
+            if self.loaded is not None and report.win_input_for_waist_um(
+                    self.loaded, self.best_point_value.value()) is None:
+                QMessageBox.warning(
+                    self, "Waist nicht umrechenbar",
+                    "Zu dem eingetragenen Waist laesst sich kein Eingangs-Waist "
+                    "bestimmen. Bitte einen anderen Wert eintragen.")
+                return
         braucht_gerade = self.do_valley.isChecked() and (
             self._current_path_mode() == "line" or self.valley_fit_line.isChecked())
         if braucht_gerade:
@@ -930,9 +1051,13 @@ class PlotsDialog(QDialog):
                 return
             # Genau die Einstellungen pruefen, mit denen dann auch gerechnet
             # wird - sonst meldet der Dialog etwas anderes, als hinterher
-            # herauskommt.
+            # herauskommt. Der Score haengt an alpha, also vorher anwenden.
+            probe = scan_data.analyse(
+                self.loaded,
+                alpha=(werte["alpha"] if werte["do_recompute"] else None),
+                percentile=(werte["percentile"] if werte["do_recompute"] else None))
             grund = report.valley_fit_diagnosis(
-                self.loaded, axis=werte["valley_axis"],
+                probe, axis=werte["valley_axis"],
                 follow=werte["valley_follow"], select=werte["valley_select"],
                 guide_follow=werte["valley_guide_follow"],
                 guide_halfwidth=werte["valley_guide_halfwidth"],
@@ -965,23 +1090,24 @@ class PlotsDialog(QDialog):
             draw_best_point=self.draw_best_point.isChecked(),
             best_point_follow=self._current_best_point_follow(),
             best_point_value=self.best_point_value.value(),
+            best_point_value2=self.best_point_value2.value(),
             fit_line_on_maps=self.fit_line_on_maps.isChecked(),
             fit_line_dashed_extrapolation=self.fit_line_dashed.isChecked(),
             amplitude_maps=self.amplitude_maps.isChecked(),
-            plot_amplitudes=self.plot_amplitudes.isChecked(),
+            point_cuts=self.point_cuts.isChecked(),
+            plot_overview=self.plot_overview.isChecked(),
             show=self.show_interactive.isChecked(),
-            do_recombine=self.do_recombine.isChecked(),
+            do_recompute=self.do_recompute.isChecked(),
             alpha=self.alpha.value(),
-            combo_lambda=self.combo_lambda.value(),
-            combo_percentile=self.combo_percentile.value(),
-            save_recombined=self.save_recombined.isChecked(),
+            percentile=self.percentile.value(),
+            save_recomputed=self.save_recomputed.isChecked(),
             ask_before_save=self.ask_before_save.isChecked(),
             do_valley=self.do_valley.isChecked(),
             valley_follow=report.FOLLOW_CHOICES[self.valley_follow.currentIndex()][0],
             valley_axis=report.VALLEY_AXIS_CHOICES[self.valley_axis.currentIndex()][0],
             valley_traces=[key for key, box in self.trace_boxes.items() if box.isChecked()],
-            valley_map_show_path=self.valley_map_show_path.isChecked(),
             valley_fit_line=self.valley_fit_line.isChecked(),
+            valley_map_show_path=self.valley_map_show_path.isChecked(),
             valley_path_mode=self._current_path_mode(),
             valley_select=self._current_select(),
             valley_guide_follow=report.FOLLOW_CHOICES[
@@ -1005,44 +1131,29 @@ def main():
 
     results = params["results"]
     source_path = results.get('_source_path')
-    kind = combine.dataset_kind(results)
 
-    # Erst die verbotenen Punkte herausnehmen, dann (neu) kombinieren - die
-    # Normierung in combine_grids() ist gitterweit, sie muss also die schon
-    # ausgeschnittenen Gitter sehen.
+    # Erst die verbotenen Punkte herausnehmen, dann auswerten - sonst
+    # bezoegen Bestpunkt und Region sie noch mit ein.
     n_verboten = None
     if params["forbidden_exclude"]:
-        results, verboten = combine.mask_forbidden_grids(results, params["forbidden_factor"])
+        results, verboten = scan_data.mask_forbidden_grids(
+            results, params["forbidden_factor"])
         n_verboten = None if verboten is None else int(verboten.sum())
 
-    # Score, Region und Bestpunkt werden IMMER neu gerechnet. Datensaetze
-    # von vor dem 2026-09-01 tragen dort noch den frueheren NORMIERTEN
-    # Score; ohne Neuberechnung wuerden Karte (rohes J) und Bericht
-    # (gespeicherter Wert) verschiedene Dinge zeigen.
-    if not combine.score_is_raw(results):
-        print("Hinweis: dieser Datensatz wurde mit dem frueheren normierten Score "
-              "gespeichert. Score, Region und bester Punkt werden aus den rohen "
-              "Gittern neu berechnet - die Zahlen weichen deshalb von aelteren "
-              "Berichten zu derselben Datei ab. Die Datei selbst bleibt unangetastet.")
+    # Score, Region und Bestpunkt werden IMMER hier bestimmt: die
+    # Amplituden-Scans speichern gar keinen, und die Fest-Amplituden-Scans
+    # einen mit ihrem eigenen alpha. So zeigen Karte und Bericht garantiert
+    # dieselbe Groesse.
+    results = scan_data.analyse(
+        results,
+        alpha=(params["alpha"] if params["do_recompute"] else None),
+        percentile=(params["percentile"] if params["do_recompute"] else None))
 
-    saved_recombined = None
-    if True:   # bewusst bedingungslos - siehe Kommentar oben
-        # Ohne eigenen Haken bleiben die Kombinationsparameter die des
-        # Datensatzes (None = "so lassen, wie gespeichert").
-        a = params["alpha"] if params["do_recombine"] else None
-        lam = params["combo_lambda"] if params["do_recombine"] else None
-        pct = params["combo_percentile"] if params["do_recombine"] else None
-        if kind == "hard_check":
-            results = hard_check.recheck_from_grids(
-                results, alpha=a, combo_lambda=lam, good_percentile=pct)
-        else:
-            results = combine.recombine_from_grids(
-                results, alpha=a, combo_lambda=lam, combo_percentile=pct)
-    if params["do_recombine"]:
-        if params["save_recombined"] and source_path:
-            src = FilePath(source_path)
-            target = src.with_name(f"{src.stem}_recombined{src.suffix}")
-            saved_recombined = combine.save_results(results, target, overwrite=False)
+    saved_recomputed = None
+    if params["do_recompute"] and params["save_recomputed"] and source_path:
+        src = FilePath(source_path)
+        target = src.with_name(f"{src.stem}_recomputed{src.suffix}")
+        saved_recomputed = scan_data.save_results(results, target, overwrite=False)
 
     try:
         out = report.make_all(
@@ -1051,6 +1162,9 @@ def main():
             draw_best_point=params["draw_best_point"],
             best_point_follow=params["best_point_follow"],
             best_point_value=params["best_point_value"],
+            best_point_value2=params["best_point_value2"],
+            point_cuts=params["point_cuts"],
+            valley_map_show_path=params["valley_map_show_path"],
             fit_line_on_maps=params["fit_line_on_maps"],
             fit_line_dashed_extrapolation=params["fit_line_dashed_extrapolation"],
             amplitude_maps=params["amplitude_maps"],
@@ -1059,7 +1173,7 @@ def main():
                               else None),
             forbidden_draw=params["forbidden_draw"],
             forbidden_excluded=params["forbidden_exclude"],
-            plot_amplitudes_overview=params["plot_amplitudes"],
+            plot_scan_overview=params["plot_overview"],
             save=True, show=params["show"],
             ask_before_save=params["ask_before_save"],
             legend_fontsize=params["legend_fontsize"],
@@ -1067,7 +1181,6 @@ def main():
             valley_axis=params["valley_axis"],
             valley_follow=params["valley_follow"],
             valley_traces=params["valley_traces"],
-            valley_map_show_path=params["valley_map_show_path"],
             valley_fit_line=params["valley_fit_line"],
             valley_path_mode=params["valley_path_mode"],
             valley_select=params["valley_select"],
@@ -1080,10 +1193,11 @@ def main():
         QMessageBox.critical(None, "Auswertung fehlgeschlagen", f"{exc!r}")
         sys.exit(1)
 
-    lines = [f"Auswertung fertig ({combine.KIND_LABELS.get(out['kind'], out['kind'])}).", ""]
+    lines = [f"Auswertung fertig "
+             f"({scan_data.KIND_LABELS.get(out['kind'], out['kind'])}).", ""]
     lines.append(f"Plots: {paths.FIT_PLOTS_DIR}")
     if params["forbidden_draw"] or params["forbidden_exclude"]:
-        grenze = combine.forbidden_boundary(results, params["forbidden_factor"])
+        grenze = scan_data.forbidden_boundary(results, params["forbidden_factor"])
         lines.append("")
         if grenze is None:
             lines.append("Verbotener Bereich: bei diesem Datensatz gibt es keine "
@@ -1109,8 +1223,8 @@ def main():
         lines.append("")
     if out.get('report'):
         lines.append(f"Bericht: {out['report']}")
-    if saved_recombined:
-        lines.append(f"Neu berechnete Fassung: {saved_recombined}")
+    if saved_recomputed:
+        lines.append(f"Neu berechnete Fassung: {saved_recomputed}")
     QMessageBox.information(None, "Fertig", "\n".join(lines))
 
 

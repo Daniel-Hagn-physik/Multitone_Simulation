@@ -451,12 +451,16 @@ und Anzahl betroffener Punkte.
 
 **Die Gerade in den Metrik-Karten.** Der Haken "Gerade auch in den
 Metrik-Vergleich einzeichnen" in der Gruppe *Darstellung* zeichnet dieselbe
-Gerade zusaetzlich in alle vier Karten von `..._metric_comparison.pdf` -
-durchgezogen im gefitteten Bereich, gepunktet in der Extrapolation, auf den
-gescannten width-Bereich beschnitten. Der extrapolierte Teil bekommt dabei
-KEINEN eigenen Legendeneintrag: der Unterschied zwischen Fit und
-Verlaengerung steckt im Linienformat, nicht in einem zweiten Kasten. Wie weit
-gefittet wurde, steht im Bericht. Welche Groesse gefittet wird, bestimmt
+Gerade zusaetzlich in alle vier Karten von `..._metric_comparison.pdf`, als
+EINE durchgezogene Linie ueber den ganzen gescannten Bereich (auf den
+gescannten width-Bereich beschnitten). Eine Gerade ist eine Gerade; aus
+welchem Bereich sie bestimmt wurde, steht im Bericht und nicht im
+Linienformat. Wer den Unterschied doch im Bild haben will, setzt den Haken
+*... ausserhalb des Fit-Bereichs gepunktet statt durchgezogen*: dann wird sie
+zweiteilig gezeichnet, durchgezogen im gefitteten Bereich und gepunktet in
+der Verlaengerung. Der gepunktete Teil bekommt bewusst KEINEN eigenen
+Legendeneintrag - der Unterschied steckt im Linienformat, nicht in einem
+zweiten Kasten. Welche Groesse gefittet wird, bestimmt
 "Groesse fuer Talpfad/Gerade" in der Talschnitt-Gruppe. Die Gerade ist immer
 die ueber dem effektiven Waist in µm; auf der mm-Achse erscheint sie deshalb
 leicht gekruemmt, weil win_input und effektiver Waist nichtlinear
@@ -708,6 +712,45 @@ Zwei Dinge dagegen:
    auf den Ordner **`Weighted_Optimization`** → **"Mark Directory as"** →
    **"Sources Root"**. Danach kennt PyCharm die Module und färbt sie normal
    ein — auch in `lib/`.
+
+## Plot-Stil: ein Massstab fuer alle drei Ordner
+
+Alle PDFs sind zum Einbinden mit `\includegraphics[width=\textwidth]`
+gedacht (A4, 2.5-cm-Raender = 16 cm = 6.3 Zoll). Die Schriftgroessen stehen
+genau einmal, und zwar so, wie sie **im Dokument** ankommen sollen (`DOC_RC`
+in `lib/report.py`, Grundschrift 9 pt). Eine Figur, die breiter angelegt ist
+- der Talschnitt mit zwei Panels -, wird beim Einbinden verkleinert;
+`dokument_stil(figurbreite)` skaliert Schrift, Linienbreiten, Markergroessen
+und Achsenabstaende deshalb vorher um genau denselben Faktor hoch. Die
+Einzeldatei sieht dadurch grossschriftig aus, im Dokument stimmt es.
+
+**Zweispaltige Figuren stehen eine Stufe kleiner.** Der Talschnitt (Karte +
+Schnitt) teilt sich die Textbreite auf zwei Panels; jedes ist damit etwa halb
+so breit wie eine einzelne Karte. Seine Beschriftung wird deshalb mit
+`ZWEI_PANEL_DICHTE = 0.70` gesetzt - genauso, wie in LaTeX eine Subfigure ihre
+Bildunterschrift kleiner setzt als die Hauptabbildung. Das ist kein Geschmack:
+mit der vollen Dokumentgroesse war die Legende der Karte breiter als die Karte
+selbst und ueberragte den Plot, um den es geht. Im Dokument sind es dort rund
+7 pt statt 10 pt.
+
+Der Block ist buchstabengleich der aus `Hard_Optimization/lib/report.py` und
+`Weighted_Optimization/lib/report.py` - genau darum geht es: die drei Ordner
+liefern Bilder in dasselbe Dokument. Gemessen kamen vorher 4.7 bis 11.7 pt
+an (Faktor 2.5, weil die PDFs 6.2 bis 14.8 Zoll breit waren), jetzt ueberall
+9.8 bis 10.2 pt.
+
+Zwei sichtbare Folgen: die Colorbar des Talschnitts traegt nur noch das
+Symbol (`J (raw)`, `U_w`, `eta_h`) statt des ausgeschriebenen Namens -
+hochkant neben einer schmalen Leiste war der lange Text hoeher als die
+Leiste -, und die Karte im Talschnitt beschriftet ihre x-Achse kurz
+(`omega' (µm)`); die lange Fassung steht weiterhin am Schnitt daneben. Die
+Figurbreite des Talschnitts haengt ausserdem **nicht** mehr an der Zahl der
+y-Achsen: da die Schrift mitskaliert, aenderte Breitermachen am Bild im
+Dokument nichts mehr, es machte nur die Datei groesser.
+
+Ebenfalls angeglichen: die Metrik-Karten tragen den Index `h` bzw. `w` an
+`U` und `eta` (Colorbar wie Titel), dieselbe Konvention wie in den beiden
+anderen Ordnern und wie in der Legende des Querschnitts.
 
 ## Was hier bewusst NICHT mehr drin ist
 

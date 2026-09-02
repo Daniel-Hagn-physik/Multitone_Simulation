@@ -115,8 +115,12 @@ COL_MUTED = "#6b6b6b"
 # Optimierer importieren
 # ======================================================================
 
+# Die Module liegen seit dem Aufraeumen (2026-09-02) im Unterordner lib/;
+# OPT_DIR (oben im Skript) uebersteuert das weiterhin, falls der Optimierer
+# woanders liegt.
 _here = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, OPT_DIR if OPT_DIR else _here)
+_lib = os.path.join(_here, "lib")
+sys.path.insert(0, OPT_DIR if OPT_DIR else _lib)
 import weighted_multitone_flattop_optimizer as wmfo  # noqa: E402
 import airy_scale  # noqa: E402
 

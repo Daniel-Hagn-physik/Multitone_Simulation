@@ -26,24 +26,36 @@ AMPLITUDES_DIR = BASE_DIR.parent
 # Der eigentliche Optimierer (MultitoneFlatTopOptimizer), die Plot-Klassen,
 # scan_checkpoint und perf_log liegen unveraendert in Weighted_Optimization
 # und werden von hier aus mitbenutzt - NICHT dupliziert.
-WEIGHTED_DIR = AMPLITUDES_DIR / "Weighted_Optimization"
-if str(WEIGHTED_DIR) not in sys.path:
-    sys.path.insert(0, str(WEIGHTED_DIR))
+#
+# SEIT DEM AUFRAEUMEN (2026-09-02) liegen sie dort im Unterordner lib/;
+# frueher lagen sie direkt in Weighted_Optimization. Beide Faelle werden
+# unterstuetzt, damit dieser Ordner auch mit einer aelteren Kopie von
+# Weighted_Optimization laeuft.
+WEIGHTED_BASE = AMPLITUDES_DIR / "Weighted_Optimization"
+_KANDIDATEN = (WEIGHTED_BASE / "lib", WEIGHTED_BASE)
+WEIGHTED_DIR = next(
+    (d for d in _KANDIDATEN
+     if (d / "weighted_multitone_flattop_optimizer.py").exists()),
+    None)
 
-if not (WEIGHTED_DIR / "weighted_multitone_flattop_optimizer.py").exists():
+if WEIGHTED_DIR is None:
     raise ImportError(
-        f"Der Ordner 'Weighted_Optimization' wurde nicht gefunden (erwartet: {WEIGHTED_DIR}).\n"
+        f"weighted_multitone_flattop_optimizer.py wurde nicht gefunden (gesucht in "
+        f"{_KANDIDATEN[0]} und {_KANDIDATEN[1]}).\n"
         f"Combinated_Optimization benutzt von dort den Optimierer, die Plot-Klassen, "
         f"scan_checkpoint und perf_log. Beide Ordner muessen nebeneinander unter "
         f"'Amplitudes/' liegen."
     )
+
+if str(WEIGHTED_DIR) not in sys.path:
+    sys.path.insert(0, str(WEIGHTED_DIR))
 
 # HINWEIS ZU PYCHARM: die Module aus WEIGHTED_DIR werden erst zur LAUFZEIT
 # ueber den sys.path-Eintrag oben gefunden. PyCharms statische Analyse kennt
 # diesen Eintrag nicht und markiert solche Importe rot ("unresolved
 # reference") - das ist ein reines Anzeigeproblem, der Code laeuft.
 # Dauerhaft weg bekommt man das Rot mit einem einmaligen Handgriff:
-#   Rechtsklick auf den Ordner "Weighted_Optimization"
+#   Rechtsklick auf den Ordner "Weighted_Optimization/lib"
 #   -> "Mark Directory as" -> "Sources Root"
 # Danach kennt PyCharm die Module und faerbt sie normal ein.
 # Damit das Rot gar nicht erst in den drei Haupt-Skripten auftaucht, sind
