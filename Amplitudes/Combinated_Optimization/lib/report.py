@@ -803,7 +803,7 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
     Karten eingezeichnet, als durchgezogene Linie ueber den ganzen gescannten
     Bereich. Mit fit_line_dashed_extrapolation=True wird der Teil ausserhalb
     des Fit-Bereichs stattdessen gepunktet (siehe draw_fit_line_on_map)."""
-    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
+    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
     width_vals = np.asarray(results['width_vals'], dtype=float)
     x_vals, x_label, reversed_ = win_axis_values(results, win_axis)
 
@@ -897,18 +897,20 @@ def plot_region(results, prefix, out_dir=None, win_axis="before_lens",
                 draw_best_point=True, save=True, show=False, confirm_overwrite=None,
                 forbidden_factor=None, best_point=None):
     """Score-Heatmap, auf Wunsch mit dem besten Punkt."""
-    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
+    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
     width_vals = np.asarray(results['width_vals'], dtype=float)
     x_vals, x_label, reversed_ = win_axis_values(results, win_axis)
     Z = score_grid(results)
     if Z is None:
         raise ValueError("Der Datensatz enthaelt kein Score-Gitter.")
-    Z = np.asarray(Z, dtype=float)
+    # In Prozent, wie U und eta und wie J im Querschnitt. "roh" bezieht sich
+    # auf die fehlende gitterweite Normierung, nicht auf die Einheit.
+    Z = np.asarray(Z, dtype=float) * 100.0
     Z_plot = Z[:, ::-1] if reversed_ else Z
 
     kind = dataset_kind(results)
-    score_label = ("Consistency score $J$ (raw)" if kind == "hard_check"
-                   else r"Penalty objective $J$ (raw)")
+    score_label = ("Consistency score $J$ (%)" if kind == "hard_check"
+                   else r"Penalty objective $J$ (%)")
     title = "Consistency region" if kind == "hard_check" else "Penalty region"
 
     with dokument_stil(REGION_FIGSIZE[0]):
@@ -939,7 +941,7 @@ def plot_amplitudes(results, prefix, out_dir=None, save=True, show=False,
     """Die 6-Panel-Uebersicht und die Schnitte des vorhandenen
     AmplitudeScanPlotter (unveraendertes Modul aus Weighted_Optimization,
     hier nur in Fit_Plots umgeleitet)."""
-    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
+    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
     plotter = AmplitudeScanPlotter(results, out_dir=out_dir, confirm_overwrite=confirm_overwrite)
     overview = plotter.plot_scan2d_combined(show=show, save=save)
     cuts = plotter.plot_dependence_cuts(show=show, save=save)
@@ -957,7 +959,7 @@ def plot_agreement_map(results, prefix, out_dir=None, win_axis="before_lens",
                        save=True, show=False, confirm_overwrite=None,
                        forbidden_factor=None):
     """Karte der vier Kategorien: wo sind gewichtet und hart einig?"""
-    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
+    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
     c = results.get('consistency') or {}
     agreement = np.asarray(c.get('agreement_map'), dtype=float)
     width_vals = np.asarray(results['width_vals'], dtype=float)
@@ -989,7 +991,7 @@ def plot_agreement_map(results, prefix, out_dir=None, win_axis="before_lens",
 def plot_score_scatter(results, prefix, out_dir=None, save=True, show=False,
                        confirm_overwrite=None):
     """Streudiagramm: gewichteter Score vs. nachgerechneter harter Score."""
-    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
+    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
     c = results.get('consistency') or {}
     sw = np.asarray(c.get('score_weighted'), dtype=float).ravel()
     sh = np.asarray(c.get('score_hard'), dtype=float).ravel()
@@ -1355,7 +1357,10 @@ def _region_lines(results, heading, intro):
     lines += [
         intro.format(pct=results.get('combo_percentile', float('nan')),
                      n_region=region['n_points_region'], n_total=region['n_points_total'],
-                     threshold=(f"{thr:.4f}" if thr is not None else "n/a")),
+                     # In Prozent, wie J im Plot und in der Punkt-Tabelle;
+                     # der rohe Wert steht daneben.
+                     threshold=(f"{thr * 100:.3f}% (roh {thr:.5f})"
+                                if thr is not None else "n/a")),
         "",
         f"- win_input (vor der Linse): {region['win_input_min'] * 1e3:.4f} .. "
         f"{region['win_input_max'] * 1e3:.4f} mm",
@@ -1383,7 +1388,10 @@ def _best_point_lines(results, heading):
         f"Crosstalk_weighted = {best['crosstalk_weighted'] * 100:.3f}%",
         f"- Uniformity_kombi = {best['uniformity_kombi']:.4f}, "
         f"Crosstalk_kombi = {best['crosstalk_kombi']:.4f} (rohe Einheiten)",
-        f"- J (Score) = {best['combined_score']:.5f}",
+        # J in Prozent, wie im Plot und wie U und eta - der rohe Wert steht
+        # daneben, weil der Optimierer ihn so ausgibt.
+        f"- J (Score) = {best['combined_score'] * 100:.3f}% "
+        f"(roh {best['combined_score']:.5f})",
         "",
     ]
     if best.get('at_edge'):
@@ -1598,13 +1606,14 @@ def make_all(results, win_axis="before_lens", draw_best_point=True,
     Gibt ein dict mit den Pfaden zurueck. Wird sowohl von run_plots.py als
     auch am Ende der beiden Scan-Skripte aufgerufen.
     """
-    plots_dir = paths.FIT_PLOTS_DIR if plots_dir is None else plots_dir
+    plots_dir = paths.fit_plots_dir() if plots_dir is None else plots_dir
     results_dir = paths.FIT_RESULTS_DIR if results_dir is None else results_dir
     confirm_overwrite = None if ask_before_save else (lambda existing_path: True)
 
     prefix = output_prefix(results)
     kind = dataset_kind(results)
-    out = dict(prefix=prefix, kind=kind, plots={}, report=None)
+    out = dict(prefix=prefix, kind=kind, plots={}, report=None,
+               plots_dir=plots_dir, results_dir=results_dir)
 
     # Die Gerade fuer die Metrik-Karten: dieselbe wie im Talschnitt, also
     # ueber der µm-Achse und der eingestellten Fuehrungsgroesse - egal,
@@ -1816,7 +1825,13 @@ TRACE_SPECS = {
     # J hat das Schwarz, das vorher der (inzwischen entfallene) normierte
     # Score hatte - damit bleibt der auf Farbabstand geprueffte 7er-Satz
     # (siehe oben) unveraendert.
-    "penalty_raw": (r"$J$", "", "#000000", False),   # der einzige Score
+    # J in PROZENT, wie U und eta. J = alpha*U + (1-alpha)*C (+ Penalty) ist
+    # eine Kombination genau dieser relativen Groessen, hat also dieselbe
+    # Einheit - und nur so kann es ueberhaupt mit ihnen auf eine gemeinsame
+    # y-Achse kommen, wenn es in derselben Groessenordnung liegt (die
+    # Buendelung in group_traces_by_axis trennt zuerst nach Einheit).
+    # Hard_Optimization und Weighted_Optimization halten es seit jeher so.
+    "penalty_raw": (r"$J$", "%", "#000000", True),   # der einzige Score
     "r_x": (r"$r_x$", "", "#785EF0", False),
     "r_y": (r"$r_y$", "", "#CC3311", False),
 }
@@ -2180,7 +2195,7 @@ FOLLOW_PLOT_LABELS = {
 # genuegt: was J, U und eta bedeuten, steht im Bericht und in den Titeln der
 # Metrik-Karten.
 FOLLOW_CBAR_LABELS = {
-    "penalty_raw": r"$J$ (raw)",
+    "penalty_raw": r"$J$",
     "uniformity_weighted": r"$U_w$",
     "crosstalk_weighted": r"$\eta_w$",
     "uniformity_hard": r"$U_h$",
@@ -2198,6 +2213,21 @@ def follow_plot_label(follow):
 def follow_cbar_label(follow):
     """Ganz kurze Fassung fuer die hochkant stehende Colorbar-Beschriftung."""
     return FOLLOW_CBAR_LABELS.get(follow, follow_plot_label(follow))
+
+
+# Alle Fuehrungsgroessen ausser r_x/r_y sind relative Groessen und werden in
+# Prozent gezeigt - die Metriken selbst, J, und die beiden alpha-Kombinationen
+# score_hard/score_weighted (die stehen nicht in TRACE_SPECS, weil sie nur als
+# Fuehrungsgroesse waehlbar sind, nicht als Kurve).
+_PROZENT_FOLLOW_EXTRA = ("score_hard", "score_weighted")
+
+
+def follow_ist_prozent(follow):
+    """Wird diese Groesse in Prozent gezeigt? Entscheidet ueber den Faktor 100
+    der Heatmap UND ueber das (%) an der Colorbar."""
+    if follow in _PROZENT_FOLLOW_EXTRA:
+        return True
+    return bool(TRACE_SPECS.get(follow, (None, None, None, False))[3])
 
 
 def _follow_label(follow):
@@ -2438,7 +2468,7 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
     Beschriftungen sind durchgehend englisch und mathtext-basiert, damit
     die PDFs unveraendert in einen LaTeX-Satz passen.
     """
-    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
+    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
     valley = extract_path(results, axis=axis, follow=follow, path_mode=path_mode,
                           select=select, guide_follow=guide_follow,
                           guide_halfwidth=guide_halfwidth,
@@ -2458,7 +2488,10 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
     x_heat, x_heat_label, reversed_ = win_axis_values(results, win_axis)
     width_vals = np.asarray(results["width_vals"], dtype=float)
     target = _grid_for(results, follow)
-    Z = target[:, ::-1] if reversed_ else target
+    # Dieselbe Einheit wie die Kurven rechts: liegt die Fuehrungsgroesse in
+    # Prozent vor, wird auch die Karte in Prozent gezeigt.
+    skala = 100.0 if follow_ist_prozent(follow) else 1.0
+    Z = (target[:, ::-1] if reversed_ else target) * skala
 
     # Die Buendelung (und damit die Achsenskalierung) richtet sich nur nach
     # den BENUTZTEN Punkten. Sonst zieht ein einzelner Ausreisser am Rand des
@@ -2504,7 +2537,8 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
             fit_fuer_maske is None and path_mode != "line")
 
         im = ax_map.pcolormesh(x_heat, width_vals * 1e-6, Z, shading="auto", cmap="magma_r")
-        fig.colorbar(im, ax=ax_map, label=follow_cbar_label(follow))
+        fig.colorbar(im, ax=ax_map,
+                     label=follow_cbar_label(follow) + (" (%)" if skala == 100.0 else ""))
         ax_map.set_xlabel(kurzes_achsenlabel(x_heat_label))
         # Die Karte ist das schmalere der beiden Panels; die automatische
         # Teilung setzt dort mehr Striche, als Zahlen nebeneinander passen
@@ -2613,8 +2647,12 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
                 ax.spines["right"].set_color(achsen_farbe)
 
         ax_cut.set_xlabel(valley["x_label"])
-        titel = ("Values along the fitted line" if path_mode == "line"
-                 else "Values along the minimum path")
+        # Ueberschrift des rechten Panels. Im Geradenmodus ist der Schnitt
+        # entlang der Fit-Geraden gelegt, im Talmodus entlang des Minimums -
+        # beides heisst "Cross-section along ...", damit die beiden Fassungen
+        # nebeneinander als dasselbe Bild erkennbar bleiben.
+        titel = ("Cross-section along fit" if path_mode == "line"
+                 else "Cross-section along minimum path")
         ax_cut.set_title(titel)
         ax_cut.grid(True, alpha=0.25)
         ax_cut.legend(linien, [ln.get_label() for ln in linien],

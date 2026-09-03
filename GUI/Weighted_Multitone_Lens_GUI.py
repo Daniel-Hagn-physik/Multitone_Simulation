@@ -61,7 +61,7 @@ from matplotlib.patches import Rectangle, Circle
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QSlider, QSpinBox, QDoubleSpinBox, QCheckBox, QPushButton,
-    QGroupBox, QScrollArea, QSplitter, QMessageBox, QComboBox
+    QGroupBox, QScrollArea, QSplitter, QMessageBox, QComboBox, QSizePolicy
 )
 from PyQt5.QtCore import Qt
 
@@ -126,6 +126,18 @@ except Exception:
 # ============================================================
 # Hilfsfunktionen (Physik/Numerik) — unverändert zur bisherigen Version
 # ============================================================
+def short_name(path, keep=34):
+    """Kuerzt einen Dateinamen fuer die Anzeige, mit Auslassung in der Mitte.
+
+    Ein gespeicherter Dateiname ist lang und enthaelt keine Leerzeichen, laesst
+    sich also nicht umbrechen; der volle Pfad steht stattdessen im Tooltip."""
+    name = str(getattr(path, "name", path))
+    if len(name) <= keep:
+        return name
+    head = keep // 2 - 2
+    return name[:head] + "..." + name[-(keep - head - 3):]
+
+
 def multitone_frequencies(N, offset, width):
     """Erzeugt diskrete Frequenzen wie im AWG: width * n/(N-1) + offset.
 
@@ -180,7 +192,9 @@ def compute_intensity_profile(X, Y, centers_x, centers_y, width_param, amps, use
         return gaussian_2d_weighted_distance_from_centers(X, Y, centers_x, centers_y, width_param, amps)
 
 
-def create_neighbourhood(X, Y, pitch, centers_x, centers_y, w_in, amps=None, use_airy=False):
+def create_neighbourhood(X, Y, pitch, centers_x, centers_y, w_in, amps=None,
+                         use_airy=False, deg=None, phases=None,
+                         airy_scale_factor=None):
     """
     Unveraendert zur Originaldatei: Summiert die (pro Nachbar-Kopie auf 1
     normierten) Intensitaetsbeitraege der 8 Nachbar-Sites. NUR fuer das
@@ -191,6 +205,10 @@ def create_neighbourhood(X, Y, pitch, centers_x, centers_y, w_in, amps=None, use
     """
     if amps is None:
         amps = np.ones(len(centers_x))
+    if deg is None:
+        deg = []
+    if phases is None:
+        phases = np.zeros(len(centers_x))
     I_neighbor = np.zeros_like(X)
     for ix in [-1, 0, 1]:
         for iy in [-1, 0, 1]:
@@ -198,8 +216,22 @@ def create_neighbourhood(X, Y, pitch, centers_x, centers_y, w_in, amps=None, use
                 continue
             shifted_x = centers_x + ix * pitch
             shifted_y = centers_y + iy * pitch
-            I_spot = compute_intensity_profile(X, Y, shifted_x, shifted_y, w_in, amps, use_airy)
-            I_spot = I_spot / np.max(I_spot)
+            if deg:
+                # Jede Nachbarkopie hat dieselbe innere Struktur wie die eigene
+                # Site, also auch dieselben frequenzentarteten Paare und deren
+                # statischen Kreuzterm. Die KOPIEN untereinander werden weiter
+                # als inkohaerent behandelt (Intensitaeten addiert) - ob sie es
+                # sind, haengt daran, wie die Nachbarsites erzeugt werden, und
+                # das ist hier nicht modelliert.
+                Fn = field_stack(X, Y, shifted_x, shifted_y, amps, w_in, use_airy,
+                                 airy_scale_factor)
+                I_spot = static_intensity(Fn, deg, phases)
+            else:
+                I_spot = compute_intensity_profile(X, Y, shifted_x, shifted_y, w_in,
+                                                   amps, use_airy)
+            mx = np.max(I_spot)
+            if mx > 0:
+                I_spot = I_spot / mx
             I_neighbor += I_spot
     return I_neighbor
 
@@ -207,6 +239,136 @@ def create_neighbourhood(X, Y, pitch, centers_x, centers_y, w_in, amps=None, use
 def overlap_mask_pitch(X, Y, center_x, center_y, side_length):
     half_side = side_length / 2
     return (np.abs(X - center_x) <= half_side) & (np.abs(Y - center_y) <= half_side)
+
+
+def overlap_mask_circle(X, Y, center_x, center_y, radius):
+    """Kreisfoermige Auswerteregion - bildet das Wandern des Strahlzeigers um
+    die Mitte ab, im Gegensatz zum Tonquadrat, das die Ausdehnung des
+    Spot-Musters beschreibt."""
+    return ((X - center_x) ** 2 + (Y - center_y) ** 2) <= radius ** 2
+
+
+def uniformity_mask(X, Y, center_x, center_y, state):
+    """Maske der harten Uniformity-Region, je nach eingestellter Form.
+
+    'square': das Tonquadrat, also die Ausdehnung des Spot-Musters. Seine
+    Kantenlaenge wird in full_update() LAUFEND nachgezogen, sobald sich
+    N_x, N_y, width oder die Linsen aendern - sie ist keine frei einstellbare
+    Groesse mehr.
+    'circle': ein Kreis fester Groesse um die Atom-Mitte (Beam-Pointing)."""
+    if state.get("uniformity_shape", "square") == "circle":
+        return overlap_mask_circle(X, Y, center_x, center_y,
+                                   state.get("uniformity_radius", 2e-6))
+    return overlap_mask_pitch(X, Y, center_x, center_y, state["uniformity_side_length"])
+
+
+# ============================================================
+# Kohaerente Ueberlagerung: der statische Anteil
+# ============================================================
+# Die Toene sind untereinander kohaerent. Ihre Kreuzterme laufen mit der
+# Differenzfrequenz um und mitteln sich in jedem Bild weg - AUSSER bei Paaren
+# mit identischer Gesamtfrequenz. Deren Kreuzterm liegt bei 0 Hz, mittelt sich
+# also nie weg und steht als STATISCHES Interferenzmuster im Bild. Genau das
+# zeigt dieses GUI, und genau das fehlte in der reinen Intensitaetssumme.
+#
+# Beide AODs schieben die Lichtfrequenz, ein Spot (n,m) traegt also
+# f_s = f_x(n) + f_y(m). Bei gleicher width auf beiden Achsen gibt es dann
+# IMMER mindestens ein entartetes Paar (die diagonal gegenueberliegenden
+# Eckspots), und bei N_x = N_y ist jede Anti-Diagonale vollstaendig entartet -
+# fuer 5x5 weicht das Zeitmittel dadurch um fast 200 % von der inkohaerenten
+# Summe ab.
+
+
+def spot_frequencies(N_x, N_y, width):
+    """Gesamtfrequenz jedes Spots, in der Reihenfolge von compute_centers()."""
+    fx = multitone_frequencies(N_x, offset, width)
+    fy = multitone_frequencies(N_y, offset, width)
+    return np.array([a + b for a in fx for b in fy])
+
+
+def degenerate_pairs(f_spots, width, N_x, N_y, rel_tol=1e-9):
+    """Spot-Paare mit identischer Gesamtfrequenz."""
+    f = np.asarray(f_spots, dtype=float)
+    if f.size < 2:
+        return []
+    scale = max(abs(width), 1.0)
+    key = np.round((f - f.min()) / (scale * rel_tol)).astype(np.int64)
+    out = []
+    for v in np.unique(key):
+        idx = np.flatnonzero(key == v)
+        if idx.size > 1:
+            out.append(idx)
+    return out
+
+
+def field_stack(X, Y, centers_x, centers_y, amp_spots, width_param, use_airy,
+                airy_scale_factor=None):
+    """FELD je Spot, A_s * u_s(x,y). `amps` gewichtet im uebrigen Projekt die
+    Intensitaet, das Feld traegt daher die Wurzel. Beim Airy bleibt das
+    Vorzeichen der Ringe erhalten - fuer die kohaerente Summe wesentlich."""
+    factor = AIRY_SCALE_FACTOR if airy_scale_factor is None else float(airy_scale_factor)
+    A = np.sqrt(np.clip(np.asarray(amp_spots, dtype=float), 0.0, None))
+    out = np.empty((len(centers_x),) + X.shape, dtype=float)
+    for i, (cx_, cy_, amp) in enumerate(zip(centers_x, centers_y, A)):
+        r2 = (X - cx_) ** 2 + (Y - cy_) ** 2
+        if use_airy:
+            kk = 3.83170597 / (factor * width_param)
+            u = kk * np.sqrt(r2)
+            prof = np.ones_like(u)
+            m = u > 1e-12
+            prof[m] = 2.0 * j1(u[m]) / u[m]
+        else:
+            prof = np.exp(-r2 / width_param ** 2)
+        out[i] = amp * prof
+    return out
+
+
+def static_intensity(F, deg, phases):
+    """Zeitmittel der kohaerenten Ueberlagerung:
+
+        <I> = sum_s g_s^2  +  sum over degenerate pairs 2 g_s g_s' cos(dphi)
+
+    Der erste Term ist die bisherige inkohaerente Summe, der zweite der
+    statische Interferenzanteil. Bei einer Phasendifferenz von 90 Grad
+    verschwindet er exakt - fuer Gruppen mit drei oder mehr Mitgliedern
+    laesst sich das aber nicht fuer alle Paare gleichzeitig erreichen."""
+    I = np.einsum("sij,sij->ij", F, F)
+    for grp in deg:
+        for i in range(len(grp)):
+            for j in range(i + 1, len(grp)):
+                s_, t_ = grp[i], grp[j]
+                I = I + 2.0 * F[s_] * F[t_] * np.cos(float(phases[s_] - phases[t_]))
+    return I
+
+
+def quadrature_phases(N_x, N_y, deg, n_start=60, seed=3):
+    """Tonphasen, die die entarteten Paare moeglichst nahe an die Quadratur
+    bringen. phi_spot(n,m) = phi_x(n) + phi_y(m) - es gibt also nur
+    N_x + N_y Freiheitsgrade, und drei Zeiger koennen nicht paarweise alle
+    orthogonal stehen. Fuer ein einzelnes Paar wird der Term exakt null."""
+    from scipy.optimize import minimize
+    n_free = max(0, N_x - 1) + max(0, N_y - 1)
+    if not deg or n_free == 0:
+        return np.zeros(N_x * N_y)
+
+    def spots(v):
+        px = np.concatenate(([0.0], v[:N_x - 1])) if N_x > 1 else np.zeros(1)
+        py = np.concatenate(([0.0], v[N_x - 1:])) if N_y > 1 else np.zeros(1)
+        return np.repeat(px, N_y) + np.tile(py, N_x)
+
+    def pen(v):
+        ph = spots(v)
+        return sum(abs(np.cos(ph[g[i]] - ph[g[j]]))
+                   for g in deg for i in range(len(g)) for j in range(i + 1, len(g)))
+
+    rng = np.random.default_rng(seed)
+    best = (1e18, np.zeros(n_free))
+    for _ in range(n_start):
+        r = minimize(pen, rng.uniform(0, 2 * np.pi, n_free), method="Nelder-Mead",
+                     options=dict(maxiter=2500, xatol=1e-7, fatol=1e-12))
+        if r.fun < best[0]:
+            best = (float(r.fun), r.x)
+    return spots(best[1])
 
 
 def compute_centers(N_x, N_y, width, f1, f2):
@@ -344,7 +506,8 @@ def weighted_crosstalk(I_own, I_neighbor, W):
     return np.sum(I_neighbor * W) / denom
 
 
-def local_neighbor_intensity(X, Y, pitch, centers_x, centers_y, width_param, amps, use_airy):
+def local_neighbor_intensity(X, Y, pitch, centers_x, centers_y, width_param, amps,
+                             use_airy, deg=None, phases=None, airy_scale_factor=None):
     """
     Wie create_neighbourhood(), aber OHNE dessen interne Renormierung
     'I_spot /= np.max(I_spot)' pro Nachbar-Kopie.
@@ -370,7 +533,13 @@ def local_neighbor_intensity(X, Y, pitch, centers_x, centers_y, width_param, amp
                 continue
             shifted_x = centers_x + ix * pitch
             shifted_y = centers_y + iy * pitch
-            I_neighbor += compute_intensity_profile(X, Y, shifted_x, shifted_y, width_param, amps, use_airy)
+            if deg:
+                Fn = field_stack(X, Y, shifted_x, shifted_y, amps, width_param,
+                                 use_airy, airy_scale_factor)
+                I_neighbor += static_intensity(Fn, deg, phases)
+            else:
+                I_neighbor += compute_intensity_profile(X, Y, shifted_x, shifted_y,
+                                                        width_param, amps, use_airy)
     return I_neighbor
 
 
@@ -413,6 +582,18 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             "f2": 750e-3,
             "width": 0.35e6,
             "uniformity_side_length": 2.6e-6,
+            # Form der harten Uniformity-Region: 'square' = Tonquadrat (folgt
+            # dem Spot-Muster automatisch), 'circle' = Kreis fester Groesse.
+            # Kohaerenz: statischer Interferenzanteil frequenzentarteter Spots
+            # Zoom des Hauptplots: None = ganzes Grid, sonst Halbbreite in m
+            # um die Atom-Mitte. Bleibt ueber Neuberechnungen erhalten - eine
+            # Zoom-Geste der Matplotlib-Leiste wuerde bei jedem full_update()
+            # wieder verlorengehen.
+            "zoom_half": None,
+            "coherent": True,
+            "phase_mode": "zero",        # 'zero' | 'quadrature'
+            "uniformity_shape": "square",
+            "uniformity_radius": 2.0e-6,
             "crosstalk_side_length": pitch,
             "custom_amps": False,
             "use_airy": False,
@@ -475,6 +656,22 @@ class WeightedFlatMultiToneWindow(QMainWindow):
     # --------------------------------------------------------
     # UI-Aufbau
     # --------------------------------------------------------
+
+    def _tame_info_labels(self):
+        """Verhindert, dass lange, nicht umbrechbare Texte den Bedienbereich
+        auseinanderziehen.
+
+        Ein gespeicherter Dateiname enthaelt keine Leerzeichen, der Zeilenumbruch
+        kann ihn also nicht brechen, und das Label meldet einen sehr breiten
+        sizeHint - den das Layout befolgt, indem es den ganzen Bereich verbreitert
+        und alle Knoepfe zusammenstaucht. Wird der waagerechte sizeHint ignoriert,
+        richtet sich das Label nach dem Bereich statt umgekehrt.
+        """
+        for lab in self.findChildren(QLabel):
+            if lab.wordWrap():
+                lab.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+                lab.setMinimumWidth(1)
+
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
@@ -513,6 +710,8 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         control_layout.addWidget(self._build_amp_group())
         control_layout.addWidget(self._build_atom_group())
         control_layout.addWidget(self._build_atom_position_group())
+        control_layout.addWidget(self._build_zoom_group())
+        control_layout.addWidget(self._build_coherence_group())
         control_layout.addWidget(self._build_region_group())
         control_layout.addWidget(self._build_crosshair_group())
         control_layout.addWidget(self._build_save_group())
@@ -532,6 +731,8 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.canvas.mpl_connect("button_press_event", self.on_button_press)
         self.canvas.mpl_connect("motion_notify_event", self.on_motion)
         self.canvas.mpl_connect("button_release_event", self.on_release)
+
+        self._tame_info_labels()
 
     def _build_update_mode_group(self):
         """NEU: Umschalter zwischen dem bisherigen Live-Update (GUI zeichnet
@@ -781,12 +982,121 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self._update_atom_offset_labels()
         return self.atom_pos_group
 
+    def _build_zoom_group(self):
+        box = QGroupBox("Ansicht (2D-Plot)")
+        layout = QHBoxLayout(box)
+        self.cb_zoom = QCheckBox("Zoom")
+        self.cb_zoom.setToolTip(
+            "Schneidet den Hauptplot auf einen quadratischen Ausschnitt um die\n"
+            "Atom-Mitte zu. Die Einstellung bleibt über Neuberechnungen erhalten.")
+        self.cb_zoom.stateChanged.connect(self.on_zoom_changed)
+        layout.addWidget(self.cb_zoom)
+        self.sp_zoom = QDoubleSpinBox()
+        self.sp_zoom.setRange(0.1, 200.0)
+        self.sp_zoom.setDecimals(2)
+        self.sp_zoom.setSingleStep(0.5)
+        self.sp_zoom.setValue(3.0)
+        self.sp_zoom.setSuffix(" µm (halbe Breite)")
+        self.sp_zoom.setKeyboardTracking(False)
+        self.sp_zoom.setEnabled(False)
+        self.sp_zoom.valueChanged.connect(self.on_zoom_changed)
+        layout.addWidget(self.sp_zoom)
+        return box
+
+    def on_zoom_changed(self, *args):
+        on = self.cb_zoom.isChecked()
+        self.sp_zoom.setEnabled(on)
+        self.state["zoom_half"] = (self.sp_zoom.value() * 1e-6) if on else None
+        self._apply_zoom()
+        self.canvas.draw_idle()
+
+    def _apply_zoom(self):
+        """Setzt die Achsengrenzen des Hauptplots. Wird am Ende jeder
+        Neuzeichnung aufgerufen, damit der Ausschnitt erhalten bleibt."""
+        if not hasattr(self, "ax_main") or "r_center" not in self.cache:
+            return
+        half = self.state.get("zoom_half")
+        if half is None:
+            if "extent" in self.cache:
+                ex = self.cache["extent"]
+                self.ax_main.set_xlim(ex[0], ex[1])
+                self.ax_main.set_ylim(ex[2], ex[3])
+            return
+        cx_um, cy_um = np.array(self._atom_center()) * 1e6
+        h = half * 1e6
+        self.ax_main.set_xlim(cx_um - h, cx_um + h)
+        self.ax_main.set_ylim(cy_um - h, cy_um + h)
+
+    def _build_coherence_group(self):
+        box = QGroupBox("Kohärenz (statische Interferenz)")
+        layout = QVBoxLayout(box)
+        self.cb_coherent = QCheckBox("frequenzentartete Spots kohärent überlagern")
+        self.cb_coherent.setChecked(self.state["coherent"])
+        self.cb_coherent.setToolTip(
+            "Die Töne sind untereinander kohärent. Ihre Kreuzterme laufen mit der\n"
+            "Differenzfrequenz um und mitteln sich weg - AUSSER bei Paaren mit\n"
+            "identischer Gesamtfrequenz f_x(n) + f_y(m). Deren Kreuzterm liegt bei\n"
+            "0 Hz und steht als statisches Muster im Bild.\n\n"
+            "Bei gleicher width auf beiden Achsen gibt es immer mindestens ein\n"
+            "solches Paar. Bei N_x = N_y ist jede Anti-Diagonale entartet: für 5x5\n"
+            "weicht das Bild dadurch um fast 200 % von der reinen Intensitätssumme\n"
+            "ab. Ohne Haken rechnet das GUI wie bisher, also inkohärent.")
+        self.cb_coherent.stateChanged.connect(self.on_coherent_changed)
+        layout.addWidget(self.cb_coherent)
+
+        self.cmb_phase_mode = QComboBox()
+        self.cmb_phase_mode.addItems(["Tonphasen alle 0",
+                                      "Tonphasen auf Quadratur optimiert"])
+        self.cmb_phase_mode.setToolTip(
+            "Bei 90 Grad Phasendifferenz verschwindet der statische Kreuzterm\n"
+            "eines Paares exakt. Für ein einzelnes Paar (z.B. 3x4) geht das\n"
+            "vollständig; bei Gruppen mit drei oder mehr Mitgliedern nicht,\n"
+            "weil drei Zeiger nicht paarweise alle orthogonal stehen können.")
+        self.cmb_phase_mode.currentIndexChanged.connect(self.on_phase_mode_changed)
+        layout.addWidget(self.cmb_phase_mode)
+
+        self.label_coherent = QLabel("-")
+        self.label_coherent.setWordWrap(True)
+        self.label_coherent.setStyleSheet("color: #555; font-size: 10px;")
+        layout.addWidget(self.label_coherent)
+        return box
+
+    def on_coherent_changed(self, _):
+        self.state["coherent"] = self.cb_coherent.isChecked()
+        self.cmb_phase_mode.setEnabled(self.state["coherent"])
+        self.full_update()
+
+    def on_phase_mode_changed(self, idx):
+        self.state["phase_mode"] = "zero" if idx == 0 else "quadrature"
+        self.full_update()
+
     def _build_region_group(self):
         self.region_group = QGroupBox("Regions (Uniformity / Crosstalk)")
         layout = QVBoxLayout(self.region_group)
-        self.btn_uniform_to_spots = QPushButton("Uniformity = spot square")
+        self.cmb_uniform_shape = QComboBox()
+        self.cmb_uniform_shape.addItems([
+            "Uniformity: Tonquadrat (folgt automatisch)",
+            "Uniformity: Kreis um die Mitte",
+        ])
+        self.cmb_uniform_shape.setToolTip(
+            "Tonquadrat: die Region umfasst das Spot-Muster und wird bei jeder\n"
+            "Aenderung von N_x, N_y, width oder den Linsen automatisch\n"
+            "nachgezogen - kein Knopfdruck mehr noetig.\n\n"
+            "Kreis: feste Groesse um die Mitte, fuer das Wandern des\n"
+            "Strahlzeigers (Beam Pointing).")
+        self.cmb_uniform_shape.currentIndexChanged.connect(self.on_uniformity_shape_changed)
+        self.sp_uniform_radius = QDoubleSpinBox()
+        self.sp_uniform_radius.setRange(0.05, 50.0)
+        self.sp_uniform_radius.setDecimals(3)
+        self.sp_uniform_radius.setSingleStep(0.1)
+        self.sp_uniform_radius.setValue(2.0)
+        self.sp_uniform_radius.setSuffix(" um")
+        self.sp_uniform_radius.setKeyboardTracking(False)
+        self.sp_uniform_radius.setEnabled(False)
+        self.sp_uniform_radius.valueChanged.connect(self.on_uniformity_radius_changed)
         self.btn_crosstalk_to_pitch = QPushButton("Crosstalk = pitch")
-        layout.addWidget(self.btn_uniform_to_spots)
+        layout.addWidget(self.cmb_uniform_shape)
+        layout.addWidget(self.sp_uniform_radius)
         layout.addWidget(self.btn_crosstalk_to_pitch)
         note = QLabel("(disabled in weighted mode - the atom-weighted region has\nno hard edge, see 'Atom' group above)")
         note.setWordWrap(True)
@@ -917,7 +1227,9 @@ class WeightedFlatMultiToneWindow(QMainWindow):
 
     def _update_region_controls_enabled(self):
         is_weighted = self.state["weighted_mode"]
-        self.btn_uniform_to_spots.setEnabled(not is_weighted)
+        self.cmb_uniform_shape.setEnabled(not is_weighted)
+        self.sp_uniform_radius.setEnabled(
+            (not is_weighted) and self.cmb_uniform_shape.currentIndex() == 1)
         self.btn_crosstalk_to_pitch.setEnabled(not is_weighted)
 
     def _mark_pending(self):
@@ -964,7 +1276,6 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.slider_atom_offset_x.valueChanged.connect(self.on_atom_offset_x_changed)
         self.slider_atom_offset_y.valueChanged.connect(self.on_atom_offset_y_changed)
         self.btn_center_atom.clicked.connect(self.on_center_atom_clicked)
-        self.btn_uniform_to_spots.clicked.connect(self.on_set_uniform_to_spots)
         self.btn_crosstalk_to_pitch.clicked.connect(self.on_set_crosstalk_to_pitch)
         self.btn_reset_crosshair.clicked.connect(self.on_reset_crosshair)
         self.btn_save.clicked.connect(self.on_save)
@@ -1045,7 +1356,7 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         I_neighbor = self.cache["I_neighbor"]
 
         # --- harte Box-Metriken (um die tatsächliche Atom-Position, siehe _atom_center()) ---
-        mask_uniformity = overlap_mask_pitch(X, Y, atom_cx, atom_cy, self.state["uniformity_side_length"])
+        mask_uniformity = uniformity_mask(X, Y, atom_cx, atom_cy, self.state)
         mask_crosstalk = overlap_mask_pitch(X, Y, atom_cx, atom_cy, self.state["crosstalk_side_length"])
 
         I_inside_uniform = I_ort[mask_uniformity]
@@ -1077,11 +1388,21 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             xs, ys, Xs, Ys = build_local_weighted_grid(
                 atom_cx, atom_cy, sigma_atom, WEIGHTED_N_SIGMA, WEIGHTED_GRID_N
             )
-            I_own_raw = compute_intensity_profile(
-                Xs, Ys, centers_x, centers_y, self.state["win"], amp_spots, self.state["use_airy"]
-            )
+            deg_a, ph_a = self._active_degeneracy(), self._active_phases()
+            if deg_a:
+                I_own_raw = static_intensity(
+                    field_stack(Xs, Ys, centers_x, centers_y, amp_spots,
+                                self.state["win"], self.state["use_airy"],
+                                self.state.get("airy_scale_factor")), deg_a, ph_a)
+            else:
+                I_own_raw = compute_intensity_profile(
+                    Xs, Ys, centers_x, centers_y, self.state["win"], amp_spots,
+                    self.state["use_airy"]
+                )
             I_neigh_raw = local_neighbor_intensity(
-                Xs, Ys, pitch, centers_x, centers_y, self.state["win"], amp_spots, self.state["use_airy"]
+                Xs, Ys, pitch, centers_x, centers_y, self.state["win"], amp_spots,
+                self.state["use_airy"], deg=deg_a, phases=ph_a,
+                airy_scale_factor=self.state.get("airy_scale_factor")
             )
             W = atom_weight_2d(Xs, Ys, atom_cx, atom_cy, sigma_atom)
 
@@ -1199,13 +1520,43 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             self.pdf_fill_y.remove()
             self.pdf_fill_y = None
 
+    def _update_coherence_label(self):
+        n = self.cache.get("n_degenerate_pairs", 0)
+        share = self.cache.get("static_share", 0.0)
+        if n == 0:
+            self.label_coherent.setText(
+                "Keine frequenzentarteten Spots - das Bild ist exakt die "
+                "inkohärente Summe.")
+            self.label_coherent.setStyleSheet("color: #060; font-size: 10px;")
+            return
+        if not self.state.get("coherent", True):
+            self.label_coherent.setText(
+                f"{n} frequenzentartete Paare vorhanden, werden aber IGNORIERT "
+                f"(Haken nicht gesetzt). Das gezeigte Bild ist dann nicht das, "
+                f"was eine Kamera aufnimmt.")
+            self.label_coherent.setStyleSheet(
+                "color: #a00; font-size: 10px; font-weight: bold;")
+            return
+        self.label_coherent.setText(
+            f"{n} frequenzentartete Paare; ihr statischer Anteil verschiebt das "
+            f"Bild um {share * 100:.1f} % gegenüber der reinen Intensitätssumme.")
+        self.label_coherent.setStyleSheet(
+            ("color: #a00; font-size: 10px; font-weight: bold;" if share > 0.15
+             else "color: #555; font-size: 10px;"))
+
     def _redraw_hard_rectangles(self):
         # falls zuvor im gewichteten Modus: Overlays aus dem letzten Zustand entfernen
         self._clear_weighted_artists()
 
-        self.handle_uniformity.set_visible(True)
+        # Der Uniformity-Griff entfaellt: im Quadrat-Modus folgt die Region
+        # automatisch dem Spot-Muster, im Kreis-Modus kommt der Radius aus
+        # dem Eingabefeld. Ziehen wuerde beides sofort wieder ueberschreiben.
+        is_circle = self.state.get("uniformity_shape", "square") == "circle"
+        self.handle_uniformity.set_visible(False)
+        self.handle_uniformity.set_data([], [])
         self.handle_crosstalk.set_visible(True)
-        self.rect_uniformity.set_visible(True)
+        self.rect_uniformity.set_visible(not is_circle)
+        self.circ_uniformity.set_visible(is_circle)
         self.rect_crosstalk.set_visible(True)
 
         r_center_um = self.cache["r_center"] * 1e6
@@ -1219,14 +1570,18 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.rect_uniformity.set_xy((atom_cx_um - half_u, atom_cy_um - half_u))
         self.rect_uniformity.set_width(2 * half_u)
         self.rect_uniformity.set_height(2 * half_u)
-        self.rect_uniformity.set_label(f"Uniformity region ({side_u_um:.3f} µm)")
+        if is_circle:
+            self.circ_uniformity.set_center((atom_cx_um, atom_cy_um))
+            self.circ_uniformity.set_radius(side_u_um / 2)
+            self.circ_uniformity.set_label(f"Uniformity circle (r = {side_u_um / 2:.3f} µm)")
+        else:
+            self.rect_uniformity.set_label(f"Uniformity square ({side_u_um:.3f} µm)")
 
         self.rect_crosstalk.set_xy((atom_cx_um - half_c, atom_cy_um - half_c))
         self.rect_crosstalk.set_width(2 * half_c)
         self.rect_crosstalk.set_height(2 * half_c)
         self.rect_crosstalk.set_label(f"Crosstalk region ({side_c_um:.3f} µm)")
 
-        self.handle_uniformity.set_data([atom_cx_um + half_u], [atom_cy_um + half_u])
         self.handle_crosstalk.set_data([atom_cx_um + half_c], [atom_cy_um + half_c])
 
         legend = self.ax_main.legend(loc="upper right", fontsize=8)
@@ -1411,6 +1766,9 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                                           linewidth=2, label="Uniformity region")
         self.rect_crosstalk = Rectangle((0, 0), 0, 0, edgecolor="red", facecolor="none",
                                          linewidth=2, label="Crosstalk region")
+        self.circ_uniformity = Circle((0, 0), 0.0, edgecolor="cyan", facecolor="none",
+                                      linewidth=1.6, linestyle="--", visible=False)
+        self.ax_main.add_patch(self.circ_uniformity)
         self.ax_main.add_patch(self.rect_uniformity)
         self.ax_main.add_patch(self.rect_crosstalk)
 
@@ -1512,6 +1870,11 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             self.state["N_x"], self.state["N_y"], self.state["width"],
             self.state["f1"], self.state["f2"]
         )
+        # Die harte Uniformity-Region folgt dem Spot-Muster jetzt LAUFEND -
+        # frueher nur auf Knopfdruck, wodurch sie nach jeder Aenderung von
+        # N_x, N_y, width oder den Linsen stillschweigend veraltet war.
+        self._sync_uniformity_region(centers_x, centers_y, r_center)
+
         x, y, X, Y = compute_grid(
             centers_x, centers_y, self.state["win"],
             self.state["uniformity_side_length"], self.state["crosstalk_side_length"],
@@ -1519,11 +1882,14 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         )
 
         amp_spots = self.current_amp_spots()
-        I_ort = compute_intensity_profile(X, Y, centers_x, centers_y, self.state["win"], amp_spots, self.state["use_airy"])
+        I_ort = self.own_intensity(X, Y, centers_x, centers_y, amp_spots)
         if np.max(I_ort) > 0:
             I_ort = I_ort / np.max(I_ort)
         I_neighbor = create_neighbourhood(X, Y, pitch, centers_x, centers_y, self.state["win"],
-                                           amps=amp_spots, use_airy=self.state["use_airy"])
+                                           amps=amp_spots, use_airy=self.state["use_airy"],
+                                           deg=self._active_degeneracy(),
+                                           phases=self._active_phases(),
+                                           airy_scale_factor=self.state.get("airy_scale_factor"))
 
         # Fadenkreuz bei jeder Grid-Neuberechnung auf die tatsächliche
         # Atom-Position setzen (r_center + Atom-Offset, siehe _atom_center()) -
@@ -1543,7 +1909,10 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             "I_ort": I_ort, "I_neighbor": I_neighbor,
         })
 
+        self._update_coherence_label()
+
         extent = [x[0] * 1e6, x[-1] * 1e6, y[0] * 1e6, y[-1] * 1e6]
+        self.cache["extent"] = extent
 
         self.ax_main.clear()
         self.ax_neighbor.clear()
@@ -1559,6 +1928,15 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.pdf_fill_y = None
 
         self.im_main = self.ax_main.imshow(I_ort, origin="lower", extent=extent, aspect="equal", cmap="viridis")
+        # Frequenzentartete Spots markieren: ihr Kreuzterm liegt bei 0 Hz und
+        # steht damit fest im Bild - sie sind der Grund, warum das Bild von der
+        # reinen Intensitaetssumme abweicht.
+        deg = self.cache.get("degenerate", [])
+        if deg and self.state.get("coherent", True):
+            idx = np.unique(np.concatenate([np.asarray(g) for g in deg]))
+            self.ax_main.plot(centers_x[idx] * 1e6, centers_y[idx] * 1e6, "o",
+                              mfc="none", mec="deepskyblue", ms=9, mew=1.4,
+                              label="frequenzentartet")
 
         self.ax_main.scatter(centers_x * 1e6, centers_y * 1e6, c="white", edgecolors="black", s=20, zorder=5)
 
@@ -1593,6 +1971,7 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self._sync_waist_sliders()
         self._update_region_controls_enabled()
 
+        self._apply_zoom()
         self.canvas.draw_idle()
 
     def medium_update(self, force=False):
@@ -1611,11 +1990,14 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         centers_x, centers_y = self.cache["centers_x"], self.cache["centers_y"]
         amp_spots = self.current_amp_spots()
 
-        I_ort = compute_intensity_profile(X, Y, centers_x, centers_y, self.state["win"], amp_spots, self.state["use_airy"])
+        I_ort = self.own_intensity(X, Y, centers_x, centers_y, amp_spots)
         if np.max(I_ort) > 0:
             I_ort = I_ort / np.max(I_ort)
         I_neighbor = create_neighbourhood(X, Y, pitch, centers_x, centers_y, self.state["win"],
-                                           amps=amp_spots, use_airy=self.state["use_airy"])
+                                           amps=amp_spots, use_airy=self.state["use_airy"],
+                                           deg=self._active_degeneracy(),
+                                           phases=self._active_phases(),
+                                           airy_scale_factor=self.state.get("airy_scale_factor"))
 
         self.cache["I_ort"] = I_ort
         self.cache["I_neighbor"] = I_neighbor
@@ -1647,6 +2029,7 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.compute_masks_and_metrics()
         self.redraw_regions()
         self.update_title()
+        self._apply_zoom()
         self.canvas.draw_idle()
 
     def atom_update(self, force=False):
@@ -1850,13 +2233,78 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self._update_atom_offset_labels()
         self.fast_update()
 
-    def on_set_uniform_to_spots(self):
-        if "centers_x" not in self.cache:
+    def own_intensity(self, X, Y, centers_x, centers_y, amp_spots):
+        """Intensitaet der eigenen Site - das statische Bild.
+
+        Ohne Kohaerenz die bisherige Intensitaetssumme; mit Kohaerenz das
+        exakte Zeitmittel, das den nicht wegmittelnden Kreuzterm
+        frequenzentarteter Spots enthaelt. Legt nebenbei die Kennzahlen fuer
+        die Anzeige im Cache ab."""
+        I_inc = compute_intensity_profile(X, Y, centers_x, centers_y,
+                                          self.state["win"], amp_spots,
+                                          self.state["use_airy"])
+        f_spots = spot_frequencies(self.state["N_x"], self.state["N_y"],
+                                   self.state["width"])
+        deg = degenerate_pairs(f_spots, self.state["width"],
+                               self.state["N_x"], self.state["N_y"])
+        self.cache["degenerate"] = deg
+        self.cache["n_degenerate_pairs"] = sum(len(g) * (len(g) - 1) // 2 for g in deg)
+        if not self.state.get("coherent", True) or not deg:
+            self.cache["static_share"] = 0.0
+            return I_inc
+        ph = self._tone_phases(deg)
+        F = field_stack(X, Y, centers_x, centers_y, amp_spots, self.state["win"],
+                        self.state["use_airy"], self.state.get("airy_scale_factor"))
+        I_coh = static_intensity(F, deg, ph)
+        denom = np.max(I_inc) if np.max(I_inc) > 0 else 1.0
+        self.cache["static_share"] = float(np.max(np.abs(I_coh - I_inc)) / denom)
+        return I_coh
+
+    def _active_degeneracy(self):
+        """Entartete Paare, sofern die kohaerente Rechnung eingeschaltet ist."""
+        if not self.state.get("coherent", True):
+            return []
+        return self.cache.get("degenerate", [])
+
+    def _active_phases(self):
+        if not self.state.get("coherent", True):
+            return np.zeros(self.state["N_x"] * self.state["N_y"])
+        return self._tone_phases(self.cache.get("degenerate", []))
+
+    def _tone_phases(self, deg):
+        """Spotphasen, zwischengespeichert - die Quadratur-Suche laeuft sonst
+        bei jeder Neuberechnung erneut."""
+        if self.state.get("phase_mode", "zero") != "quadrature":
+            return np.zeros(self.state["N_x"] * self.state["N_y"])
+        key = (self.state["N_x"], self.state["N_y"])
+        if getattr(self, "_phase_cache", (None, None))[0] != key:
+            self._phase_cache = (key, quadrature_phases(self.state["N_x"],
+                                                        self.state["N_y"], deg))
+        return self._phase_cache[1]
+
+    def _sync_uniformity_region(self, centers_x, centers_y, r_center):
+        """Haelt uniformity_side_length aktuell.
+
+        Im Quadrat-Modus ist das die Kantenlaenge des Tonquadrats, also die
+        Ausdehnung des Spot-Musters; im Kreis-Modus der Durchmesser des
+        Kreises. So bleiben die Baender in den Schnittplots und die
+        Grid-Marge in beiden Faellen ohne Sonderfall richtig."""
+        if self.state.get("uniformity_shape", "square") == "circle":
+            self.state["uniformity_side_length"] = 2.0 * self.state["uniformity_radius"]
             return
-        cx, cy, rc = self.cache["centers_x"], self.cache["centers_y"], self.cache["r_center"]
-        half_extent = max(np.max(np.abs(cx - rc)), np.max(np.abs(cy - rc)))
-        self.state["uniformity_side_length"] = 2 * half_extent
-        self.fast_update()
+        half_extent = max(np.max(np.abs(centers_x - r_center)),
+                          np.max(np.abs(centers_y - r_center)))
+        self.state["uniformity_side_length"] = 2.0 * half_extent
+
+    def on_uniformity_shape_changed(self, idx):
+        self.state["uniformity_shape"] = "square" if idx == 0 else "circle"
+        self.sp_uniform_radius.setEnabled(idx == 1)
+        self.full_update()
+
+    def on_uniformity_radius_changed(self, val):
+        self.state["uniformity_radius"] = val * 1e-6
+        if self.state.get("uniformity_shape") == "circle":
+            self.full_update()
 
     def on_set_crosstalk_to_pitch(self):
         self.state["crosstalk_side_length"] = pitch
@@ -1961,10 +2409,13 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             GRID_N_HIGHRES
         )
         amp_spots = self.current_amp_spots()
-        I_ort = compute_intensity_profile(X, Y, centers_x, centers_y, self.state["win"], amp_spots, self.state["use_airy"])
+        I_ort = self.own_intensity(X, Y, centers_x, centers_y, amp_spots)
         I_ort /= np.max(I_ort)
         I_neighbor = create_neighbourhood(X, Y, pitch, centers_x, centers_y, self.state["win"],
-                                           amps=amp_spots, use_airy=self.state["use_airy"])
+                                           amps=amp_spots, use_airy=self.state["use_airy"],
+                                           deg=self._active_degeneracy(),
+                                           phases=self._active_phases(),
+                                           airy_scale_factor=self.state.get("airy_scale_factor"))
 
         weighted = self.state["weighted_mode"]
         sigma_atom = self._current_sigma_atom()
@@ -2017,12 +2468,13 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             pdf_x = np.exp(-(x_line - atom_cx) ** 2 / (2 * sigma_atom ** 2))
             pdf_y = np.exp(-(y_line - atom_cy) ** 2 / (2 * sigma_atom ** 2))
         else:
-            mask_u = overlap_mask_pitch(X, Y, atom_cx, atom_cy, self.state["uniformity_side_length"])
+            mask_u = uniformity_mask(X, Y, atom_cx, atom_cy, self.state)
             mask_c = overlap_mask_pitch(X, Y, atom_cx, atom_cy, self.state["crosstalk_side_length"])
             uniformity = np.std(I_ort[mask_u]) / np.mean(I_ort[mask_u])
             crosstalk = np.sum(I_neighbor[mask_c]) / np.sum(I_ort[mask_c])
 
         extent = [x[0] * 1e6, x[-1] * 1e6, y[0] * 1e6, y[-1] * 1e6]
+        self.cache["extent"] = extent
 
         # Aktuelle Fadenkreuz-Position (aus der interaktiven Ansicht) auf das
         # hochauflösende Grid übertragen, statt immer die Mitte zu nehmen
@@ -2163,7 +2615,8 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         out_file = out_dir / f"FlatMultiTone_GUI_{mode_tag}_{timestamp}.png"
         try:
             fig_save.savefig(out_file, dpi=150, bbox_inches="tight")
-            self.label_save_status.setText(f"Saved: {out_file.name}")
+            self.label_save_status.setText(f"Gespeichert: {short_name(out_file)}")
+            self.label_save_status.setToolTip(str(out_file))
             self.label_save_status.setToolTip(str(out_file))
         except Exception as e:
             self.label_save_status.setText(f"Error while saving: {e}")
@@ -2185,7 +2638,7 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         # _redraw_weighted_overlays()), sodass diese Schleife dort automatisch
         # nichts findet und direkt auf Fadenkreuz-Verhalten zurückfällt.
         click_disp = np.array(self.ax_main.transData.transform((event.xdata, event.ydata)))
-        for target, handle in (("uniformity", self.handle_uniformity), ("crosstalk", self.handle_crosstalk)):
+        for target, handle in (("crosstalk", self.handle_crosstalk),):
             hx, hy = handle.get_data()
             if len(hx) == 0:
                 continue
@@ -2221,10 +2674,8 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         half_um = float(np.clip(half_um, 0.02, 25.0))
         side_m = 2 * half_um * 1e-6
 
-        if self.dragging_target == "uniformity":
-            self.state["uniformity_side_length"] = side_m
-        else:
-            self.state["crosstalk_side_length"] = side_m
+        # "uniformity" ist kein Ziehziel mehr (siehe _redraw_hard_rectangles)
+        self.state["crosstalk_side_length"] = side_m
 
         self.fast_update()
 

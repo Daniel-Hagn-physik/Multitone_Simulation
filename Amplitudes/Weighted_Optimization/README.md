@@ -52,10 +52,26 @@ Weighted_Optimization/
         weighted_use_torch.py optionale GPU-Beschleunigung
     Old_Scripts/        Archiv der abgelösten Konfig-Skripte
     Results/            gepickelte Scan-Rohdaten (.pkl)
-    Bilder/             PNG-Ausgaben der Scan-Plotter
-    Fit_Plots/          Vektor-PDFs der Auswertung
-    Fit_Results/        Markdown-Berichte der Auswertung
+    Bilder/2026-09-03/  PNG-Ausgaben der Scan-Plotter, tageweise
+    Fit_Plots/2026-09-03/   Vektor-PDFs der Auswertung, tageweise
+    Fit_Results/        Markdown-Berichte der Auswertung (flach, Datum im Namen)
 ```
+
+**Bilder liegen tageweise, Daten und Berichte flach.** Jeder Lauf schreibt
+seine PDFs nach `Fit_Plots/<JJJJ-MM-TT>/`, jeder Scan seine PNGs nach
+`Bilder/<JJJJ-MM-TT>/`; der Ordner entsteht automatisch. Grund ist die Menge –
+ein Auswertungslauf legt bis zu acht PDFs an, und nach ein paar Läufen war im
+flachen Ordner nicht mehr zu sehen, was zusammengehört. Die Dateinamen tragen
+das Datum weiterhin, der Ordner ist also eine zusätzliche Ordnung und nicht
+die einzige Auskunft.
+
+`Results/` und `Fit_Results/` bleiben flach: die `.pkl` ist der Datensatz und
+nicht das Ergebnis eines Tages, und die Berichte will man nebeneinander lesen
+können. Beide tragen das Datum im Dateinamen
+(`HardScan_N3x4_41x41pts_Airy_2026-09-03_Report.md`).
+
+Bereits vorhandene Dateien werden nicht verschoben – die Umstellung gilt ab
+dem nächsten Lauf.
 
 `lib/scan_data.py`, `lib/report.py` und `run_plots.py` sind
 **buchstabengleich** mit den gleichnamigen Dateien in

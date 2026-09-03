@@ -35,16 +35,19 @@ matplotlib.use("Qt5Agg")
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Rectangle, Circle
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QSlider, QSpinBox, QDoubleSpinBox, QCheckBox, QPushButton,
-    QGroupBox, QScrollArea, QSplitter, QMessageBox, QComboBox
+    QGroupBox, QScrollArea, QSplitter, QMessageBox, QComboBox, QSizePolicy
 )
 from PyQt5.QtCore import Qt
 
-from Strahlanalyse.lens_design_dialog import LensDesignDialog
+try:
+    from lens_design_dialog import LensDesignDialog
+except ImportError:      # aeltere Ablage
+    from Strahlanalyse.lens_design_dialog import LensDesignDialog
 import airy_scale
 
 # ----------------------------------------------------------------------
@@ -94,6 +97,18 @@ except Exception:
 # ============================================================
 # Hilfsfunktionen (Physik/Numerik) — unverändert zur bisherigen Version
 # ============================================================
+def short_name(path, keep=34):
+    """Kuerzt einen Dateinamen fuer die Anzeige, mit Auslassung in der Mitte.
+
+    Ein gespeicherter Dateiname ist lang und enthaelt keine Leerzeichen, laesst
+    sich also nicht umbrechen; der volle Pfad steht stattdessen im Tooltip."""
+    name = str(getattr(path, "name", path))
+    if len(name) <= keep:
+        return name
+    head = keep // 2 - 2
+    return name[:head] + "..." + name[-(keep - head - 3):]
+
+
 def multitone_frequencies(N, offset, width):
     if N <= 1:
         return np.array([offset], dtype=float)
@@ -157,6 +172,27 @@ def create_neighbourhood(X, Y, pitch, centers_x, centers_y, w_in, amps=None, use
 def overlap_mask_pitch(X, Y, center_x, center_y, side_length):
     half_side = side_length / 2
     return (np.abs(X - center_x) <= half_side) & (np.abs(Y - center_y) <= half_side)
+
+
+def overlap_mask_circle(X, Y, center_x, center_y, radius):
+    """Kreisfoermige Auswerteregion - bildet das Wandern des Strahlzeigers um
+    die Mitte ab, im Gegensatz zum Tonquadrat, das die Ausdehnung des
+    Spot-Musters beschreibt."""
+    return ((X - center_x) ** 2 + (Y - center_y) ** 2) <= radius ** 2
+
+
+def uniformity_mask(X, Y, center_x, center_y, state):
+    """Maske der harten Uniformity-Region, je nach eingestellter Form.
+
+    'square': das Tonquadrat, also die Ausdehnung des Spot-Musters. Seine
+    Kantenlaenge wird in full_update() LAUFEND nachgezogen, sobald sich
+    N_x, N_y, width oder die Linsen aendern - sie ist keine frei einstellbare
+    Groesse mehr.
+    'circle': ein Kreis fester Groesse um die Mitte (Beam-Pointing)."""
+    if state.get("uniformity_shape", "square") == "circle":
+        return overlap_mask_circle(X, Y, center_x, center_y,
+                                   state.get("uniformity_radius", 2e-6))
+    return overlap_mask_pitch(X, Y, center_x, center_y, state["uniformity_side_length"])
 
 
 def compute_centers(N_x, N_y, width, f1, f2):
@@ -258,6 +294,10 @@ class FlatMultiToneWindow(QMainWindow):
             "f2": 750e-3,
             "width": 0.35e6,
             "uniformity_side_length": 2.6e-6,
+            # Form der harten Uniformity-Region: 'square' = Tonquadrat (folgt
+            # dem Spot-Muster automatisch), 'circle' = Kreis fester Groesse.
+            "uniformity_shape": "square",
+            "uniformity_radius": 2.0e-6,
             "crosstalk_side_length": pitch,
             "custom_amps": False,
             "use_airy": False,
@@ -286,6 +326,22 @@ class FlatMultiToneWindow(QMainWindow):
     # --------------------------------------------------------
     # UI-Aufbau
     # --------------------------------------------------------
+
+    def _tame_info_labels(self):
+        """Verhindert, dass lange, nicht umbrechbare Texte den Bedienbereich
+        auseinanderziehen.
+
+        Ein gespeicherter Dateiname enthaelt keine Leerzeichen, der Zeilenumbruch
+        kann ihn also nicht brechen, und das Label meldet einen sehr breiten
+        sizeHint - den das Layout befolgt, indem es den ganzen Bereich verbreitert
+        und alle Knoepfe zusammenstaucht. Wird der waagerechte sizeHint ignoriert,
+        richtet sich das Label nach dem Bereich statt umgekehrt.
+        """
+        for lab in self.findChildren(QLabel):
+            if lab.wordWrap():
+                lab.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+                lab.setMinimumWidth(1)
+
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
@@ -340,6 +396,8 @@ class FlatMultiToneWindow(QMainWindow):
         self.canvas.mpl_connect("button_press_event", self.on_button_press)
         self.canvas.mpl_connect("motion_notify_event", self.on_motion)
         self.canvas.mpl_connect("button_release_event", self.on_release)
+
+        self._tame_info_labels()
 
     def _build_grid_group(self):
         box = QGroupBox("Spot Grid")
@@ -481,9 +539,30 @@ class FlatMultiToneWindow(QMainWindow):
     def _build_region_group(self):
         box = QGroupBox("Regions (Uniformity / Crosstalk)")
         layout = QVBoxLayout(box)
-        self.btn_uniform_to_spots = QPushButton("Uniformity = spot square")
+        self.cmb_uniform_shape = QComboBox()
+        self.cmb_uniform_shape.addItems([
+            "Uniformity: Tonquadrat (folgt automatisch)",
+            "Uniformity: Kreis um die Mitte",
+        ])
+        self.cmb_uniform_shape.setToolTip(
+            "Tonquadrat: die Region umfasst das Spot-Muster und wird bei jeder\n"
+            "Aenderung von N_x, N_y, width oder den Linsen automatisch\n"
+            "nachgezogen - kein Knopfdruck mehr noetig.\n\n"
+            "Kreis: feste Groesse um die Mitte, fuer das Wandern des\n"
+            "Strahlzeigers (Beam Pointing).")
+        self.cmb_uniform_shape.currentIndexChanged.connect(self.on_uniformity_shape_changed)
+        self.sp_uniform_radius = QDoubleSpinBox()
+        self.sp_uniform_radius.setRange(0.05, 50.0)
+        self.sp_uniform_radius.setDecimals(3)
+        self.sp_uniform_radius.setSingleStep(0.1)
+        self.sp_uniform_radius.setValue(2.0)
+        self.sp_uniform_radius.setSuffix(" um")
+        self.sp_uniform_radius.setKeyboardTracking(False)
+        self.sp_uniform_radius.setEnabled(False)
+        self.sp_uniform_radius.valueChanged.connect(self.on_uniformity_radius_changed)
         self.btn_crosstalk_to_pitch = QPushButton("Crosstalk = pitch")
-        layout.addWidget(self.btn_uniform_to_spots)
+        layout.addWidget(self.cmb_uniform_shape)
+        layout.addWidget(self.sp_uniform_radius)
         layout.addWidget(self.btn_crosstalk_to_pitch)
         return box
 
@@ -571,7 +650,6 @@ class FlatMultiToneWindow(QMainWindow):
         self.cb_airy.stateChanged.connect(self.on_profile_toggle)
         self.cb_custom_amps.stateChanged.connect(self.on_amp_toggle)
         self.btn_reset_amps.clicked.connect(self.on_reset_amps)
-        self.btn_uniform_to_spots.clicked.connect(self.on_set_uniform_to_spots)
         self.btn_crosstalk_to_pitch.clicked.connect(self.on_set_crosstalk_to_pitch)
         self.btn_reset_crosshair.clicked.connect(self.on_reset_crosshair)
         self.btn_save.clicked.connect(self.on_save)
@@ -644,7 +722,7 @@ class FlatMultiToneWindow(QMainWindow):
         I_ort = self.cache["I_ort"]
         I_neighbor = self.cache["I_neighbor"]
 
-        mask_uniformity = overlap_mask_pitch(X, Y, r_center, r_center, self.state["uniformity_side_length"])
+        mask_uniformity = uniformity_mask(X, Y, r_center, r_center, self.state)
         mask_crosstalk = overlap_mask_pitch(X, Y, r_center, r_center, self.state["crosstalk_side_length"])
 
         I_inside_uniform = I_ort[mask_uniformity]
@@ -665,6 +743,14 @@ class FlatMultiToneWindow(QMainWindow):
         self.cache["crosstalk"] = crosstalk
 
     def redraw_rectangles(self):
+        # Der Uniformity-Griff entfaellt: im Quadrat-Modus folgt die Region
+        # automatisch dem Spot-Muster, im Kreis-Modus kommt der Radius aus dem
+        # Eingabefeld. Ziehen wuerde beides sofort wieder ueberschreiben.
+        is_circle = self.state.get("uniformity_shape", "square") == "circle"
+        self.handle_uniformity.set_visible(False)
+        self.handle_uniformity.set_data([], [])
+        self.rect_uniformity.set_visible(not is_circle)
+        self.circ_uniformity.set_visible(is_circle)
         r_center_um = self.cache["r_center"] * 1e6
         side_u_um = self.state["uniformity_side_length"] * 1e6
         side_c_um = self.state["crosstalk_side_length"] * 1e6
@@ -674,14 +760,18 @@ class FlatMultiToneWindow(QMainWindow):
         self.rect_uniformity.set_xy((r_center_um - half_u, r_center_um - half_u))
         self.rect_uniformity.set_width(2 * half_u)
         self.rect_uniformity.set_height(2 * half_u)
-        self.rect_uniformity.set_label(f"Uniformity region ({side_u_um:.3f} µm)")
+        if is_circle:
+            self.circ_uniformity.set_center((r_center_um, r_center_um))
+            self.circ_uniformity.set_radius(side_u_um / 2)
+            self.circ_uniformity.set_label(f"Uniformity circle (r = {side_u_um / 2:.3f} µm)")
+        else:
+            self.rect_uniformity.set_label(f"Uniformity square ({side_u_um:.3f} µm)")
 
         self.rect_crosstalk.set_xy((r_center_um - half_c, r_center_um - half_c))
         self.rect_crosstalk.set_width(2 * half_c)
         self.rect_crosstalk.set_height(2 * half_c)
         self.rect_crosstalk.set_label(f"Crosstalk region ({side_c_um:.3f} µm)")
 
-        self.handle_uniformity.set_data([r_center_um + half_u], [r_center_um + half_u])
         self.handle_crosstalk.set_data([r_center_um + half_c], [r_center_um + half_c])
 
         # zorder + volldeckender Rahmen: die Legende liegt damit garantiert ÜBER
@@ -730,6 +820,9 @@ class FlatMultiToneWindow(QMainWindow):
                                           linewidth=2, label="Uniformity region")
         self.rect_crosstalk = Rectangle((0, 0), 0, 0, edgecolor="red", facecolor="none",
                                          linewidth=2, label="Crosstalk region")
+        self.circ_uniformity = Circle((0, 0), 0.0, edgecolor="cyan", facecolor="none",
+                                      linewidth=1.6, linestyle="--", visible=False)
+        self.ax_main.add_patch(self.circ_uniformity)
         self.ax_main.add_patch(self.rect_uniformity)
         self.ax_main.add_patch(self.rect_crosstalk)
 
@@ -808,6 +901,11 @@ class FlatMultiToneWindow(QMainWindow):
             self.state["N_x"], self.state["N_y"], self.state["width"],
             self.state["f1"], self.state["f2"]
         )
+        # Die harte Uniformity-Region folgt dem Spot-Muster jetzt LAUFEND -
+        # frueher nur auf Knopfdruck, wodurch sie nach jeder Aenderung von
+        # N_x, N_y, width oder den Linsen stillschweigend veraltet war.
+        self._sync_uniformity_region(centers_x, centers_y, r_center)
+
         x, y, X, Y = compute_grid(
             centers_x, centers_y, self.state["win"],
             self.state["uniformity_side_length"], self.state["crosstalk_side_length"],
@@ -1026,13 +1124,29 @@ class FlatMultiToneWindow(QMainWindow):
             spin.blockSignals(False)
         self.medium_update()
 
-    def on_set_uniform_to_spots(self):
-        if "centers_x" not in self.cache:
+    def _sync_uniformity_region(self, centers_x, centers_y, r_center):
+        """Haelt uniformity_side_length aktuell.
+
+        Im Quadrat-Modus ist das die Kantenlaenge des Tonquadrats, also die
+        Ausdehnung des Spot-Musters; im Kreis-Modus der Durchmesser des
+        Kreises. So bleiben die Baender in den Schnittplots und die
+        Grid-Marge in beiden Faellen ohne Sonderfall richtig."""
+        if self.state.get("uniformity_shape", "square") == "circle":
+            self.state["uniformity_side_length"] = 2.0 * self.state["uniformity_radius"]
             return
-        cx, cy, rc = self.cache["centers_x"], self.cache["centers_y"], self.cache["r_center"]
-        half_extent = max(np.max(np.abs(cx - rc)), np.max(np.abs(cy - rc)))
-        self.state["uniformity_side_length"] = 2 * half_extent
-        self.fast_update()
+        half_extent = max(np.max(np.abs(centers_x - r_center)),
+                          np.max(np.abs(centers_y - r_center)))
+        self.state["uniformity_side_length"] = 2.0 * half_extent
+
+    def on_uniformity_shape_changed(self, idx):
+        self.state["uniformity_shape"] = "square" if idx == 0 else "circle"
+        self.sp_uniform_radius.setEnabled(idx == 1)
+        self.full_update()
+
+    def on_uniformity_radius_changed(self, val):
+        self.state["uniformity_radius"] = val * 1e-6
+        if self.state.get("uniformity_shape") == "circle":
+            self.full_update()
 
     def on_set_crosstalk_to_pitch(self):
         self.state["crosstalk_side_length"] = pitch
@@ -1131,7 +1245,7 @@ class FlatMultiToneWindow(QMainWindow):
         I_neighbor = create_neighbourhood(X, Y, pitch, centers_x, centers_y, self.state["win"],
                                            amps=amp_spots, use_airy=self.state["use_airy"])
 
-        mask_u = overlap_mask_pitch(X, Y, r_center, r_center, self.state["uniformity_side_length"])
+        mask_u = uniformity_mask(X, Y, r_center, r_center, self.state)
         mask_c = overlap_mask_pitch(X, Y, r_center, r_center, self.state["crosstalk_side_length"])
         uniformity = np.std(I_ort[mask_u]) / np.mean(I_ort[mask_u])
         crosstalk = np.sum(I_neighbor[mask_c]) / np.sum(I_ort[mask_c])
@@ -1226,7 +1340,8 @@ class FlatMultiToneWindow(QMainWindow):
         out_file = out_dir / f"FlatMultiTone_GUI_{timestamp}.png"
         try:
             fig_save.savefig(out_file, dpi=150, bbox_inches="tight")
-            self.label_save_status.setText(f"Saved: {out_file.name}")
+            self.label_save_status.setText(f"Gespeichert: {short_name(out_file)}")
+            self.label_save_status.setToolTip(str(out_file))
             self.label_save_status.setToolTip(str(out_file))
         except Exception as e:
             self.label_save_status.setText(f"Error while saving: {e}")
@@ -1245,7 +1360,7 @@ class FlatMultiToneWindow(QMainWindow):
 
         # Priorität: liegt der Klick nah genug an einem Region-Handle, dieses greifen
         click_disp = np.array(self.ax_main.transData.transform((event.xdata, event.ydata)))
-        for target, handle in (("uniformity", self.handle_uniformity), ("crosstalk", self.handle_crosstalk)):
+        for target, handle in (("crosstalk", self.handle_crosstalk),):
             hx, hy = handle.get_data()
             if len(hx) == 0:
                 continue
@@ -1275,10 +1390,8 @@ class FlatMultiToneWindow(QMainWindow):
         half_um = float(np.clip(half_um, 0.02, 25.0))
         side_m = 2 * half_um * 1e-6
 
-        if self.dragging_target == "uniformity":
-            self.state["uniformity_side_length"] = side_m
-        else:
-            self.state["crosstalk_side_length"] = side_m
+        # "uniformity" ist kein Ziehziel mehr (siehe _redraw_hard_rectangles)
+        self.state["crosstalk_side_length"] = side_m
 
         self.fast_update()
 

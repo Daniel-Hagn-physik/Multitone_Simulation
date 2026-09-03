@@ -102,6 +102,7 @@ Nutzung:
 Ggf. vorher AMP_PKL_DATEI / FIXED_PKL_DATEI unten anpassen.
 """
 
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -147,7 +148,7 @@ def _default_dir(name):
 # Eigener Ordner für die Diagnose-Plots dieses Skripts (siehe PLOT_FITS unten)
 # - bewusst GETRENNT vom "Bilder"-Ordner der anderen Skripte (User-Wunsch),
 # damit Fit-Diagnosen nicht mit den normalen Scan-Plots vermischt werden.
-FIT_PLOTS_DIR = _default_dir("Fit_Plots")
+FIT_PLOTS_DIR = _default_dir(f"Fit_Plots/{date.today().isoformat()}")
 
 
 # ======================================================================

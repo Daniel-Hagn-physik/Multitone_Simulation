@@ -65,6 +65,7 @@ Linse, width) - reine Berechnung, siehe oben für das Plotten:
     )
 """
 
+from datetime import date
 import os
 import sys
 import pickle
@@ -104,7 +105,10 @@ def _default_dir(name):
 
 
 DEFAULT_RESULTS_DIR = _default_dir("Results")
-DEFAULT_IMAGES_DIR = _default_dir("Bilder")
+# Bilder werden tageweise abgelegt (Bilder/JJJJ-MM-TT). Der Dateiname
+# traegt weiterhin alles, was die Datei identifiziert - der Ordner sagt
+# nur, wann sie entstanden ist.
+DEFAULT_IMAGES_DIR = _default_dir(f"Bilder/{date.today().isoformat()}")
 
 
 def _resolve_pickle_path(out_dir, filename):

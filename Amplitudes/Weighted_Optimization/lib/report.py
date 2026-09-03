@@ -784,7 +784,7 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
     Karten eingezeichnet, als durchgezogene Linie ueber den ganzen gescannten
     Bereich. Mit fit_line_dashed_extrapolation=True wird der Teil ausserhalb
     des Fit-Bereichs stattdessen gepunktet (siehe draw_fit_line_on_map)."""
-    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
+    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
     width_vals = np.asarray(results['width_vals'], dtype=float)
     x_vals, x_label, reversed_ = win_axis_values(results, win_axis)
 
@@ -868,7 +868,7 @@ def plot_region(results, prefix, out_dir=None, win_axis="before_lens",
                 draw_best_point=True, save=True, show=False, confirm_overwrite=None,
                 forbidden_factor=None, best_point=None):
     """Score-Heatmap, auf Wunsch mit dem Arbeitspunkt."""
-    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
+    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
     width_vals = np.asarray(results['width_vals'], dtype=float)
     x_vals, x_label, reversed_ = win_axis_values(results, win_axis)
     Z = score_grid(results)
@@ -909,7 +909,7 @@ def plot_overview(results, out_dir=None, save=True, show=False,
     """Die PNG-Uebersicht des jeweiligen Scan-Plotters (unveraenderte
     Module aus lib/): beim Amplituden-Scan die 6-Panel-Uebersicht plus die
     Schnitte, beim Fest-Amplituden-Scan die zwei Heatmaps."""
-    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
+    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
     if has_amplitudes(results):
         plotter = AmplitudeScanPlotter(results, out_dir=out_dir,
                                        confirm_overwrite=confirm_overwrite)
@@ -974,7 +974,7 @@ def plot_point_cuts(results, prefix, best=None, out_dir=None,
     entlang der width. Der Punkt ist in beiden Panels als senkrechte rote
     Linie markiert, sein Wert je Kurve als Stern.
     """
-    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
+    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
     verfuegbar = available_trace_keys(results)
     gewaehlt = [k for k in POINT_CUT_TRACES if k in verfuegbar]
     if not gewaehlt:
@@ -1508,12 +1508,13 @@ def make_all(results, win_axis="before_lens", draw_best_point=True,
     Score da, wird analyse() hier nachgeholt."""
     if results.get('score') is None:
         results = scan_data.analyse(results)
-    plots_dir = paths.FIT_PLOTS_DIR if plots_dir is None else plots_dir
+    plots_dir = paths.fit_plots_dir() if plots_dir is None else plots_dir
     results_dir = paths.FIT_RESULTS_DIR if results_dir is None else results_dir
     confirm_overwrite = None if ask_before_save else (lambda existing_path: True)
 
     prefix = output_prefix(results)
-    out = dict(prefix=prefix, kind=dataset_kind(results), plots={}, report=None)
+    out = dict(prefix=prefix, kind=dataset_kind(results), plots={}, report=None,
+               plots_dir=plots_dir, results_dir=results_dir)
 
     # Die Gerade fuer die Metrik-Karten: dieselbe wie im Talschnitt, also
     # ueber der µm-Achse und mit der eingestellten Fuehrungsgroesse - egal,
@@ -2248,7 +2249,7 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
 
     Ausnahme: gibt es gar keine Gerade, bliebe die Karte sonst leer - dann
     wird der Talpfad auch ohne Haken gezeichnet."""
-    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
+    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
     valley = extract_path(results, axis=axis, follow=follow, path_mode=path_mode,
                           select=select, guide_follow=guide_follow,
                           guide_halfwidth=guide_halfwidth,
@@ -2418,8 +2419,12 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
                 ax.spines["right"].set_color(achsen_farbe)
 
         ax_cut.set_xlabel(valley["x_label"])
-        titel = ("Values along the fitted line" if path_mode == "line"
-                 else "Values along the minimum path")
+        # Ueberschrift des rechten Panels. Im Geradenmodus ist der Schnitt
+        # entlang der Fit-Geraden gelegt, im Talmodus entlang des Minimums -
+        # beides heisst "Cross-section along ...", damit die beiden Fassungen
+        # nebeneinander als dasselbe Bild erkennbar bleiben.
+        titel = ("Cross-section along fit" if path_mode == "line"
+                 else "Cross-section along minimum path")
         ax_cut.set_title(titel)
         ax_cut.grid(True, alpha=0.25)
         ax_cut.legend(linien, [ln.get_label() for ln in linien],

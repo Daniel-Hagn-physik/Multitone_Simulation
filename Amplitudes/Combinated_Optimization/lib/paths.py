@@ -10,12 +10,13 @@ Alle Ausgabeordner liegen in Combinated_Optimization/ (also eine Ebene
 UEBER diesem lib/-Ordner) und werden bei Bedarf automatisch angelegt:
 
     Results/       gepickelte Scan-Rohdaten (.pkl)
-    Bilder/        interaktive/PNG-Ausgaben
-    Fit_Plots/     Vektor-PDFs der Auswertung
+    Bilder/<JJJJ-MM-TT>/     interaktive/PNG-Ausgaben, tageweise
+    Fit_Plots/<JJJJ-MM-TT>/  Vektor-PDFs der Auswertung, tageweise
     Fit_Results/   Markdown-Berichte der Auswertung
 """
 
 import sys
+from datetime import date
 from pathlib import Path as FilePath
 
 # Combinated_Optimization/ - eine Ebene ueber lib/
@@ -77,10 +78,53 @@ def _default_dir(name):
         return fallback
 
 
+# ----------------------------------------------------------------------
+# Ausgabeordner
+# ----------------------------------------------------------------------
+# BILDER werden tageweise abgelegt: Bilder/2026-09-02/, Fit_Plots/2026-09-02/.
+# Grund ist schlicht die Menge - ein Auswertungslauf schreibt bis zu acht
+# PDFs, und nach ein paar Laeufen liess sich im flachen Ordner nicht mehr
+# sagen, was zusammengehoert. Der Dateiname traegt das Datum weiterhin, der
+# Ordner ist also redundant und nicht die einzige Auskunft darueber.
+#
+# ROHDATEN (Results/) und BERICHTE (Fit_Results/) bleiben flach: die .pkl ist
+# der Datensatz, nicht das Ergebnis eines Tages, und die Berichte will man
+# nebeneinander lesen koennen. Beide tragen das Datum im Namen.
 DEFAULT_RESULTS_DIR = _default_dir("Results")
-DEFAULT_IMAGES_DIR = _default_dir("Bilder")
-FIT_PLOTS_DIR = _default_dir("Fit_Plots")
 FIT_RESULTS_DIR = _default_dir("Fit_Results")
+
+# Die flachen Elternordner - zum Blaettern, und damit ein Aufrufer die
+# Tagesordner nebeneinander findet.
+IMAGES_ROOT = _default_dir("Bilder")
+FIT_PLOTS_ROOT = _default_dir("Fit_Plots")
+
+
+def tages_unterordner(name, tag=None):
+    """`<name>/<JJJJ-MM-TT>`, angelegt falls noetig.
+
+    `tag=None` heisst HEUTE, ausgewertet beim Aufruf - ein Lauf, der ueber
+    Mitternacht geht, schreibt seine spaeteren Plots also in den neuen Tag.
+    Das ist gewollt: der Ordner soll sagen, wann die Datei entstanden ist."""
+    tag = date.today().isoformat() if tag is None else str(tag)
+    return _default_dir(f"{name}/{tag}")
+
+
+def bilder_dir(tag=None):
+    """Tagesordner fuer die PNG-Ausgaben der Scan-Plotter."""
+    return tages_unterordner("Bilder", tag)
+
+
+def fit_plots_dir(tag=None):
+    """Tagesordner fuer die Vektor-PDFs der Auswertung (run_plots.py)."""
+    return tages_unterordner("Fit_Plots", tag)
+
+
+# Modul-Konstanten fuer Aufrufer, die sie als Konstante importieren (die
+# run_*.py der Scans). Sie zeigen auf den Tag, an dem importiert wurde;
+# report.py ruft statt dessen fit_plots_dir() auf und trifft damit immer den
+# aktuellen Tag.
+DEFAULT_IMAGES_DIR = bilder_dir()
+FIT_PLOTS_DIR = fit_plots_dir()
 
 
 # ----------------------------------------------------------------------

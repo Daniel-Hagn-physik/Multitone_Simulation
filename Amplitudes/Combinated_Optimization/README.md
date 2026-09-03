@@ -289,6 +289,22 @@ gescannten Fenster (dieselbe Physik, anderer Scan-Bereich, andere Zahlen);
 und er hebt die atom-gewichteten Groessen um das Fuenf- bis Zehnfache an,
 weil deren rohe Spannen 4-7 pp betragen gegen 41 pp bei U_hart.
 
+**J wird in Prozent gezeigt.** J ist eine Kombination von `Uniformity` und
+`Crosstalk`, also relativer Groessen, und hat damit dieselbe Einheit wie sie.
+Karte, Querschnitt und Bericht zeigen es deshalb wie U und eta in Prozent -
+und nur so kann es ueberhaupt mit ihnen auf eine gemeinsame y-Achse kommen,
+wenn es in derselben Groessenordnung liegt: `group_traces_by_axis()` trennt
+zuerst nach EINHEIT und erst danach nach Groessenordnung. Vorher stand J
+dimensionslos daneben (0.046 statt 4.6 %) und bekam zwangslaeufig immer eine
+eigene Achse. Hard_Optimization und Weighted_Optimization halten es seit
+jeher so.
+
+Das Wort **"roh"** bezieht sich weiterhin auf die fehlende gitterweite
+Normierung, nicht auf die Einheit. Wo der rohe Zahlenwert zum Vergleich mit
+der Konsolenausgabe des Optimierers gebraucht wird - Bestpunkt und
+Region-Schwellwert im Bericht -, steht er in Klammern daneben
+(`J (Score) = 4.387% (roh 0.04387)`).
+
 Der Schluessel im gespeicherten dict heisst weiterhin `combined_score`
 (Dateiformat), traegt aber jetzt J; neue Datensaetze bekommen zusaetzlich
 `score_is_raw=True`. **Aeltere Dateien tragen dort noch den normierten
@@ -685,9 +701,9 @@ Combinated_Optimization/
         hard_check.py       harte Nachrechnung + Konsistenz-Analyse
         report.py           Plots und Markdown-Berichte
     Results/                gespeicherte Datensaetze (.pkl)
-    Fit_Plots/              Vektor-PDFs der Auswertung
-    Fit_Results/            Markdown-Berichte
-    Bilder/                 PNG-Ausgaben
+    Fit_Plots/2026-09-03/   Vektor-PDFs der Auswertung, tageweise
+    Fit_Results/            Markdown-Berichte (flach, Datum im Namen)
+    Bilder/2026-09-03/      PNG-Ausgaben, tageweise
     Old_Combine/            Archiv des verworfenen GETRENNTEN Verfahrens
 ```
 

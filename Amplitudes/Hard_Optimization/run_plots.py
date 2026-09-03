@@ -1195,7 +1195,10 @@ def main():
 
     lines = [f"Auswertung fertig "
              f"({scan_data.KIND_LABELS.get(out['kind'], out['kind'])}).", ""]
-    lines.append(f"Plots: {paths.FIT_PLOTS_DIR}")
+    # Der Tagesordner, in den dieser Lauf tatsaechlich geschrieben hat -
+    # nicht die Konstante, die beim Import galt.
+    lines.append(f"Plots: {out.get('plots_dir', paths.fit_plots_dir())}")
+    lines.append(f"Bericht: {out.get('results_dir', paths.FIT_RESULTS_DIR)}")
     if params["forbidden_draw"] or params["forbidden_exclude"]:
         grenze = scan_data.forbidden_boundary(results, params["forbidden_factor"])
         lines.append("")

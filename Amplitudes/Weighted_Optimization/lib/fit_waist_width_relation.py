@@ -116,7 +116,7 @@ def _default_dir(name):
 # "um_waist", getrennt von fit_central_amplitudes.py's "mm_waist"
 # (Waist VOR der Linse) - auf Wunsch, damit an Ordnernamen sofort erkennbar
 # ist, welche Waist-Konvention ein Plot verwendet.
-FIT_PLOTS_DIR = _default_dir("Fit_Plots/um_waist")
+FIT_PLOTS_DIR = _default_dir(f"Fit_Plots/{date.today().isoformat()}/um_waist")
 FIT_RESULTS_DIR = _default_dir("Fit_Results")
 
 # LaTeX-freundlicher Plot-Stil - identisch zu fit_central_amplitudes.py.

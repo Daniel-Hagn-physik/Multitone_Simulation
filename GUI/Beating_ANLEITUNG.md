@@ -99,64 +99,29 @@ Der Kreuzterm **eines** Spotpaares lautet
 2 · A_s A_s' · u_s(r) u_s'(r) · cos(2π Δf t + Δφ)
 ```
 
-Für sich allein genommen lässt sich ein einzelnes Paar durch keine Phase
-dämpfen — Δφ verschiebt nur, *wann* das Maximum liegt.
+Für sich allein lässt sich ein einzelnes Paar durch keine Phase dämpfen — Δφ
+verschiebt nur, *wann* das Maximum liegt. Weil sich aber viele Paare dieselbe
+Differenzfrequenz teilen (bei 3×4 bis zu elf), addieren sich ihre Beiträge als
+Zeiger und können sich teilweise auslöschen. Die zeitliche Varianz ist damit
+sehr wohl phasenabhängig — aber nur begrenzt:
 
-Entscheidend ist aber, dass sich **viele Paare dieselbe Differenzfrequenz
-teilen** (bei 3×4 bis zu elf Paare pro Frequenz). Ihre Beiträge addieren sich
-als Zeiger, und diese Summe kann durch geeignete Phasen teilweise ausgelöscht
-werden. Schreibt man I(r,t) als Fourierreihe in f₀,
+| | σ_t/⟨I⟩ im Plateau |
+|---|---|
+| alle Phasen 0 | 136 % |
+| Schroeder | 90 % |
+| bestes mit Tonphasen | 70 % |
+| absolute Schranke (freie Paarphasen) | 28.7 % |
 
-```
-I(r,t) = Σ_d D_d(r) e^{i d ω₀ t}      D_d = Σ_{k_s−k_s' = d} g_s g_s' e^{i(φ_s−φ_s')}
-⟨I⟩(r) = D_0(r)                        Var_t(I) = Σ_{d≠0} |D_d|²
-```
+**Verworfen und entfernt.** Es gab einmal drei weitere Optimierer — auf
+breitbandige Zeitvariation, auf minimale Spitzenintensität und auf ein
+„Ruhefenster". Alle drei liefen auf nahezu denselben Phasensatz hinaus (72 %,
+70 %, 70 %), und für den gepulsten Betrieb ist ohnehin die Pulsfläche die
+maßgebliche Größe. Ebenfalls entfernt: der Modus *frei je Spot* (er zeigte, dass
+auch volle Freiheit nur auf 55 % kommt — Punkt gemacht, Knopf weg) und das
+Newman-Preset (lieferte auf drei Stellen dasselbe wie Schroeder).
 
-dann ist die zeitliche Varianz **sehr wohl phasenabhängig**. (Diese Form ist
-exakt und braucht keine Zeitschleife — das GUI rechnet σ_t/⟨I⟩ damit und kann
-deshalb hunderte Startpunkte optimieren.)
-
-Gemessen bei 3×4, waist 1.05 µm, width 0.35 MHz, als RMS von σ_t(I)/⟨I⟩ im
-Plateau:
-
-| Phasensatz | σ_t/⟨I⟩ im Plateau | Modulationstiefe | Spitze / max⟨I⟩ |
-|---|---|---|---|
-| alle 0 | 136 % | 99.7 % | 7.49 × |
-| Schroeder | 90 % | 98.3 % | 3.93 × |
-| Newman | 90 % | 98.3 % | 3.91 × |
-| auf minimale **Spitze** optimiert | 72 % | 96.9 % | **2.47 ×** |
-| auf minimale **Variation** optimiert | **70 %** | 96.4 % | 2.63 × |
-| frei je Spot (unphysikalisch) | 55 % | — | 2.26 × |
-
-**Faktor 1.9 ist drin, mehr nicht.** Auf null bringen lässt es sich prinzipiell
-nicht: Differenzfrequenzen, die nur von einem einzigen Paar erzeugt werden (bei
-3×4 etwa d = 12, die beiden diagonalen Eckspots), haben keinen Partner zum
-Auslöschen. Selbst mit völlig freien Spotphasen — die sich mit zwei AODs gar
-nicht ansteuern lassen — kommt man nur auf 55 %.
-
-Bemerkenswert: die Optimierung auf **Plateau**, auf die **Spot-Zentren** und auf
-den **2-µm-Kreis** führt auf praktisch denselben Wert (70.2 / 70.5 / 70.2 %).
-Es gibt hier also keinen Zielkonflikt, ein Phasensatz bedient alle drei.
-
-Ebenso bemerkenswert: die Optimierung auf minimale **Spitze** landet fast am
-selben Punkt (72 % statt 70 %). Wer den AOD schonen will, bekommt die ruhigere
-Intensität fast geschenkt.
-
-Die **Modulationstiefe** (I_max−I_min)/(I_max+I_min) bleibt dagegen bei 96 bis
-100 %, egal welche Phasen. Sie wird vom Minimum bestimmt, und das geht in einem
-so stark überlappenden Muster fast überall durch null. σ_t/⟨I⟩ ist deshalb die
-aussagekräftigere Größe für „wie unruhig ist das Licht".
-
-**Was physikalisch einstellbar ist:** nur die N_x + N_y Phasen der RF-Töne.
-Ein Spot (n,m) trägt φ_x(n) + φ_y(m) — bei 3×4 kommen die zwölf Spotphasen also
-aus sieben Freiheitsgraden, von denen zwei global sind, bleiben fünf. Der
-Eintrag *frei je Spot* im GUI umgeht das bewusst und dient nur als Gegenprobe.
-
-Die Knöpfe: **Ruhefenster optimieren** (siehe unten — meist der praktisch
-relevante), **Zeitliche Variation minimieren** (Zielgebiet wählbar: Plateau,
-Spot-Zentren oder Kreis mit einstellbarem Radius) und **Spitze minimieren**.
-Beide schreiben das Ergebnis in die Eingabefelder, von wo aus sich weiter
-probieren lässt.
+**Geblieben** sind die Presets 0 / Schroeder / würfeln, der Quadratur-Haken und
+der Puls-Optimierer.
 
 ## Wo die Unruhe sitzt: das Spektrum
 
@@ -412,6 +377,180 @@ den Abstand der nächsten Linie:
 | 0.45 MHz (jetzt) | 75.0 kHz | 14.6 kHz | 29.2 kHz | unkritisch |
 
 Der Wechsel auf width = 0.45 MHz hat also nebenbei genau das Richtige getan.
+
+## Gepulster Betrieb: die Pulsfläche ist die relevante Größe
+
+Wird das Profil **gepulst** eingestrahlt, um Rabi-Übergänge zu treiben, ist
+weder die Momentanintensität noch das Zeitmittel die maßgebliche Größe, sondern
+die **akkumulierte Rabi-Fläche**
+
+```
+θ(r) = ∫_{t₀}^{t₀+T_p} Ω(r,t) dt
+```
+
+Der Puls integriert über die Schwebung. Ihre Gleichmäßigkeit über das
+Auswertegebiet bestimmt, wie einheitlich der Drehwinkel der Atome wird.
+
+Weil I eine Fourierreihe in f₀ ist, lässt sich das Integral für Ω ~ I
+geschlossen angeben — kein Zeitschritt, keine Diskretisierungsfehler:
+
+```
+θ = T_p·D₀ + 2 Re[ Σ_{d>0} D_d · G_d ],   G_d = (e^{i d ω₀ (t₀+T_p)} − e^{i d ω₀ t₀}) / (i d ω₀)
+```
+
+### Die harte Bedingung: der Puls muss getriggert sein
+
+π-Puls-Dauer T = 1/(2 f_Rabi), also 5 µs bei 0.1 MHz bis 0.5 µs bei 1 MHz —
+gegen eine Schwebungsperiode von 13.33 µs. **Ohne feste Lage des Pulses im
+Schwebungszyklus schwankt die Pulsfläche von Schuss zu Schuss:**
+
+| f_Rabi | T_π | T_π / T₀ | Fläche schwankt um |
+|---|---|---|---|
+| 0.1 MHz | 5.00 µs | 0.375 | 2.2 × |
+| 0.2 MHz | 2.50 µs | 0.188 | 18.7 × |
+| 0.5 MHz | 1.00 µs | 0.075 | 55.6 × |
+| 1.0 MHz | 0.50 µs | 0.037 | 73.1 × |
+
+Faktor 73 im Drehwinkel macht kohärente Operationen unmöglich. Der Puls **muss**
+auf die AWG-Wellenform getriggert werden. Das GUI weist darauf hin und nennt den
+Faktor.
+
+### Ist der Puls getriggert, ist die Lage sogar ein Vorteil
+
+Mit fester Pulslage t₀ und optimierten Tonphasen wird die Uniformity der
+Pulsfläche im 2-µm-Kreis **besser als der Zeitmittelwert** — der Puls
+integriert die Schwebung so, dass sie die räumliche Ungleichmäßigkeit teilweise
+kompensiert:
+
+| f_Rabi | U bei t₀ = 0 | bestes t₀, Phasen 0 | Phasen **und** t₀ optimiert | t₀ |
+|---|---|---|---|---|
+| 0.1 MHz | 35.3 % | 18.6 % | **14.2 %** | 9.64 µs |
+| 0.2 MHz | 46.4 % | 20.3 % | **11.4 %** | 0.64 µs |
+| 0.5 MHz | 57.0 % | 31.9 % | **18.4 %** | 4.93 µs |
+| 1.0 MHz | 67.3 % | 34.2 % | **19.5 %** | 2.06 µs |
+
+Zum Vergleich: **U(⟨I⟩) = 27.8 %** im selben Kreis — das ist der Wert, den das
+inkohärente Bild liefert. Bei 0.1 und 0.2 MHz liegt die optimierte Pulsfläche
+deutlich darunter.
+
+### Welche Physik im Anregungsmodell steckt
+
+Die Anregung kommt allein aus der Pulsfläche: P(r) = sin²(θ(r)/2) mit
+θ(r) = ∫Ω dt. Für ein **resonantes** Zweiniveausystem mit beliebig
+zeitabhängigem Ω ist das **exakt**, keine Näherung — gegen eine
+schrittweise Integration der Schrödingergleichung auf sechs Stellen geprüft.
+
+Das **Kopplungsgesetz** ist die entscheidende Wahl:
+
+* **Ω ~ I** — beide Raman-Äste kommen aus diesem Multiton-Strahl (z. B. ein EOM
+  setzt die 3.035-GHz-Seitenbänder hinter den AOD). Dann paart sich jeder Ton
+  mit seinem eigenen Seitenband, alle Paare sind zweiphotonen-resonant, und die
+  kohärente Summe über alle Tonpaare ergibt exakt Ω ~ |E|² = I. **Hier ist das
+  Modell exakt.**
+* **Ω ~ √I** — nur ein Ast läuft über den AOD. Dann ist Ω ~ E **komplex**, und
+  jeder Ton sitzt bei seiner eigenen Zweiphotonen-Verstimmung (Vielfache von f₀,
+  bis ±450 kHz — in derselben Größenordnung wie Ω selbst). Das GUI behält nur
+  |Ω| ~ √I und lässt die Phase weg; gegen die exakte komplexe Lösung kostet das
+  bis zu 2.5 % Anregung bei 0.2 MHz. Dieser Zweig ist als Anhaltspunkt zu lesen.
+
+Die **Lichtverschiebung** ist über das Feld `light shift eta` = δ/Ω drin. Bei
+einem Raman-Übergang skalieren δ und Ω mit derselben Intensität, ihr Verhältnis
+ist also orts- und zeitunabhängig, und das Problem schließt sich wieder:
+
+```
+P = 1/(1+η²) · sin²( √(1+η²) · θ/2 )
+```
+
+numerisch bestätigt. Die Lichtverschiebung **deckelt also den Kontrast, erzeugt
+aber keine zusätzliche räumliche Ungleichmäßigkeit** — alle Uniformity-Zahlen
+dieses GUIs bleiben davon unberührt. Kompensiert man den Mittelwert durch
+Verstimmen des Raman, holt man das meiste zurück (bei η = 0.5: 0.77 → 0.93).
+
+**Nicht im Modell**, und beim Vergleich mit der Messung zu bedenken: statische
+Zweiphotonen-Verstimmung und Magnetfeldshifts; spontane Emission über den
+Zwischenzustand; die Zeeman-Substruktur von Rb-85 (F = 2 mit 5, F = 3 mit 7
+Unterzuständen, je eigener Clebsch-Gordan-Faktor — ein sauberer π-Puls setzt ein
+geschlossenes Paar voraus); Atombewegung während des Pulses (jeder Ort wird
+eingefroren behandelt, was zum Schuss-zu-Schuss-Zittern des Strahlzeigers passt,
+nicht zu einem im Topf schwingenden Atom); endliche Pulsflanken und die
+Füllzeit des AOD; Polarisation und Vektor-Lichtverschiebung.
+
+Die 3.035 GHz selbst tauchen in keiner Formel auf: sie entscheiden nur, **welche**
+Lichtkomponenten das Raman-Paar bilden — die AOD-Töne liegen nur einige 100 kHz
+auseinander. Ob die Aufspaltung innerhalb oder außerhalb des Multiton-Pfades
+überbrückt wird, ist genau das, was das Kopplungsgesetz oben kodiert.
+
+### Der Trigger, praktisch
+
+„Triggern" heißt nur: jeden Schuss an derselben Stelle des Schwebungszyklus
+beginnen. Der AWG spielt die Multiton-Wellenform mit Periode T₀ = 13.33 µs;
+der Lichtpuls braucht eine feste Verzögerung dazu. Zwei Wege:
+
+* Der **AWG erzeugt den Puls selbst** (Burst statt Dauerbetrieb) — dann liegt
+  die Phase per Konstruktion fest. Vorbehalt: der AOD braucht seine Füllzeit
+  (Strahldurchmesser / Schallgeschwindigkeit), bei ~2 mm Strahl je nach
+  Kristall 0.5 bis 3 µs. Bei einem 5-µs-Puls spürbar, bei 0.5 µs unbrauchbar.
+* Die Töne laufen durch, ein separater **AOM schneidet den Puls heraus** —
+  dann Marker-Ausgang des AWG als Startsignal, Loop-Länge genau T₀ (oder ein
+  Vielfaches), einstellbare Verzögerung darauf.
+
+### Flacher Punkt statt bestem Punkt
+
+Die Flächenkurve A(t₀) hat steile und flache Stellen. Auf einer flachen Stelle
+verschwindet dA/dt₀, und Zeit-Jitter wirkt erst in zweiter Ordnung. Das ist
+weit mehr wert als das letzte Prozent Uniformity:
+
+| t₀ liegt … | U | Toleranz für 1 % Flächenfehler |
+|---|---|---|
+| auf dem U-Minimum (steil) | 18.3 % | 44 ns |
+| auf einer flachen Stelle | 19.9 % | **12 800 ns** |
+
+Faktor 290 an Timing-Toleranz für 1.6 Prozentpunkte. Bei 1 MHz ist es 5 ns
+gegen 533 ns — dort existenziell. Der Knopf **Move t_0 to a flat point of the
+area** setzt t₀ dorthin.
+
+### Was man am Ende misst
+
+Das Panel **Rabi oscillation** zeigt die Anregung über die Pulsdauer, gemittelt
+über das Zielgebiet, für drei Fälle: ideal ohne Schwebung, getriggert beim
+aktuellen t₀, und ungetriggert (über zufällige Pulslagen gemittelt). Bei
+0.1 MHz und optimierten Phasen:
+
+| | Kontrast |
+|---|---|
+| ideal | 100 % |
+| getriggert auf den flachen Punkt | 84 % |
+| getriggert auf den steilen Punkt | 78 % |
+| ohne Trigger | 76 % |
+
+Bei 1 MHz dagegen 80 % mit gegen 41 % ohne Trigger — je kürzer der Puls, desto
+mehr hängt alles am Timing.
+
+Die Kurven werden erst berechnet, wenn das Panel gewählt ist (etwa eine
+Sekunde), und danach zwischengespeichert.
+
+### Bedienung
+### Bedienung
+
+Die Gruppe **Gepulster Betrieb** hat drei Eingaben und einen Knopf:
+
+| Feld | Bedeutung |
+|---|---|
+| f_Rabi | Ω/2π; daraus folgt T_π = 1/(2 f_Rabi) |
+| Pulsbeginn t₀ | Lage des Pulses im Schwebungszyklus |
+| Kopplung | Ω ~ I (Zweiphotonen-Raman, beide Äste aus diesem Profil) oder Ω ~ √I (dieses Profil ist nur ein Ast) |
+| *Move t_0 to a flat point* | setzt t₀ auf eine jitter-tolerante Stelle |
+| *Optimise phases and t_0* | minimiert U(θ) im Zielgebiet, etwa 30 s |
+
+Das Panel **Pulsfläche: U über den Pulsbeginn** zeigt U(θ) als Funktion von t₀
+über einen ganzen Schwebungszyklus, mit dem besten t₀ markiert und der
+Zeitmittel-Referenz als gepunkteter Linie.
+
+Die Kopplung macht einen spürbaren Unterschied: mit Ω ~ √I liegt das beste t₀
+bei 11.1 % statt 20.3 %, weil die Wurzel den Dynamikbereich staucht.
+
+**Zielgebiet ist jetzt der 2-µm-Kreis** um die MusterMitte — Voreinstellung im
+Feld *Zielgebiet*, Radius im Feld daneben.
 
 ## Was die Modulation tatsächlich reduziert
 

@@ -141,7 +141,7 @@ def _default_dir(name):
 # eigener Unterordner, getrennt von Fit_Plots/um_waist (siehe
 # fit_waist_width_relation.py), damit an der Ordnerstruktur sofort erkennbar
 # ist, welche Waist-Konvention ein Plot verwendet.
-FIT_PLOTS_DIR = _default_dir("Fit_Plots/mm_waist")
+FIT_PLOTS_DIR = _default_dir(f"Fit_Plots/{date.today().isoformat()}/mm_waist")
 FIT_RESULTS_DIR = _default_dir("Fit_Results")
 
 

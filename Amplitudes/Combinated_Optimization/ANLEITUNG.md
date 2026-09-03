@@ -41,11 +41,18 @@ Alles landet in vier Unterordnern, die bei Bedarf automatisch angelegt
 werden:
 
 ```
-Results/       die Datensaetze (.pkl)
-Fit_Plots/     die Plots (PDF, teils PNG)
-Fit_Results/   die Berichte (Markdown)
-Bilder/        Nebenausgaben des Optimierers
+Results/                 die Datensaetze (.pkl)
+Fit_Plots/2026-09-03/    die Plots (PDF, teils PNG) - tageweise
+Fit_Results/             die Berichte (Markdown) - flach, Datum im Namen
+Bilder/2026-09-03/       Nebenausgaben des Optimierers - tageweise
 ```
+
+Die Plots landen also in einem Ordner je Tag, der automatisch entsteht: nach
+ein paar Laeufen war im flachen Ordner nicht mehr zu sehen, was zusammen
+gehoert. Datensaetze und Berichte bleiben flach - die `.pkl` ist der
+Datensatz und nicht das Ergebnis eines Tages, und Berichte will man
+nebeneinander lesen. Beide tragen das Datum im Dateinamen. Vorhandene Dateien
+werden nicht verschoben; die Umstellung gilt ab dem naechsten Lauf.
 
 ---
 
