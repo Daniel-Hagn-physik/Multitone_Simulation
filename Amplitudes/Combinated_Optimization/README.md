@@ -4,7 +4,7 @@
 Schritt in `ANLEITUNG.md`.** Dieses Dokument beschreibt, was die Verfahren
 rechnen und wie der Code aufgebaut ist.
 
-Vier Skripte zum Ausfuehren, ein Ordner `lib/` mit dem, was sie benutzen.
+Fuenf Skripte zum Ausfuehren, ein Ordner `lib/` mit dem, was sie benutzen.
 
 ## Was will ich gerade?
 
@@ -14,8 +14,9 @@ Vier Skripte zum Ausfuehren, ein Ordner `lib/` mit dem, was sie benutzen.
 | pruefen, **ob mein vorhandener Weighted-Datensatz auch im Hard Case gut ist** | `run_hard_check.py` |
 | **vorhandene Datensaetze plotten** und den Bericht (neu) erzeugen | `run_plots.py` |
 | **einen einzelnen Parametersatz suchen**: einen Teil der Groessen vorgeben, die uebrigen gegen die Penalty optimieren lassen (kein Gitter) | `run_penalty_only.py` |
+| **einen EINZELNEN Strahl** ueber dem Waist durchrechnen (kein Tonarray, kein width, keine Amplituden) | `run_single_beam.py` |
 
-Alle vier oeffnen einen Dialog, in dem die Parameter stehen. Nichts muss
+Alle fuenf oeffnen einen Dialog, in dem die Parameter stehen. Nichts muss
 im Code geaendert werden.
 
 **Welchen Datensatz?** `run_plots.py` und `run_hard_check.py` zeigen im
@@ -684,6 +685,213 @@ Ergebnis ueberhaupt sein kann.
 
 ---
 
+## 5. `run_single_beam.py` - ein einzelner Strahl ueber dem Waist
+
+Kein Tonarray, sondern EIN Strahl. Vorgegeben wird ein Waistbereich -
+wahlweise vor der ersten Linse in mm oder in der Atomebene in µm -, heraus kommen
+Uniformity und Crosstalk ueber dem Waist, in allen drei Metrik-Familien.
+
+**Warum es hier weder width noch r_x/r_y gibt.** Beides ist bei einem Ton
+nicht definiert: `width` spannt nichts auf (die harte Uniformity-Region der
+Multitone-Skripte ist das Quadrat, das die Spot-Zentren aufspannen - ein
+einzelner Punkt spannt kein Quadrat auf), und ein Aussen/Innen-Verhaeltnis
+braucht mindestens zwei Toene je Achse.
+
+**Was an die Stelle des Ton-Quadrats tritt.** Eine KREISREGION mit frei
+einstellbarem Radius (Default 1 µm) um die Site - die Beam-Pointing-Region:
+das Atom kann irgendwo in diesem Kreis sitzen. Sie traegt die Uniformity:
+
+```
+U_h   = std(I) / mean(I)               ueber dem Kreis
+eta_h = sum(I_nachbar) / sum(I_eigen)  ueber der gewaehlten Region
+```
+
+**Die Crosstalk-Region ist waehlbar** (`hard_crosstalk_region`, im Dialog
+eine Auswahlliste):
+
+- `"kreis"` - derselbe Kreis. Beide harten Groessen sagen dann
+  etwas ueber dieselbe Flaeche aus.
+- `"pitch"` - das Pitch-Quadrat mit Seitenlaenge `pitch`, also genau die
+  Region, die `_build_masks()` im Multitone-Optimierer fuer den Crosstalk
+  ausschneidet. Damit ist `eta_h` direkt mit den Multitone-Scans
+  vergleichbar - bezieht sich dann aber auf eine ANDERE Flaeche als die
+  Uniformity daneben. Bericht und Plot-Titel nennen beide Regionen, und der
+  Dateiname bekommt `_pitchbox`, damit sich die beiden Faelle nicht
+  ueberschreiben.
+- `"beide"` (Default) - beide in EINEM Lauf. Der Datensatz bekommt dann zwei Kurven,
+  `crosstalk_hart_kreis` und `crosstalk_hart_pitch`; die harte Figur zeigt
+  sie als `eta_h^circ` und `eta_h^box` neben derselben Uniformity. Die
+  haengt gar nicht an der Crosstalk-Region und wird deshalb nur EINMAL
+  gerechnet; die beiden Crosstalks laufen ueber ihre je eigenen Gitter.
+
+  Die beiden Kurven teilen sich IMMER eine y-Achse (`IMMER_ZUSAMMEN` in
+  `single_beam_report.py`, dasselbe Prinzip wie `r_x`/`r_y` im
+  Querschnitt): es ist dieselbe Groesse ueber zwei Flaechen, und genau ihr
+  Verhaeltnis will man ablesen - auf getrennten Achsen saehen sie gleich
+  gross aus.
+
+  Die Penalty-Kombination braucht EINE Definition von `eta_h`. Welche der
+  beiden das ist, sagt `penalty_crosstalk_region` (Dialog: "davon in eta_c /
+  J"); nur sie geht in `eta_c` und `J` ein, und der Bericht schreibt es dazu.
+  Der Dateiname bekommt `_beide` bzw. `_beide-pitchbox`.
+
+Fuer das Pitch-Quadrat wird ein zweites Gitter aufgebaut statt eines
+gemeinsamen, groesseren: sonst haenge die Aufloesung des Kreises daran, wie
+gross der Pitch gerade ist, und `U_h` aenderte sich mit einer Einstellung,
+die es gar nicht betrifft.
+
+Die atom-gewichteten Groessen sind unveraendert die des Optimierers
+(`weighted_uniformity`, `weighted_crosstalk` auf dem lokalen Sub-Gitter),
+die Kombination unveraendert die Penalty-Formel aus `lib/combine.py`. Alle
+drei Formeln werden importiert, nicht neu geschrieben - eine zweite Fassung
+waere genau die Sorte Abweichung, die spaeter niemand mehr findet.
+
+**Crosstalk bei einem Strahl** ist weiterhin `sum(I_nachbar)/sum(I_eigen)`,
+wobei `I_nachbar` die um +-pitch verschobenen Kopien desselben Strahls sind
+(Default: die 8 direkten Nachbarn, wie im Optimierer). Weil das Profil
+translationsinvariant ist, ist das dieselbe Zahl wie "wieviel von diesem
+Strahl faellt auf die Nachbar-Sites".
+
+**Nicht normiert wird bewusst.** Der Peak des Profils ist analytisch 1, und
+beide Metriken sind gegen eine gemeinsame Skalierung invariant. Eine
+Normierung auf ein Gitter-Maximum waere hier sogar falsch: das Maximum der
+Nachbar-Summe liegt ~pitch entfernt, also ausserhalb der ausgewerteten
+Region - derselbe Fehler, den `_local_neighbor_intensity()` im Optimierer
+beschreibt.
+
+**Die Plots.** Uniformity und Crosstalk stehen IMMER zusammen in einer
+Figur; ob sie sich eine y-Achse teilen, entscheidet dieselbe Regel wie im
+Querschnitt (`report.group_traces_by_axis`): gemeinsame Achse, solange die
+Wertebereiche innerhalb einer Groessenordnung liegen und jede Kurve dort
+noch etwas zu sehen gibt, sonst eine zweite Achse rechts in der Farbe ihrer
+Kurve. Im Dialog laesst sich das auf "immer eine Achse", "logarithmisch"
+oder "je Kurve eine eigene" stellen. Ob hart und gewichtet in GETRENNTE
+Figuren gehen, ist ein Haken im Dialog; die Penalty-Kombination bekommt auf
+Wunsch ihre eigene Figur (`U_c`, `eta_c`, `J`).
+
+Jede Figur traegt oben eine zweite x-Achse mit dem Waist vor der ersten
+Linse. Die ist nicht linear - `waist = C/win_input` -, und ihre Teilstriche
+werden selbst gesetzt, weil der automatische Ticker die grossen
+win_input-Werte am linken Rand zu einem Klumpen schiebt.
+
+**Linienstile.** Alle Kurven sind durchgezogen; unterschieden werden sie
+ueber die Farbe. Gestrichelt wird nur, wo zwei Kurven im Bild
+UEBEREINANDER liegen - dort taeuscht die obere sonst eine Einzelkurve vor
+und die untere ist schlicht nicht mehr da. Betroffen ist regelmaessig das
+Paar U_c/J, das sich fast deckt.
+
+Entschieden wird das am fertigen Bild, nicht an den Rohwerten: zwei Kurven
+koennen auf verschiedenen y-Achsen laufen und sich trotzdem exakt decken.
+Verglichen werden deshalb die Lagen in Achsen-Anteilen, nachdem alle
+Achsengrenzen stehen (`_entwirre_ueberlapp`); decken sie sich ueber mehr
+als die Haelfte des Bereichs auf weniger als 2 % der Achsenhoehe, bekommt
+die spaeter gezeichnete den naechsten Strichel-Stil. Die senkrechte Linie
+des Arbeitspunkts ist immer gestrichelt - sie ist eine Markierung, keine
+Messkurve.
+
+**Ohne Ueberschrift, Legende im Bild.** Die Figuren tragen per Default
+keinen Titel: in LaTeX steht die Bildunterschrift darunter, und was der
+Titel sagen wuerde (Region, sigma_atom, Penalty-Parameter), steht im
+Bericht und im Dateinamen. Im Dialog laesst er sich zuschalten. Die Legende
+sitzt im Bild (Vorgabe oben links); damit sie nicht auf den Kurven liegt,
+wird die Achse oben um `LEGENDEN_LUFT` aufgeweitet - abgeschnitten wird
+nichts.
+
+**Schrift und Linien** liegen ueber `SCHRIFT_DICHTE` (Default 1.45) ueber
+dem Massstab der Multitone-Karten. Das ist kein Bruch mit dem
+gemeinsamen Stil, sondern seine Anwendung: `DOC_RC` ist auf eine ueber die
+volle Textbreite eingebundene Karte ausgelegt, eine Kurvenfigur wird im
+Text meist schmaler gesetzt und muss dafuer schwerer gezeichnet sein. Der
+Faktor steht im Dialog.
+
+**Arbeitspunkt.** Auf Wunsch wird ein Waist in allen Figuren markiert -
+senkrechte Linie plus ein Stern auf jeder Kurve, und im Bericht ein
+Abschnitt mit den Werten aller Groessen dort (zwischen den benachbarten
+Stuetzstellen linear interpoliert; die Kurven sind hier glatte Funktionen
+des Waists). Der Waist kommt entweder aus dem Dialog oder aus dem Minimum
+von J, eta_c oder U_h - dann als Stuetzstelle, nicht interpoliert.
+
+### Zweiter Lauf: die Atomposition durchfahren
+
+Bei FESTEM Waist wandert das Atom aus der Mitte heraus - gefahren wird der
+Betrag `r` des Versatzes, von 0 bis zum Waist (oder bis zu einem eigenen
+Wert). Berechnet werden ALLE Groessen, in jeder gewaehlten Richtung; die
+Schluessel tragen die Richtung als Endung
+(`crosstalk_weighted__diagonal`). Es gibt eigene Figuren, einen eigenen
+Bericht und einen eigenen Datensatz (`SingleBeamOffset_...`,
+`single_beam_offset_...pkl`).
+
+**Zwei Richtungen, nicht drei.** Waagerecht fehlt mit Absicht: das
+Strahlprofil ist rotationssymmetrisch, waagerecht ist dasselbe wie
+senkrecht. Diagonal ist es NICHT - nicht wegen des Strahls, sondern wegen
+der Nachbar-Sites: die liegen auf einem Quadratgitter, und diagonal ist die
+naechste Site sqrt(2) mal weiter weg. Der Unterschied zwischen den beiden
+Richtungen steckt deshalb ganz im Crosstalk; die Uniformity ist in beiden
+identisch (und genau das ist eine brauchbare Kontrolle, dass die Rechnung
+stimmt).
+
+**Was sich bewegt.** Nur das Atom, und mit ihm die Auswertebereiche: das
+lokale Sub-Gitter und die Gauss-Gewichtung W sitzen zentriert auf der
+jeweiligen Atomposition. Das Lichtfeld steht - der Spot im Ursprung, die
+8 Nachbarkopien bei +-pitch darum herum. Wanderten sie mit, waere es eine
+reine Translation und alle Kurven waeren konstant. Dieselbe Semantik wie
+`atom_offset_x/y` im Multitone-Optimierer; sie deckt auch eine
+Pointing-Drift ab, die alle Strahlen gemeinsam verschiebt (aequivalent zu
+einem Versatz des Atoms um -r, und der Satz der 8 Nachbarn ist
+inversionssymmetrisch).
+
+**Was sich mit dem Versatz aendert.** Die atom-gewichteten Groessen immer -
+das Atom sitzt im Strahl woanders. Die HARTEN nur, wenn
+`offset_hard_follows_atom` gesetzt ist (Default): dann wandert die Kreis-
+bzw. Pitch-Region mit dem Atom. Das ist hier die sinnvolle Lesart, denn die
+Atomposition IST die abgefahrene Groesse. Steht der Schalter aus, bleibt
+die Region auf der Site und die harten Kurven sind ueber dem Versatz
+konstant - auch eine Aussage, nur eben eine langweilige.
+
+Bei `r = 0` stimmen alle Werte exakt mit dem Waist-Sweep an diesem Waist
+ueberein; der Positions-Sweep faengt also dort an, wo jener steht.
+
+In den Figuren steht die Richtung im LINIENSTIL (senkrecht durchgezogen,
+diagonal gestrichelt) und die Groesse in der Farbe - hier traegt der Stil
+also Bedeutung, und die automatische Ueberlapp-Strichelung ist
+abgeschaltet. Die obere x-Achse zeigt den Versatz in Einheiten des Waists
+(`r/w`), die untere in µm.
+
+**Womit der Dialog aufgeht.** Die Auftragung beginnt bei **1.8 mm vor der
+ersten Linse** und endet bei **2.5 µm in der Atomebene** - in der Einheit
+der x-Achse also 0.7434 .. 2.5 µm. Festgelegt sind die beiden Enden, die
+jeweils andere Schreibweise wird daraus ausgerechnet (siehe
+`WIN_INPUT_START_DEFAULT_MM` / `WAIST_ENDE_DEFAULT_UM`), damit nicht zwei
+gerundete Zahlenpaare nebeneinander stehen, die dasselbe meinen sollen.
+Dazu Kreisradius 1 µm, beide
+Crosstalk-Regionen, und der Arbeitspunkt bei 1.9 µm eingezeichnet. Das ist
+der Arbeitsbereich dieses Aufbaus; alles davon steht im Dialog und ist
+umstellbar.
+
+- Ergebnis: `Fit_Plots/<Datum>/SingleBeam_..._hard.pdf` (bzw. `_metrics.pdf`),
+  `..._weighted.pdf`, `..._penalty.pdf`
+- Bericht: `Fit_Results/SingleBeam_..._Report.md`
+- Datensatz: `Results/single_beam_....pkl` (optional)
+- Braucht keinen vorhandenen Datensatz
+
+**Gitteraufloesung.** Jede harte Region wird mit 401 Zellen je Achse
+ausgewertet, und zwar an den ZELLMITTEN (Mittelpunktsregel). Das ist nicht
+Kosmetik: mit `linspace(-a, a, n)` liegen Punkte auf beiden Raendern und
+werden doppelt so stark gewichtet, wie ihnen zusteht - beim Pitch-Quadrat,
+dessen Rand mitten im Signal liegt, waren das gemessen 0.6 % Fehler, der
+erst mit 1/n verschwand. Mit den Zellmitten stimmen U_h und eta_h fuer
+BEIDE Regionen schon bei 401 Zellen auf sechs Stellen (nachgerechnet gegen
+3201). Das gewichtete Sub-Gitter (241 Punkte ueber +-6 sigma_atom) ist
+ebenfalls auf sechs Stellen konvergiert.
+
+**Wieviele Nachbarn.** Default sind die 8 Sites im Kranz direkt um die
+Site (die 3x3-Umgebung ohne die Mitte) - genau das, was der
+Multitone-Optimierer rechnet, und die einzige Wahl, mit der die Zahlen mit
+dessen Scans vergleichbar sind. Zwei Kraenze (24 Sites) bringen bei Airy
+rund 20 % mehr Crosstalk; im Dialog einstellbar.
+
+---
+
 ## Ordner
 
 ```
@@ -692,13 +900,16 @@ Combinated_Optimization/
     run_penalty_only.py     <- ausfuehren: ein Parametersatz, kein Gitter
     run_hard_check.py       <- ausfuehren: Hard Case zu vorhandenem Weighted
     run_plots.py            <- ausfuehren: plotten/auswerten
-    lib/                    <- wird von den drei Skripten benutzt,
+    run_single_beam.py      <- ausfuehren: EIN Strahl ueber dem Waist
+    lib/                    <- wird von den Skripten benutzt,
                                nicht direkt ausfuehren
         paths.py            Ordner-Konstanten, Anbindung an Weighted_Optimization
         combine.py          Penalty-Kombination, Region, Laden/Speichern
         penalty_scan.py     die gemeinsame Amplituden-Optimierung (Gitter)
         penalty_opt.py      dieselbe Zielfunktion ohne Gitter (freie Parameter)
         hard_check.py       harte Nachrechnung + Konsistenz-Analyse
+        single_beam.py      ein Strahl: Sweep ueber den Waist (Kreisregion)
+        single_beam_report.py   dessen Kurven-PDFs und Bericht
         report.py           Plots und Markdown-Berichte
     Results/                gespeicherte Datensaetze (.pkl)
     Fit_Plots/2026-09-03/   Vektor-PDFs der Auswertung, tageweise

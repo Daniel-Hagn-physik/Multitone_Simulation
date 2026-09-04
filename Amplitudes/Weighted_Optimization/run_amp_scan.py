@@ -78,6 +78,7 @@ from weighted_multitone_amplitude_dependence_plots import AmplitudeScanPlotter
 import perf_log
 import scan_checkpoint
 import airy_scale
+import coherence
 import resume_picker
 
 
@@ -312,6 +313,11 @@ class StartParametersDialog(QDialog):
         self.airy_group.factor_spin.valueChanged.connect(
             lambda _v: self._update_default_save_path())
 
+        # Statische Interferenz frequenzentarteter Spots. Per Default AN -
+        # sie ist da, ob man sie mitrechnet oder nicht.
+        self.coherence_group = coherence.CoherenceGroup(N_X_FIXED, N_Y_FIXED)
+        main_layout.addWidget(self.coherence_group)
+
         save_group = QGroupBox("Save Location (Zwischenspeicherung + Endergebnis)")
         save_layout = QHBoxLayout()
         self.save_path_edit = QLineEdit()
@@ -440,6 +446,7 @@ class StartParametersDialog(QDialog):
             force_cpu=self.force_cpu.isChecked(),
             enable_perf_log=self.enable_perf_log.isChecked(),
             airy_scale_factor=self.airy_group.value(),
+            coherent=self.coherence_group.value(),
             save_path=self.save_path_edit.text().strip(),
         )
 
@@ -496,6 +503,7 @@ def main():
         trap_freq_r=params["trap_freq_r"],
         weighted_n_grid=params["weighted_n_grid"],
         airy_scale_factor=params["airy_scale_factor"],
+        coherent=params["coherent"],
     )
 
     save_path = params["save_path"]
@@ -509,7 +517,10 @@ def main():
             save_path, params["win_input_range"], params["width_range"],
             params["n_points"], params["n_points"], N_X_FIXED, N_Y_FIXED,
             extra_match=dict(alpha=params["alpha"], r_bounds=params["r_bounds"]),
-            airy_scale_factor=params["airy_scale_factor"], verbose=False,
+            airy_scale_factor=params["airy_scale_factor"],
+            # Ein inkohaerent gerechneter Zwischenstand darf nicht kohaerent
+            # weitergerechnet werden (und umgekehrt).
+            optics_match=dict(coherent=params["coherent"]), verbose=False,
         )
         if resumable is not None:
             n_done = scan_checkpoint.count_done(resumable["uniformity_weighted_grid"])

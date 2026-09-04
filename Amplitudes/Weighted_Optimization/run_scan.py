@@ -126,6 +126,7 @@ from weighted_multitone_amplitude_dependence_plots import WeightedFixedScanPlott
 import perf_log
 import scan_checkpoint
 import airy_scale
+import coherence
 import resume_picker
 
 # Feste Optik-Parameter fuer die Umrechnung win_input (vor der Linse) <->
@@ -425,6 +426,16 @@ class StartParametersDialog(QDialog):
         self.airy_group.factor_spin.valueChanged.connect(
             lambda _v: self._update_default_save_path())
 
+        # Statische Interferenz frequenzentarteter Spots. Per Default AN -
+        # sie ist da, ob man sie mitrechnet oder nicht.
+        self.coherence_group = coherence.CoherenceGroup(self.nx_spin.value(),
+                                                        self.ny_spin.value())
+        main_layout.addWidget(self.coherence_group)
+        for _spin in (self.nx_spin, self.ny_spin):
+            _spin.valueChanged.connect(
+                lambda _v: self.coherence_group.set_tones(self.nx_spin.value(),
+                                                          self.ny_spin.value()))
+
         save_group = QGroupBox("Save Location (Zwischenspeicherung + Endergebnis)")
         save_layout = QHBoxLayout()
         self.save_path_edit = QLineEdit()
@@ -700,6 +711,7 @@ class StartParametersDialog(QDialog):
             # vom hier gewaehlten Eingabemodus (siehe Docstring).
             waist_mode=self._current_waist_mode,
             airy_scale_factor=self.airy_group.value(),
+            coherent=self.coherence_group.value(),
             save_path=self.save_path_edit.text().strip(),
         )
 
@@ -755,6 +767,7 @@ def main():
         atom_offset_x=params["atom_offset_x"],
         atom_offset_y=params["atom_offset_y"],
         airy_scale_factor=params["airy_scale_factor"],
+        coherent=params["coherent"],
     )
 
     save_path = params["save_path"]
@@ -769,7 +782,10 @@ def main():
             save_path, params["win_input_range"], params["width_range"],
             params["n_points"], params["n_points"], params["N_x"], params["N_y"],
             extra_match=dict(amps=amps, alpha=params["alpha"]),
-            airy_scale_factor=params["airy_scale_factor"], verbose=False,
+            airy_scale_factor=params["airy_scale_factor"],
+            # Ein inkohaerent gerechneter Zwischenstand darf nicht kohaerent
+            # weitergerechnet werden (und umgekehrt).
+            optics_match=dict(coherent=params["coherent"]), verbose=False,
         )
         if resumable is not None:
             n_done = scan_checkpoint.count_done(resumable["uniformity_weighted_grid"])

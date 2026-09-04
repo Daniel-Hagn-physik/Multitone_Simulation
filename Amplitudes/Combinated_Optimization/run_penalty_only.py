@@ -54,6 +54,7 @@ sys.path.insert(0, str(FilePath(__file__).resolve().parent))
 # Alles kommt aus lib - auch der Optimierer, der eigentlich in
 # ../Weighted_Optimization liegt (siehe Hinweis in lib/paths.py).
 from lib import paths, combine, penalty_opt  # noqa: E402
+import coherence               # aus ../Weighted_Optimization/lib (siehe lib/paths.py)
 
 
 ROLLE_FEST = "vorgeben"
@@ -196,6 +197,16 @@ class PenaltyOnlyDialog(QDialog):
         setup_form.addRow("n_grid:", self.n_grid)
         setup_group.setLayout(setup_form)
         main_layout.addWidget(setup_group)
+
+        # Statische Interferenz frequenzentarteter Spots. Per Default AN -
+        # sie ist da, ob man sie mitrechnet oder nicht.
+        self.coherence_group = coherence.CoherenceGroup(self.N_x.value(),
+                                                        self.N_y.value())
+        main_layout.addWidget(self.coherence_group)
+        for _spin in (self.N_x, self.N_y):
+            _spin.valueChanged.connect(
+                lambda _v: self.coherence_group.set_tones(self.N_x.value(),
+                                                          self.N_y.value()))
 
         # ------------------------------------------------------------------
         # Suche
@@ -350,6 +361,7 @@ class PenaltyOnlyDialog(QDialog):
             N_x=self.N_x.value(), N_y=self.N_y.value(),
             profile=self.profile.currentText(),
             airy_scale_factor=self.airy_scale_factor.value(),
+            coherent=self.coherence_group.value(),
             offset=self.offset.value() * 1e6,
             n_grid=self.n_grid.value(),
             weighted_metrics_enabled=True,

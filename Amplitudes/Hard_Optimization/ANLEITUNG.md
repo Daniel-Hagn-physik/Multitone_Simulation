@@ -86,6 +86,16 @@ Zusätzliche Gruppen:
 
 ---
 
+**Kohärenz (statische Interferenz).** Der Haken *frequenzentartete Spots
+kohärent überlagern* ist standardmäßig gesetzt. Die Töne sind kohärent; Paare
+mit identischer Gesamtfrequenz f_x(n) + f_y(m) haben einen Kreuzterm bei 0 Hz,
+der sich nie wegmittelt und als statisches Muster im Bild steht. Bei 3×4 ist
+das genau ein Paar (die diagonal gegenüberliegenden Eckspots). Gerechnet wird
+mit Phasendifferenz 0, also voll konstruktiv – der ungünstigste Fall. Ohne
+Haken rechnet der Scan wie vor dem 2026-09-04. **Datensätze mit und ohne
+Kohärenz sind nicht vergleichbar**; welches Modell galt, steht in der `.pkl`
+und im Bericht. Details im README.
+
 ## `run_plots.py` – auswerten
 
 Braucht keinen neuen Scan. Datensatz auswählen, Haken setzen, fertig.

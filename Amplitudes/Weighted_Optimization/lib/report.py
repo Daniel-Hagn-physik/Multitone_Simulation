@@ -1339,6 +1339,27 @@ def _scan_parameter_lines(results):
             lines.append(
                 f"- airy_scale_factor = {float(faktor):.4f} "
                 f"(`first_zero_radius = Faktor * waist`)")
+    # Kohaerenz: mit oder ohne den statischen Interferenzanteil der
+    # frequenzentarteten Spots gerechnet? Fehlt der Schluessel, stammt der
+    # Datensatz aus der Zeit vor der Option und wurde inkohaerent gerechnet.
+    koh = results.get('coherent')
+    paare = results.get('n_degenerate_pairs')
+    zusatz = "" if paare is None else f", {int(paare)} entartete(s) Paar(e)"
+    if koh is None:
+        lines.append(
+            "- **Kohaerenz: nicht im Datensatz gespeichert** - der Scan lief vor "
+            "dieser Option und hat die statische Interferenz frequenzentarteter "
+            "Spots NICHT mitgerechnet. Mit neueren, kohaerent gerechneten "
+            "Datensaetzen ist er deshalb nicht direkt vergleichbar.")
+    elif koh:
+        lines.append(
+            f"- Kohaerenz: statische Interferenz mitgerechnet, Phasendifferenz 0 "
+            f"(voll konstruktiv, unguenstigster Fall){zusatz}")
+    else:
+        lines.append(
+            f"- Kohaerenz: AUS - reine Intensitaetssumme, statische Interferenz "
+            f"nicht enthalten{zusatz}")
+
     sigma = results.get('sigma_atom')
     if sigma is not None:
         lines.append(

@@ -236,6 +236,59 @@ extrapoliert, im Plot mit offenen Kreisen). Da die Gerade die Gitterpunkte
 nicht trifft, werden die Werte zwischen den beiden Nachbarzeilen linear
 interpoliert.
 
+## Kohärenz: statische Interferenz der Spots
+
+Die Töne sind untereinander **kohärent**. Ihre Kreuzterme laufen mit der
+Differenzfrequenz um und mitteln sich in jeder Messung weg – **außer** bei
+Paaren mit identischer Gesamtfrequenz. Beide AODs schieben die Lichtfrequenz,
+ein Spot (n, m) trägt also f_s = f_x(n) + f_y(m); mit
+f_x(n) = offset + width·n/(N_x−1) ist
+
+```
+f_s = 2·offset + width · ( n/(N_x−1) + m/(N_y−1) )
+```
+
+Zwei Spots sind entartet, wenn die Klammer übereinstimmt – das hängt **nur an
+N_x und N_y**, nicht an offset oder width. Bei gleicher width auf beiden Achsen
+gibt es deshalb immer mindestens ein entartetes Paar (die diagonal
+gegenüberliegenden Eckspots); bei N_x = N_y ist jede Anti-Diagonale entartet.
+Bei 3×4 ist es genau ein Paar. Der Kreuzterm dieser Paare liegt bei 0 Hz,
+mittelt sich also nie weg und steht als **statisches Interferenzmuster** im
+Bild:
+
+```
+<I> = Σ_s g_s²  +  Σ über entartete Paare  2 g_s g_t cos(Δφ)
+```
+
+Der erste Term ist die reine Intensitätssumme, wie sie das Projekt bis zum
+2026-09-04 gerechnet hat; der zweite fehlte. Gerechnet wird mit Δφ = 0, also
+**voll konstruktiv** – der ungünstigste Fall, und den soll ein Scan bewerten.
+Gemessen an einem 3×4-Airy-Punkt (waist 1.1 µm, width 0.45 MHz) verschiebt das
+die Uniformity um 1.6 % und den atom-gewichteten Crosstalk um 5.7 %.
+
+Der Haken **„frequenzentartete Spots kohärent überlagern"** steht in beiden
+Scan-Dialogen und ist **standardmäßig gesetzt** – die Interferenz ist da, ob
+man sie mitrechnet oder nicht. Ohne Haken rechnet der Scan wie vorher.
+
+Wo das steckt: `lib/coherence.py` (welche Spots entartet sind, plus die
+Dialog-Gruppe), `lib/multitone_flattop_optimizer.py` (Felder und Kreuzterm).
+Der Aufhänger ist `_profile_func()` – es liefert bei eingeschalteter Kohärenz
+eine Profilfunktion mit unveränderter Signatur, die den Kreuzterm addiert.
+Dadurch wirkt die Kohärenz überall gleich: Eigenintensität, Nachbarschaft und
+lokales Sub-Gitter rufen dieselbe Funktion auf.
+
+**Datensätze mit und ohne Kohärenz sind nicht vergleichbar.** Deshalb:
+
+* Der Schlüssel `coherent` (und `n_degenerate_pairs`) steht in jeder neuen
+  `.pkl`. Fehlt er, stammt der Datensatz aus der Zeit vor der Option und wurde
+  inkohärent gerechnet.
+* `run_plots.py` sagt es beim Laden, der Bericht schreibt es in die
+  Scan-Parameter – bei fehlendem Schlüssel als deutlicher Hinweis.
+* Ein Zwischenstand wird **nicht** fortgesetzt, wenn er mit dem anderen Modell
+  gerechnet wurde; ein fehlender Schlüssel zählt dabei als „inkohärent" und
+  nicht als „unbekannt", sonst entstünde ein halb kohärent gerechneter
+  Datensatz.
+
 ## Verbotener Bereich (überlappende Eck-Spots)
 
 Die beiden diagonal gegenüberliegenden Eck-Spots des N_x × N_y-Arrays dürfen

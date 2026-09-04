@@ -76,6 +76,8 @@ from scipy.optimize import minimize
 from matplotlib.path import Path
 from pathlib import Path as FilePath
 from scipy.special import j0, j1
+
+from coherence import degenerate_spot_groups
 from scipy.constants import hbar, k as kB, atomic_mass
 from matplotlib.patches import Rectangle
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -432,6 +434,115 @@ def amps_from_ratios(r_x, r_y, N_x, N_y):
 
 
 # Verfügbare Strahlprofile: Name -> gewichtete Profilfunktion f(X,Y,cx,cy,scale,amps)
+# ======================================================================
+# Statische Interferenz frequenzentarteter Spots
+# ======================================================================
+# Die Toene sind untereinander KOHAERENT. Ihre Kreuzterme laufen mit der
+# Differenzfrequenz um und mitteln sich in jeder Messung weg - AUSSER bei
+# Paaren mit identischer Gesamtfrequenz. Deren Kreuzterm liegt bei 0 Hz,
+# mittelt sich also nie weg und steht als STATISCHES Interferenzmuster im
+# Bild. Die reine Intensitaetssumme (Summe der Einzelprofile) laesst ihn
+# weg und beschreibt das Muster damit falsch.
+#
+# WELCHE Spots entartet sind, sagt coherence.degenerate_spot_groups() - das
+# haengt nur an N_x und N_y, dort steht auch die Herleitung. Hier steht, was
+# daraus fuer die Intensitaet folgt.
+#
+# Zeitmittel der kohaerenten Ueberlagerung:
+#
+#     <I> = sum_s g_s^2  +  sum ueber entartete Paare 2 g_s g_t cos(dphi)
+#
+# Der erste Term ist die bisherige inkohaerente Summe, der zweite der
+# statische Anteil. Hier wird mit dphi = 0 gerechnet, also VOLL KONSTRUKTIV:
+# das ist der unguenstigste Fall, und ein Scan soll den bewerten. (Bei 90 Grad
+# verschwindet der Term fuer ein einzelnes Paar exakt - wer das ausnutzen
+# will, braucht dafuer eingestellte Tonphasen; die Stelle dafuer ist
+# static_interference(..., phases=...).)
+#
+# Dasselbe Modell rechnet das Weighted_Multitone_Lens_GUI.
+
+def spot_frequencies(N_x, N_y, offset, width):
+    """Gesamtfrequenz jedes Spots, in der Reihenfolge der Spot-Zentren
+    (x aussen, y innen - wie _compute_centers_for_width()). Nur zur
+    Anschauung; welche Spots entartet sind, sagt degenerate_spot_groups()
+    ohne offset und width (siehe coherence.py)."""
+    fx = multitone_frequencies(N_x, offset, width)
+    fy = multitone_frequencies(N_y, offset, width)
+    return np.array([a + b for a in fx for b in fy], dtype=float)
+
+
+def _gaussian_field(X, Y, cx, cy, sigma):
+    """FELD eines Gauss-Spots. Die Intensitaet dieses Moduls ist
+    exp(-2 r^2/sigma^2), das Feld traegt also die Wurzel davon."""
+    return np.exp(-((X - cx) ** 2 + (Y - cy) ** 2) / sigma ** 2)
+
+
+def _airy_field(X, Y, cx, cy, first_zero_radius):
+    """FELD eines Airy-Spots: 2*J1(u)/u, MIT Vorzeichen. Die Ringe wechseln
+    das Vorzeichen - fuer die kohaerente Summe ist genau das wesentlich,
+    in der Intensitaet (Quadrat) geht es verloren."""
+    u = (3.83170597 / first_zero_radius) * np.sqrt((X - cx) ** 2 + (Y - cy) ** 2)
+    prof = np.ones_like(u)
+    m = u > 1e-12
+    prof[m] = 2.0 * j1(u[m]) / u[m]
+    return prof
+
+
+FIELD_FUNCS = {
+    "gaussian": _gaussian_field,
+    "airy": _airy_field,
+}
+
+
+def static_interference(X, Y, centers_x, centers_y, scale, amp_spots, deg,
+                        field_func, phases=None):
+    """Der statische Kreuzterm sum 2 g_s g_t cos(dphi) ueber alle entarteten
+    Paare. `phases=None` heisst dphi = 0 (voll konstruktiv).
+
+    Gerechnet wird nur mit den Feldern der BETEILIGTEN Spots - das sind bei
+    3x4 zwei von zwoelf. Ein vollstaendiger Feld-Stack waere hier reine
+    Verschwendung, und der Scan ruft diese Funktion einige zehntausend Mal."""
+    if not len(deg):
+        return 0.0
+    amp = np.clip(np.asarray(amp_spots, dtype=float), 0.0, None)
+    A = np.sqrt(amp)
+    cx = np.asarray(centers_x, dtype=float)
+    cy = np.asarray(centers_y, dtype=float)
+    noetig = np.unique(np.concatenate([np.asarray(g) for g in deg]))
+    feld = {int(i): A[i] * field_func(X, Y, cx[i], cy[i], scale) for i in noetig}
+
+    I = np.zeros_like(X, dtype=float)
+    for grp in deg:
+        for i in range(len(grp)):
+            for j in range(i + 1, len(grp)):
+                s, t = int(grp[i]), int(grp[j])
+                c = 1.0 if phases is None else float(np.cos(phases[s] - phases[t]))
+                if c != 0.0:
+                    I += (2.0 * c) * feld[s] * feld[t]
+    return I
+
+
+def coherent_profile_func(profile_func, field_func, deg):
+    """`profile_func` plus statischer Kreuzterm, mit unveraenderter Signatur
+    f(X, Y, centers_x, centers_y, scale, amps).
+
+    Dass die Signatur gleich bleibt, ist der ganze Trick: die Kohaerenz geht
+    damit durch JEDEN Aufrufer der Profilfunktion - Eigenintensitaet,
+    Nachbarschaft, lokales Sub-Gitter -, ohne dass dort etwas zu aendern
+    waere. Ohne entartete Paare wird die Basisfunktion unveraendert
+    zurueckgegeben, es entsteht also auch kein Aufwand."""
+    if not len(deg):
+        return profile_func
+
+    def mit_interferenz(X, Y, centers_x, centers_y, scale, amps):
+        return (profile_func(X, Y, centers_x, centers_y, scale, amps)
+                + static_interference(X, Y, centers_x, centers_y, scale, amps,
+                                      deg, field_func))
+
+    mit_interferenz.__name__ = getattr(profile_func, "__name__", "profile") + "_coherent"
+    return mit_interferenz
+
+
 PROFILE_FUNCS = {
     "gaussian": gaussian_2d_weighted_distance_from_centers,
     "airy": airy_2d_weighted_distance_from_centers,
@@ -479,6 +590,12 @@ class MultitoneFlatTopOptimizer:
         n_grid=1000,
         profile="airy",           # "gaussian" oder "airy"
         airy_scale_factor=1.19,   # first_zero_radius = airy_scale_factor * win
+
+        # Statische Interferenz frequenzentarteter Spots (siehe den Block ueber
+        # PROFILE_FUNCS). True = Kreuzterme mitrechnen, voll konstruktiv, also
+        # der unguenstigste Fall. False = reine Intensitaetssumme, das
+        # Verhalten bis 2026-09-04.
+        coherent=True,
 
         # --- Atom-gewichtete Uniformity/Crosstalk (siehe atom_weight_2d(),
         # weighted_uniformity(), weighted_crosstalk()) ---
@@ -610,9 +727,35 @@ class MultitoneFlatTopOptimizer:
             kwargs["airy_scale_factor"] = airy_scale_factor
         return self.set_parameters(clear_results=clear_results, **kwargs)
 
+    def _degenerate_groups(self):
+        """Die frequenzentarteten Spot-Gruppen, zwischengespeichert.
+
+        Sie haengen nur an N_x/N_y (siehe degenerate_spot_groups), waehrend
+        ein Scan width ueber einen ganzen Bereich variiert - einmal rechnen
+        genuegt also fuer den ganzen Lauf."""
+        schluessel = (self.N_x, self.N_y)
+        if getattr(self, "_deg_cache", (None, None))[0] != schluessel:
+            self._deg_cache = (schluessel,
+                               degenerate_spot_groups(self.N_x, self.N_y))
+        return self._deg_cache[1]
+
     def _profile_func(self):
-        """Gibt die aktuell gewählte gewichtete Profilfunktion zurück."""
-        return PROFILE_FUNCS[self.profile]
+        """Die aktuell gewaehlte gewichtete Profilfunktion.
+
+        Mit coherent=True (Default) kommt der statische Interferenzanteil der
+        frequenzentarteten Spots dazu. Weil der Zeiger hier zentral gebaut
+        wird, wirkt die Kohaerenz ueberall gleich - in der Eigenintensitaet,
+        in der Nachbarschaft und im lokalen Sub-Gitter."""
+        basis = PROFILE_FUNCS[self.profile]
+        if not getattr(self, "coherent", True):
+            return basis
+        return coherent_profile_func(basis, FIELD_FUNCS[self.profile],
+                                     self._degenerate_groups())
+
+    def n_degenerate_pairs(self):
+        """Wie viele entartete Paare es bei dieser Tonzahl gibt - fuer die
+        Anzeige im Dialog und den Bericht."""
+        return sum(len(g) * (len(g) - 1) // 2 for g in self._degenerate_groups())
 
     def _profile_scale(self, win_val):
         """
@@ -1575,7 +1718,10 @@ class MultitoneFlatTopOptimizer:
             checkpoint_path, win_input_range, width_range, n_win_input, n_width,
             self.N_x, self.N_y, extra_match=dict(amps=amps, alpha=alpha),
             airy_scale_factor=self.airy_scale_factor,
-            optics_match=dict(n_grid=self.n_grid, weighted_n_grid=self.weighted_n_grid,
+            # coherent gehoert zum Rechenmodell: ein fortgesetzter Scan darf
+            # nicht halb kohaerent und halb inkohaerent gerechnet sein.
+            optics_match=dict(coherent=bool(getattr(self, "coherent", True)),
+                              n_grid=self.n_grid, weighted_n_grid=self.weighted_n_grid,
                               atom_offset_x=self.atom_offset_x,
                               atom_offset_y=self.atom_offset_y), verbose=verbose,
         )
@@ -1606,6 +1752,8 @@ class MultitoneFlatTopOptimizer:
                 lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
                 profile=self.profile,
                 airy_scale_factor=self.airy_scale_factor,
+                coherent=bool(getattr(self, "coherent", True)),
+                n_degenerate_pairs=self.n_degenerate_pairs(),
                 # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
                 # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
                 # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
@@ -1697,6 +1845,10 @@ class MultitoneFlatTopOptimizer:
             lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
             profile=self.profile,
             airy_scale_factor=self.airy_scale_factor,
+            # Mit oder ohne statischen Interferenzanteil gerechnet? Aeltere
+            # Datensaetze fuehren das Feld nicht - dort gilt "ohne".
+            coherent=bool(getattr(self, "coherent", True)),
+            n_degenerate_pairs=self.n_degenerate_pairs(),
             # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
             # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
             # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
@@ -1879,7 +2031,10 @@ class MultitoneFlatTopOptimizer:
             checkpoint_path, win_input_range, width_range, n_win_input, n_width,
             self.N_x, self.N_y, extra_match=dict(alpha=alpha, r_bounds=r_bounds),
             airy_scale_factor=self.airy_scale_factor,
-            optics_match=dict(n_grid=self.n_grid, weighted_n_grid=self.weighted_n_grid,
+            # coherent gehoert zum Rechenmodell: ein fortgesetzter Scan darf
+            # nicht halb kohaerent und halb inkohaerent gerechnet sein.
+            optics_match=dict(coherent=bool(getattr(self, "coherent", True)),
+                              n_grid=self.n_grid, weighted_n_grid=self.weighted_n_grid,
                               atom_offset_x=self.atom_offset_x,
                               atom_offset_y=self.atom_offset_y), verbose=verbose,
         )
@@ -1910,6 +2065,8 @@ class MultitoneFlatTopOptimizer:
                 lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
                 profile=self.profile,
                 airy_scale_factor=self.airy_scale_factor,
+                coherent=bool(getattr(self, "coherent", True)),
+                n_degenerate_pairs=self.n_degenerate_pairs(),
                 # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
                 # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
                 # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
@@ -2086,6 +2243,10 @@ class MultitoneFlatTopOptimizer:
             lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
             profile=self.profile,
             airy_scale_factor=self.airy_scale_factor,
+            # Mit oder ohne statischen Interferenzanteil gerechnet? Aeltere
+            # Datensaetze fuehren das Feld nicht - dort gilt "ohne".
+            coherent=bool(getattr(self, "coherent", True)),
+            n_degenerate_pairs=self.n_degenerate_pairs(),
             # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
             # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
             # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.

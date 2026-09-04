@@ -56,12 +56,13 @@ matplotlib.use("Qt5Agg")
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.patches import Rectangle, Circle
+from matplotlib.patches import Rectangle, Circle, Patch
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QSlider, QSpinBox, QDoubleSpinBox, QCheckBox, QPushButton,
-    QGroupBox, QScrollArea, QSplitter, QMessageBox, QComboBox, QSizePolicy
+    QGroupBox, QScrollArea, QSplitter, QMessageBox, QComboBox, QSizePolicy,
+    QDialog, QDialogButtonBox, QRadioButton
 )
 from PyQt5.QtCore import Qt
 
@@ -107,19 +108,49 @@ WEIGHTED_GRID_N_HIGHRES = 301  # Auflösung des lokalen 2D-Fensters (Export)
 WEIGHTED_CUT_POINTS = 400      # Punkte pro Schnittlinie im gewichteten Modus (interaktiv)
 WEIGHTED_CUT_POINTS_HIGHRES = 800
 
-# Schriftgrößen für den High-Resolution-Export (PNG, das z.B. in LaTeX/PDF
-# eingebunden wird -> muss auch nach dem Verkleinern im Dokument lesbar sein).
-EXPORT_FONTSIZE_SUPTITLE = 15
-EXPORT_FONTSIZE_TITLE = 13
-EXPORT_FONTSIZE_LABEL = 13
-EXPORT_FONTSIZE_TICK = 11
-EXPORT_FONTSIZE_LEGEND = 11
+# Schriftgrößen für den Export (PDF, das in LaTeX eingebunden wird -> muss
+# auch nach dem Verkleinern im Dokument lesbar sein).
+# Massstab: die Abbildung wird im Dokument auf ~16 cm Breite skaliert, aus
+# einer Figur von rund 12 Zoll Breite also mit etwa 0.5. Was im PDF 20 pt
+# gross ist, steht im Dokument als 10 pt - genau die Groesse des Fliesstextes.
+# Kleiner darf hier nichts sein, sonst ist es im Dokument unlesbar.
+EXPORT_FONTSIZE_SUPTITLE = 17
+EXPORT_FONTSIZE_TITLE = 20
+EXPORT_FONTSIZE_LABEL = 20
+EXPORT_FONTSIZE_TICK = 17
+EXPORT_FONTSIZE_LEGEND = 15
 
-out_dir = FilePath(r"\\brain43\public\__Transfer__\DHagn\LokalerRaman_Master\PythonCode\Multitone_FlatTop")
+# Der Export laeuft in demselben LaTeX-Stil wie die Plots der Scan-Skripte
+# (serif + Computer-Modern-Mathematik, siehe
+# Amplitudes/Weighted_Optimization/lib/..._plots.py). pdf.fonttype 42 bettet
+# echte TrueType-Fonts ein, damit der Text im PDF Text bleibt.
+EXPORT_RC = {
+    "font.family": "serif",
+    "mathtext.fontset": "cm",
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
+    "axes.unicode_minus": False,
+    "savefig.format": "pdf",
+}
+
+# Mikrometer als EINHEIT: beide Zeichen aufrecht und aus derselben Schrift.
+# "$\mu$m" setzt das mu kursiv (Mathe-Variable) und das m aufrecht aus dem
+# Fliesstext - genau der Bruch, der in einem LaTeX-Dokument auffaellt.
+# $\mathrm{\mu m}$ hilft nicht: mathtext setzt kleine griechische Buchstaben
+# auch in \mathrm kursiv. Das Mikrozeichen als normaler Text kommt dagegen
+# aus derselben Schrift wie das m daneben.
+MU_M = "\u00b5m"
+
+# Wie viel groesser als das rote Crosstalk-Quadrat der 2D-Ausschnitt im
+# Export ist (im Dialog einstellbar).
+EXPORT_PITCH_ZOOM_DEFAULT = 1.15
+
+# Alle Bilder des GUIs landen neben dem Skript in GUI/Bilder.
+out_dir = FilePath(__file__).resolve().parent / "Bilder"
 try:
     out_dir.mkdir(parents=True, exist_ok=True)
 except Exception:
-    out_dir = FilePath.cwd() / "FlatMultiTone_Output"
+    out_dir = FilePath.cwd() / "Bilder"
     out_dir.mkdir(parents=True, exist_ok=True)
 
 
@@ -565,6 +596,112 @@ def build_local_cut_lines(center_x, center_y, sigma, n_sigma, n_points):
 # ============================================================
 # Hauptfenster
 # ============================================================
+# ============================================================
+# Export: kleiner Dialog fuer das Layout der gespeicherten Abbildung
+# ============================================================
+class ExportOptionsDialog(QDialog):
+    """Fragt vor dem Speichern ab, wie die Abbildung aussehen soll.
+
+    Der Aufbau haengt an der Zahl der Schnitte:
+      1 Schnitt  - links der grosse Nachbar-Plot, rechts darueber der
+                   herangezoomte Einzelspot, darunter der Schnitt.
+      2 Schnitte - obere Zeile beide 2D-Ansichten, untere Zeile der
+                   horizontale und der vertikale Schnitt.
+    Bei 1x1 gibt es nur einen Schnitt: das Muster ist dann punktsymmetrisch,
+    der zweite waere dieselbe Kurve.
+    """
+
+    def __init__(self, parent=None, single_site=False, sigma_ok=True):
+        super().__init__(parent)
+        self.setWindowTitle("Save figure - layout")
+        self._single_site = bool(single_site)
+        layout = QVBoxLayout(self)
+
+        box_cuts = QGroupBox("Cross sections")
+        v_cuts = QVBoxLayout(box_cuts)
+        self.rb_one = QRadioButton("1 - horizontal only")
+        self.rb_one.setToolTip("Links der grosse Nachbar-Plot, rechts darueber der\n"
+                               "herangezoomte Einzelspot und darunter der Schnitt.")
+        self.rb_two = QRadioButton("2 - horizontal and vertical")
+        self.rb_two.setToolTip("Obere Zeile beide 2D-Ansichten, untere Zeile beide Schnitte.")
+        v_cuts.addWidget(self.rb_one)
+        v_cuts.addWidget(self.rb_two)
+        if self._single_site:
+            self.rb_one.setChecked(True)
+            self.rb_two.setEnabled(False)
+            hint = QLabel("Bei 1x1 gibt es nur einen Spot - der zweite Schnitt waere "
+                          "dieselbe Kurve.")
+            hint.setWordWrap(True)
+            hint.setStyleSheet("color: gray; font-size: 10px;")
+            v_cuts.addWidget(hint)
+        else:
+            self.rb_two.setChecked(True)
+        layout.addWidget(box_cuts)
+
+        box_content = QGroupBox("Contents")
+        v_content = QVBoxLayout(box_content)
+        self.cb_title = QCheckBox("Parameter title above the figure")
+        self.cb_title.setChecked(True)
+        self.cb_title.setToolTip("Aus fuer Abbildungen im LaTeX-Dokument - dort gehoeren die\n"
+                                 "Parameter in die Bildunterschrift. Sie werden in jedem Fall\n"
+                                 "als .txt neben das PDF geschrieben.")
+        self.cb_crosshair = QCheckBox("Crosshair in the 2D views")
+        self.cb_crosshair.setChecked(False)
+        self.cb_regions = QCheckBox("Uniformity / crosstalk region in the cross sections")
+        self.cb_regions.setChecked(True)
+        self.cb_pdf = QCheckBox("Atom probability density (cross section + spot profile)")
+        self.cb_pdf.setChecked(bool(sigma_ok))
+        self.cb_pdf.setEnabled(bool(sigma_ok))
+        if not sigma_ok:
+            self.cb_pdf.setToolTip("sigma_atom ist ungueltig - Temperatur/Fallenfrequenz pruefen.")
+        for w in (self.cb_title, self.cb_crosshair, self.cb_regions, self.cb_pdf):
+            v_content.addWidget(w)
+        layout.addWidget(box_content)
+
+        box_zoom = QGroupBox("2D window")
+        g_zoom = QGridLayout(box_zoom)
+        g_zoom.addWidget(QLabel("crosstalk square x"), 0, 0)
+        self.sp_zoom = QDoubleSpinBox()
+        self.sp_zoom.setRange(1.0, 4.0)
+        self.sp_zoom.setDecimals(2)
+        self.sp_zoom.setSingleStep(0.05)
+        self.sp_zoom.setValue(EXPORT_PITCH_ZOOM_DEFAULT)
+        self.sp_zoom.setToolTip("Der 2D-Ausschnitt (und damit auch der x-Bereich der\n"
+                                "Schnitte) ist um diesen Faktor groesser als das rote\n"
+                                "Crosstalk-Quadrat.")
+        g_zoom.addWidget(self.sp_zoom, 0, 1)
+        layout.addWidget(box_zoom)
+
+        note = QLabel("Gespeichert wird ein PDF (vektoriell, LaTeX-tauglich) plus eine "
+                      ".txt mit allen Parametern.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addWidget(note)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def values(self):
+        return {
+            "n_cuts": 1 if (self._single_site or self.rb_one.isChecked()) else 2,
+            "title": self.cb_title.isChecked(),
+            "crosshair": self.cb_crosshair.isChecked(),
+            "regions_in_cut": self.cb_regions.isChecked(),
+            "atom_pdf": self.cb_pdf.isChecked() and self.cb_pdf.isEnabled(),
+            "zoom_factor": float(self.sp_zoom.value()),
+        }
+
+    @staticmethod
+    def get_options(parent, single_site=False, sigma_ok=True):
+        """Zeigt den Dialog und liefert die Einstellungen - oder None bei Abbruch."""
+        dlg = ExportOptionsDialog(parent, single_site=single_site, sigma_ok=sigma_ok)
+        if dlg.exec_() != QDialog.Accepted:
+            return None
+        return dlg.values()
+
+
 class WeightedFlatMultiToneWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -651,6 +788,7 @@ class WeightedFlatMultiToneWindow(QMainWindow):
 
         self._build_ui()
         self._connect_signals()
+        self._enforce_single_tone_width()
         self.full_update()
 
     # --------------------------------------------------------
@@ -816,7 +954,9 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         layout.addWidget(self.label_width, row, 0, 1, 2)
         row += 1
         self.slider_width = QSlider(Qt.Horizontal)
-        self.slider_width.setRange(1, 300)  # entspricht 0.01 - 3.00 MHz (Faktor 100)
+        # 0 ist zugelassen: bei 1x1 gibt es nur einen Ton, und nur width = 0
+        # legt ihn in den Ursprung (siehe _enforce_single_tone_width()).
+        self.slider_width.setRange(0, 300)  # entspricht 0.00 - 3.00 MHz (Faktor 100)
         self.slider_width.setValue(int(round(self.state["width"] * 1e-6 * 100)))
         layout.addWidget(self.slider_width, row, 0, 1, 2)
 
@@ -2104,13 +2244,43 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.state["N_x"] = value
         self.state["amp_x"] = np.ones(value)
         self.rebuild_amplitude_widgets()
+        self._enforce_single_tone_width()
         self.full_update()
 
     def on_ny_changed(self, value):
         self.state["N_y"] = value
         self.state["amp_y"] = np.ones(value)
         self.rebuild_amplitude_widgets()
+        self._enforce_single_tone_width()
         self.full_update()
+
+    def _enforce_single_tone_width(self):
+        """Bei 1x1 wird width automatisch auf 0 gesetzt.
+
+        Mit nur einem Ton hat width keine Bedeutung mehr - es gibt keinen
+        zweiten Ton, von dem sich der erste um width unterscheiden koennte.
+        Stehen bleibt allein die Wirkung auf die Lage: die Mittenfrequenz ist
+        offset + width/2, jedes width > 0 schiebt den einzelnen Spot also aus
+        dem Ursprung heraus. width = 0 legt ihn genau auf (0, 0), und dort
+        will man ihn haben. Der Regler wird solange gesperrt und der zuletzt
+        eingestellte Wert gemerkt, damit er beim Zurueckschalten auf mehrere
+        Toene wieder da ist."""
+        if not hasattr(self, "slider_width"):
+            return
+        single = (self.state["N_x"] == 1 and self.state["N_y"] == 1)
+        if single:
+            if self.state["width"] != 0.0:
+                self._width_before_single = self.state["width"]
+                self.state["width"] = 0.0
+        elif self.state["width"] == 0.0 and getattr(self, "_width_before_single", None):
+            self.state["width"] = self._width_before_single
+            self._width_before_single = None
+
+        self.slider_width.blockSignals(True)
+        self.slider_width.setValue(int(round(self.state["width"] * 1e-6 * 100)))
+        self.slider_width.blockSignals(False)
+        self.slider_width.setEnabled(not single)
+        self._update_param_labels()
 
     def _clear_external_optics(self):
         """Invalidiert Werte, die zuletzt vom Lens Design Tool übernommen wurden,
@@ -2396,47 +2566,77 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.full_update()
 
     def on_save(self):
-        self._sync_waists()  # sicherstellen, dass win/win_in konsistent sind (z.B. falls Modus zuletzt geändert wurde)
+        """Speichert die Abbildung als PDF. Layout und Inhalt legt vorher ein
+        kleiner Dialog fest (ExportOptionsDialog).
+
+        EIN Schnitt:  links der grosse Nachbar-Plot, rechts darueber der
+        herangezoomte Einzelspot und darunter der Schnitt.
+        ZWEI Schnitte: obere Zeile beide 2D-Ansichten, untere Zeile der
+        horizontale und der vertikale Schnitt.
+
+        Der 2D-Ausschnitt ist immer etwas groesser als das rote Crosstalk-
+        Quadrat (Faktor im Dialog), die Schnitte teilen genau diesen
+        Ausschnitt - so liegen Bild und Schnitt uebereinander auf derselben
+        Achse. Uniformity- und Crosstalk-Region stehen jetzt auch im Schnitt,
+        ebenso (optional) die Aufenthaltswahrscheinlichkeit des Atoms.
+        """
+        self._sync_waists()
+
+        single_site = (self.state["N_x"] == 1 and self.state["N_y"] == 1)
+        sigma_probe = self._current_sigma_atom()
+        sigma_ok = (sigma_probe is not None and np.isfinite(sigma_probe) and sigma_probe > 0)
+        opts = ExportOptionsDialog.get_options(self, single_site=single_site, sigma_ok=sigma_ok)
+        if opts is None:
+            self.label_save_status.setText("Export abgebrochen.")
+            return
+
         centers_x, centers_y, r_center = compute_centers(
             self.state["N_x"], self.state["N_y"], self.state["width"],
             self.state["f1"], self.state["f2"]
         )
+        # Die harte Uniformity-Region folgt dem Spot-Muster laufend; beim
+        # Export muss sie denselben Stand haben wie in der Ansicht.
+        self._sync_uniformity_region(centers_x, centers_y, r_center)
+
         atom_cx = r_center + self.state["atom_offset_x"]
         atom_cy = r_center + self.state["atom_offset_y"]
+
         x, y, X, Y = compute_grid(
             centers_x, centers_y, self.state["win"],
             self.state["uniformity_side_length"], self.state["crosstalk_side_length"],
             GRID_N_HIGHRES
         )
         amp_spots = self.current_amp_spots()
-        I_ort = self.own_intensity(X, Y, centers_x, centers_y, amp_spots)
-        I_ort /= np.max(I_ort)
+        I_ort_raw = self.own_intensity(X, Y, centers_x, centers_y, amp_spots)
+        peak = float(np.max(I_ort_raw))
+        if not np.isfinite(peak) or peak <= 0:
+            peak = 1.0
+        I_ort = I_ort_raw / peak
         I_neighbor = create_neighbourhood(X, Y, pitch, centers_x, centers_y, self.state["win"],
-                                           amps=amp_spots, use_airy=self.state["use_airy"],
-                                           deg=self._active_degeneracy(),
-                                           phases=self._active_phases(),
-                                           airy_scale_factor=self.state.get("airy_scale_factor"))
+                                          amps=amp_spots, use_airy=self.state["use_airy"],
+                                          deg=self._active_degeneracy(),
+                                          phases=self._active_phases(),
+                                          airy_scale_factor=self.state.get("airy_scale_factor"))
 
         weighted = self.state["weighted_mode"]
         sigma_atom = self._current_sigma_atom()
         self.state["sigma_atom"] = sigma_atom
+        sigma_valid = (sigma_atom is not None and np.isfinite(sigma_atom) and sigma_atom > 0)
         crosstalk_edge = crosstalk_diag = float("nan")
 
-        if weighted and sigma_atom is not None and np.isfinite(sigma_atom) and sigma_atom > 0:
+        if weighted and sigma_valid:
             xs, ys, Xs, Ys = build_local_weighted_grid(
                 atom_cx, atom_cy, sigma_atom, WEIGHTED_N_SIGMA, WEIGHTED_GRID_N_HIGHRES
             )
             I_own_raw = compute_intensity_profile(Xs, Ys, centers_x, centers_y, self.state["win"],
-                                                    amp_spots, self.state["use_airy"])
+                                                  amp_spots, self.state["use_airy"])
             I_neigh_raw = local_neighbor_intensity(Xs, Ys, pitch, centers_x, centers_y, self.state["win"],
-                                                     amp_spots, self.state["use_airy"])
+                                                   amp_spots, self.state["use_airy"])
             W = atom_weight_2d(Xs, Ys, atom_cx, atom_cy, sigma_atom)
             uniformity = weighted_uniformity(I_own_raw, W)
             crosstalk = weighted_crosstalk(I_own_raw, I_neigh_raw, W)
-            peak_local = np.max(I_own_raw)
-            I_own_local = I_own_raw / peak_local if peak_local > 0 else I_own_raw
 
-            # Aufschlüsselung nach Kanten-/Diagonal-Nachbarn (siehe compute_masks_and_metrics())
+            # Aufschluesselung nach Kanten-/Diagonal-Nachbarn (siehe compute_masks_and_metrics())
             denom_bd = np.sum(I_own_raw * W)
             if denom_bd != 0:
                 per_direction = {}
@@ -2453,177 +2653,357 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                 diag_keys = [k for k in per_direction if abs(k[0]) == 1 and abs(k[1]) == 1]
                 crosstalk_edge = sum(per_direction[k] for k in edge_keys) / len(edge_keys)
                 crosstalk_diag = sum(per_direction[k] for k in diag_keys) / len(diag_keys)
-            else:
-                crosstalk_edge = crosstalk_diag = float("nan")
-
-            x_line, y_line = build_local_cut_lines(atom_cx, atom_cy, sigma_atom, WEIGHTED_N_SIGMA,
-                                                     WEIGHTED_CUT_POINTS_HIGHRES)
-            I_x_line = compute_intensity_profile(x_line, np.full_like(x_line, atom_cy), centers_x, centers_y,
-                                                  self.state["win"], amp_spots, self.state["use_airy"])
-            I_y_line = compute_intensity_profile(np.full_like(y_line, atom_cx), y_line, centers_x, centers_y,
-                                                  self.state["win"], amp_spots, self.state["use_airy"])
-            peak_line = max(np.max(I_x_line), np.max(I_y_line), 1e-300)
-            I_x_line /= peak_line
-            I_y_line /= peak_line
-            pdf_x = np.exp(-(x_line - atom_cx) ** 2 / (2 * sigma_atom ** 2))
-            pdf_y = np.exp(-(y_line - atom_cy) ** 2 / (2 * sigma_atom ** 2))
         else:
             mask_u = uniformity_mask(X, Y, atom_cx, atom_cy, self.state)
             mask_c = overlap_mask_pitch(X, Y, atom_cx, atom_cy, self.state["crosstalk_side_length"])
-            uniformity = np.std(I_ort[mask_u]) / np.mean(I_ort[mask_u])
-            crosstalk = np.sum(I_neighbor[mask_c]) / np.sum(I_ort[mask_c])
+            # Bei 1x1 im Quadrat-Modus ist das Tonquadrat entartet (Kantenlaenge 0) -
+            # dann gibt es keine Uniformity-Flaeche und die Zahl bleibt leer.
+            if np.count_nonzero(mask_u) >= 2 and np.mean(I_ort[mask_u]) > 0:
+                uniformity = float(np.std(I_ort[mask_u]) / np.mean(I_ort[mask_u]))
+            else:
+                uniformity = float("nan")
+            denom_c = float(np.sum(I_ort[mask_c]))
+            crosstalk = float(np.sum(I_neighbor[mask_c]) / denom_c) if denom_c > 0 else float("nan")
 
-        extent = [x[0] * 1e6, x[-1] * 1e6, y[0] * 1e6, y[-1] * 1e6]
-        self.cache["extent"] = extent
-
-        # Aktuelle Fadenkreuz-Position (aus der interaktiven Ansicht) auf das
-        # hochauflösende Grid übertragen, statt immer die Mitte zu nehmen
-        if self.state["cut_row_idx"] is not None and "y" in self.cache and not weighted:
-            y_pos_m = self.cache["y"][self.state["cut_row_idx"]]
-            x_pos_m = self.cache["x"][self.state["cut_col_idx"]]
+        # Schnittposition: im harten Modus das Fadenkreuz aus der interaktiven
+        # Ansicht, sonst der Atom-Ort.
+        if (not weighted) and self.state["cut_row_idx"] is not None and "y" in self.cache:
+            y_pos_m = float(self.cache["y"][self.state["cut_row_idx"]])
+            x_pos_m = float(self.cache["x"][self.state["cut_col_idx"]])
         else:
             y_pos_m = atom_cy
             x_pos_m = atom_cx
-        mid_y_idx = int(np.argmin(np.abs(y - y_pos_m)))
-        mid_x_idx = int(np.argmin(np.abs(x - x_pos_m)))
-        y_pos_um = y[mid_y_idx] * 1e6
-        x_pos_um = x[mid_x_idx] * 1e6
+
+        half_u = self.state["uniformity_side_length"] / 2.0
+        half_c = self.state["crosstalk_side_length"] / 2.0
+        # Ausschnitt der 2D-Profilansicht UND x-Bereich der Schnitte: etwas
+        # groesser als das rote Crosstalk-Quadrat.
+        half_win = max(half_c, half_u, 2.0 * self.state["win"]) * float(opts["zoom_factor"])
+
+        n_cut = 1600
+        x_line = np.linspace(atom_cx - half_win, atom_cx + half_win, n_cut)
+        y_line = np.linspace(atom_cy - half_win, atom_cy + half_win, n_cut)
+        # own_intensity() rechnet den statischen Interferenzterm ueber
+        # np.einsum("sij,sij->ij", ...) und braucht daher ein 2D-Feld: die
+        # Schnittlinie wird als einzelne Zeile (1, n_cut) uebergeben.
+        I_cut_h = self.own_intensity(x_line[None, :], np.full((1, n_cut), y_pos_m),
+                                     centers_x, centers_y, amp_spots)[0] / peak
+        I_cut_v = self.own_intensity(np.full((1, n_cut), x_pos_m), y_line[None, :],
+                                     centers_x, centers_y, amp_spots)[0] / peak
+
+        show_pdf = bool(opts["atom_pdf"]) and sigma_valid
+        pdf_h = pdf_v = None
+        if show_pdf:
+            pdf_h = np.exp(-(x_line - atom_cx) ** 2 / (2 * sigma_atom ** 2))
+            pdf_v = np.exp(-(y_line - atom_cy) ** 2 / (2 * sigma_atom ** 2))
+
+        um = 1e6
+        extent = [x[0] * um, x[-1] * um, y[0] * um, y[-1] * um]
+        self.cache["extent"] = extent
+        atom_cx_um, atom_cy_um = atom_cx * um, atom_cy * um
+        r_um = r_center * um
+        half_u_um, half_c_um, half_win_um = half_u * um, half_c * um, half_win * um
+        x_pos_um, y_pos_um = x_pos_m * um, y_pos_m * um
+
+        if self.state.get("uniformity_shape", "square") == "circle":
+            LBL_UNI = rf"Uniformity region ($r$ = {half_u*1e6:.2f} {MU_M})"
+        else:
+            LBL_UNI = rf"Uniformity region ({2*half_u*1e6:.2f} {MU_M})"
+        LBL_CROSS = rf"Crosstalk region ({2*half_c*1e6:.2f} {MU_M})"
+
+        LBL_X = rf"Position $x$ ({MU_M})"
+        LBL_Y = rf"Position $y$ ({MU_M})"
+        LBL_I = r"Intensity $I/I_{\mathrm{max}}$"
 
         profile_label = "Airy" if self.state["use_airy"] else "Gaussian"
-        metric_label = "Uniformity_w/Crosstalk_w (atom-weighted)" if weighted else "Uniformity/Crosstalk (hard box)"
-
-        suptitle_text = (
-            f"f1={self.state['f1']*1e3:g} mm, f2={self.state['f2']*1e3:g} mm, "
-            f"win_in={self.state['win_in']*1e3:.3f} mm, win={self.state['win']*1e6:.3f} µm, "
-            f"width={self.state['width']*1e-6:.3f} MHz, Profile={profile_label}, {metric_label}: "
-            f"Uniformity={uniformity*100:.2f}%, Crosstalk={crosstalk*100:.3f}%"
-        )
+        sub = r"_{\mathrm{w}}" if weighted else ""
+        # Kurze Zeilen: in der jetzt deutlich groesseren Schrift passt die
+        # ganze Parameterliste nicht mehr auf eine Zeile.
+        title_lines = [
+            (rf"$f_1$ = {self.state['f1']*1e3:g} mm,   $f_2$ = {self.state['f2']*1e3:g} mm,   "
+             rf"$w_{{\mathrm{{in}}}}$ = {self.state['win_in']*1e3:.3f} mm,   "
+             rf"$w$ = {self.state['win']*1e6:.3f} {MU_M}"),
+            (rf"width = {self.state['width']*1e-6:.3f} MHz,   "
+             rf"{self.state['N_x']}$\times${self.state['N_y']} tones,   {profile_label}"),
+            (rf"{'atom-weighted' if weighted else 'hard box'}:   "
+             rf"$U{sub}$ = {uniformity*100:.2f} %,   $\eta{sub}$ = {crosstalk*100:.3f} %"),
+        ]
         if weighted and np.isfinite(crosstalk_edge) and np.isfinite(crosstalk_diag):
-            suptitle_text += (f"\nη_w per neighbor: edge (N/S/E/W) = {crosstalk_edge*100:.4f} %, "
-                               f"diagonal (corners) = {crosstalk_diag*100:.4f} %  (4 each, sum = η_w)")
+            title_lines.append(
+                rf"$\eta{sub}$ per neighbour: edge (N/S/E/W) = {crosstalk_edge*100:.4f} %,   "
+                rf"diagonal = {crosstalk_diag*100:.4f} %   (4 each)"
+            )
 
-        fig_save = plt.figure(figsize=(13, 10))
-        fig_save.set_constrained_layout(True)
-        fig_save.suptitle(suptitle_text, fontsize=EXPORT_FONTSIZE_SUPTITLE, fontweight="bold")
+        with plt.rc_context(EXPORT_RC):
+            if opts["n_cuts"] == 1:
+                # Links gross der Schnitt, rechts darueber der herangezoomte
+                # Einzelspot und darunter die Nachbarn.
+                fig_save = plt.figure(figsize=(12.5, 8.2))
+                gs_save = fig_save.add_gridspec(2, 2, width_ratios=[1.35, 1.0])
+                ax_cut_h = fig_save.add_subplot(gs_save[:, 0])
+                ax_zoom = fig_save.add_subplot(gs_save[0, 1])
+                ax_nb = fig_save.add_subplot(gs_save[1, 1])
+                ax_cut_v = None
+            else:
+                fig_save = plt.figure(figsize=(12.5, 10.5))
+                gs_save = fig_save.add_gridspec(2, 2, height_ratios=[1.3, 1.0])
+                ax_nb = fig_save.add_subplot(gs_save[0, 0])
+                ax_zoom = fig_save.add_subplot(gs_save[0, 1])
+                ax_cut_h = fig_save.add_subplot(gs_save[1, 0])
+                ax_cut_v = fig_save.add_subplot(gs_save[1, 1])
+            fig_save.set_constrained_layout(True)
+            # Der Parameter-Titel ist optional: fuer eine Abbildung im
+            # LaTeX-Dokument steht das alles in der Bildunterschrift. Die
+            # Parameter gehen trotzdem nicht verloren - sie landen immer in
+            # der .txt-Datei neben dem PDF (siehe unten).
+            if opts["title"]:
+                fig_save.suptitle("\n".join(title_lines), fontsize=EXPORT_FONTSIZE_SUPTITLE)
 
-        gs_save = fig_save.add_gridspec(3, 2, width_ratios=[1.6, 1], height_ratios=[1.8, 1, 1])
-        ax1 = fig_save.add_subplot(gs_save[:, 0])
-        ax2 = fig_save.add_subplot(gs_save[0, 1])
-        ax3 = fig_save.add_subplot(gs_save[1, 1])
-        ax4 = fig_save.add_subplot(gs_save[2, 1])
+            def region_patches():
+                """Uniformity- und Crosstalk-Region als frische Patches (ein
+                Artist kann nur zu genau einer Achse gehoeren)."""
+                out = []
+                if half_u_um > 0:
+                    if self.state.get("uniformity_shape", "square") == "circle":
+                        out.append(Circle((atom_cx_um, atom_cy_um), half_u_um,
+                                          edgecolor="cyan", facecolor="none", linewidth=1.8,
+                                          label=LBL_UNI))
+                    else:
+                        out.append(Rectangle((atom_cx_um - half_u_um, atom_cy_um - half_u_um),
+                                             2 * half_u_um, 2 * half_u_um,
+                                             edgecolor="cyan", facecolor="none", linewidth=1.8,
+                                             label=LBL_UNI))
+                out.append(Rectangle((atom_cx_um - half_c_um, atom_cy_um - half_c_um),
+                                     2 * half_c_um, 2 * half_c_um,
+                                     edgecolor="red", facecolor="none", linewidth=1.8,
+                                     label=LBL_CROSS))
+                return out
 
-        ax1.imshow(I_ort, origin="lower", extent=extent, aspect="equal", cmap="viridis")
-        ax1.scatter(centers_x * 1e6, centers_y * 1e6, c="white", edgecolors="black", s=15, zorder=5)
-        ax1.axhline(y_pos_um, color="black", linewidth=0.8, zorder=6)
-        ax1.axvline(x_pos_um, color="black", linewidth=0.8, zorder=6)
-        r_um = r_center * 1e6
-        atom_cx_um, atom_cy_um = atom_cx * 1e6, atom_cy * 1e6
+            def draw_regions_2d(ax):
+                for p in region_patches():
+                    p.set_zorder(6)
+                    ax.add_patch(p)
 
-        if weighted and sigma_atom is not None and np.isfinite(sigma_atom) and sigma_atom > 0:
-            # große Ansicht: dezente 1/2/3-sigma-Ringe an eigener Site + 8
-            # Nachbarn, keine Legende (siehe interaktive Ansicht /
-            # _redraw_weighted_overlays()) - zentriert auf die tatsächliche
-            # Atom-Position (inkl. Offset).
-            sigma_um = sigma_atom * 1e6
-            pitch_um = pitch * 1e6
-            for ix in (-1, 0, 1):
-                for iy in (-1, 0, 1):
-                    for n in (1, 2, 3):
-                        ax1.add_patch(Circle((atom_cx_um + ix * pitch_um, atom_cy_um + iy * pitch_um), n * sigma_um,
-                                              edgecolor="white", facecolor="none",
-                                              linewidth=0.6, alpha=0.35, zorder=6))
-        else:
-            side_u_um = self.state["uniformity_side_length"] * 1e6
-            side_c_um = self.state["crosstalk_side_length"] * 1e6
-            half_u = side_u_um / 2
-            half_c = side_c_um / 2
-            ax1.add_patch(Rectangle((atom_cx_um - half_u, atom_cy_um - half_u), 2 * half_u, 2 * half_u,
-                                     edgecolor="cyan", facecolor="none", linewidth=2,
-                                     label=f"Uniformity region ({side_u_um:.3f} µm)"))
-            ax1.add_patch(Rectangle((atom_cx_um - half_c, atom_cy_um - half_c), 2 * half_c, 2 * half_c,
-                                     edgecolor="red", facecolor="none", linewidth=2,
-                                     label=f"Crosstalk region ({side_c_um:.3f} µm)"))
-            leg1 = ax1.legend(fontsize=EXPORT_FONTSIZE_LEGEND)
-            leg1.set_zorder(10)
-            leg1.get_frame().set_alpha(1.0)
+            def draw_atom_density(ax):
+                """Aufenthaltswahrscheinlichkeit des Atoms als das, was sie ist:
+                eine 2D-Gaussverteilung. Sie liegt als magentafarbenes Bild
+                ueber dem Intensitaetsprofil, die Deckkraft folgt der Dichte
+                selbst - aussen durchsichtig, im Zentrum voll."""
+                if not show_pdf:
+                    return
+                n_pdf = 241
+                span = 4.0 * sigma_atom
+                gx = np.linspace(atom_cx - span, atom_cx + span, n_pdf)
+                gy = np.linspace(atom_cy - span, atom_cy + span, n_pdf)
+                GX, GY = np.meshgrid(gx, gy)
+                W_pdf = np.exp(-((GX - atom_cx) ** 2 + (GY - atom_cy) ** 2)
+                               / (2 * sigma_atom ** 2))
+                rgba_pdf = np.zeros(W_pdf.shape + (4,))
+                rgba_pdf[..., 0] = 1.0   # Magenta
+                rgba_pdf[..., 2] = 1.0
+                rgba_pdf[..., 3] = 0.90 * W_pdf
+                ax.imshow(rgba_pdf, origin="lower",
+                          extent=[gx[0] * um, gx[-1] * um, gy[0] * um, gy[-1] * um],
+                          aspect="equal", interpolation="bilinear", zorder=6)
 
-        ax1.set_xlabel("Position $x$ (µm)", fontsize=EXPORT_FONTSIZE_LABEL)
-        ax1.set_ylabel("Position $y$ (µm)", fontsize=EXPORT_FONTSIZE_LABEL)
-        ax1.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
+            def draw_crosshair(ax):
+                if not opts["crosshair"]:
+                    return
+                ax.axhline(y_pos_um, color="black", linewidth=0.8, zorder=7)
+                ax.axvline(x_pos_um, color="black", linewidth=0.8, zorder=7)
 
-        if weighted and sigma_atom is not None and np.isfinite(sigma_atom) and sigma_atom > 0:
-            extent_local = [xs[0] * 1e6, xs[-1] * 1e6, ys[0] * 1e6, ys[-1] * 1e6]
-            ax2.imshow(I_own_local, origin="lower", extent=extent_local, aspect="equal", cmap="viridis")
-            # 1/2/3-sigma-Konturen NUR hier (gezoomte Ansicht), dezent mit
-            # Inline-Beschriftung direkt auf der Linie statt einer Legende.
-            levels = [np.exp(-4.5), np.exp(-2.0), np.exp(-0.5)]
-            level_labels = {levels[0]: "3σ", levels[1]: "2σ", levels[2]: "1σ"}
-            Xs_um, Ys_um = Xs * 1e6, Ys * 1e6
-            try:
-                cs2 = ax2.contour(Xs_um, Ys_um, W, levels=levels, colors="white", linewidths=0.8,
-                                   linestyles="--", alpha=0.8)
-                ax2.clabel(cs2, fmt=level_labels, fontsize=6, inline=True)
-            except Exception:
-                pass
-            ax2.set_title(f"Local view (±{WEIGHTED_N_SIGMA}σ, σ={sigma_atom*1e9:.0f} nm)",
-                          fontsize=EXPORT_FONTSIZE_TITLE)
-        else:
-            ax2.imshow(I_neighbor, origin="lower", extent=extent, aspect="equal", cmap="viridis")
-            configure_neighbor_view(ax2, r_um, pitch * 1e6)
+            # ---- 2D: Nachbar-Sites -------------------------------------
+            # Keine weissen Spot-Marker mehr: das Muster zeigt seine Zentren
+            # selbst, und bei wenigen Toenen sass der helle Punkt genau dort,
+            # wo die Atomdichte hingehoert.
+            ax_nb.imshow(I_neighbor, origin="lower", extent=extent, aspect="equal", cmap="viridis")
             if abs(self.state["atom_offset_x"]) > 0 or abs(self.state["atom_offset_y"]) > 0:
-                ax2.plot(atom_cx_um, atom_cy_um, "+", color="red", markersize=10,
-                         markeredgewidth=1.5, zorder=6, label="Atom")
-                ax2.legend(fontsize=EXPORT_FONTSIZE_LEGEND * 0.8, loc="upper right")
-            ax2.set_title("Neighbor regions", fontsize=EXPORT_FONTSIZE_TITLE)
-        ax2.set_xlabel("Position $x$ (µm)", fontsize=EXPORT_FONTSIZE_LABEL)
-        ax2.set_ylabel("Position $y$ (µm)", fontsize=EXPORT_FONTSIZE_LABEL)
-        ax2.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
+                ax_nb.plot(atom_cx_um, atom_cy_um, "+", color="red", markersize=10,
+                           markeredgewidth=1.5, zorder=8)
+            draw_regions_2d(ax_nb)
+            draw_atom_density(ax_nb)
+            draw_crosshair(ax_nb)
+            configure_neighbor_view(ax_nb, r_um, pitch * um)
+            ax_nb.set_title("Neighbour sites", fontsize=EXPORT_FONTSIZE_TITLE)
+            ax_nb.set_xlabel(LBL_X, fontsize=EXPORT_FONTSIZE_LABEL)
+            ax_nb.set_ylabel(LBL_Y, fontsize=EXPORT_FONTSIZE_LABEL)
+            ax_nb.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
+            ax_nb.locator_params(axis="both", nbins=5)
 
-        if weighted and sigma_atom is not None and np.isfinite(sigma_atom) and sigma_atom > 0:
-            ax3.plot(x_line * 1e6, I_x_line, "b-", linewidth=2, label="Intensity", zorder=3)
-            ax3.fill_between(x_line * 1e6, 0, pdf_x, color="magenta", alpha=0.25, zorder=0,
-                              label="Atom probability density (norm.)")
-            ax3.legend(fontsize=EXPORT_FONTSIZE_LEGEND * 0.7, loc="upper right")
-            ax3.set_title(f"Cut along x through atom  (y = {atom_cy_um:.3f} µm)", fontsize=EXPORT_FONTSIZE_TITLE)
+            # ---- 2D: eigener Spot, herangezoomt ------------------------
+            ax_zoom.imshow(I_ort, origin="lower", extent=extent, aspect="equal", cmap="viridis")
+            draw_regions_2d(ax_zoom)
+            draw_atom_density(ax_zoom)
+            draw_crosshair(ax_zoom)
+            ax_zoom.set_xlim(atom_cx_um - half_win_um, atom_cx_um + half_win_um)
+            ax_zoom.set_ylim(atom_cy_um - half_win_um, atom_cy_um + half_win_um)
+            ax_zoom.set_aspect("equal", adjustable="box")
+            ax_zoom.set_title("Spot profile", fontsize=EXPORT_FONTSIZE_TITLE)
+            ax_zoom.set_xlabel(LBL_X, fontsize=EXPORT_FONTSIZE_LABEL)
+            ax_zoom.set_ylabel(LBL_Y, fontsize=EXPORT_FONTSIZE_LABEL)
+            ax_zoom.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
+            ax_zoom.locator_params(axis="both", nbins=5)
 
-            ax4.plot(y_line * 1e6, I_y_line, "g-", linewidth=2, label="Intensity", zorder=3)
-            ax4.fill_between(y_line * 1e6, 0, pdf_y, color="magenta", alpha=0.25, zorder=0,
-                              label="Atom probability density (norm.)")
-            ax4.legend(fontsize=EXPORT_FONTSIZE_LEGEND * 0.7, loc="upper right")
-            ax4.set_title(f"Cut along y through atom  (x = {atom_cx_um:.3f} µm)", fontsize=EXPORT_FONTSIZE_TITLE)
-        else:
-            ax3.plot(x * 1e6, I_ort[mid_y_idx, :], "b-", linewidth=2)
-            ax3.set_title(f"Cut along x  (y = {y_pos_um:.3f} µm)", fontsize=EXPORT_FONTSIZE_TITLE)
+            # ---- Schnitte ----------------------------------------------
+            def draw_cut(ax, s_um, I_cut, pdf, center_um, axis_label, title, color,
+                         headroom=1.0):
+                if opts["regions_in_cut"]:
+                    ax.axvspan(center_um - half_c_um, center_um + half_c_um,
+                               facecolor=(1, 0, 0, 0.10), edgecolor="red", linewidth=1.2,
+                               zorder=0, label=LBL_CROSS)
+                    if half_u_um > 0:
+                        ax.axvspan(center_um - half_u_um, center_um + half_u_um,
+                                   facecolor=(0, 1, 1, 0.16), edgecolor="cyan", linewidth=1.2,
+                                   zorder=1, label=LBL_UNI)
+                if pdf is not None:
+                    ax.fill_between(s_um, 0, pdf, color="magenta", alpha=0.25, zorder=2,
+                                    label=r"Atom probability density (norm.)")
+                ax.plot(s_um, I_cut, "-", color=color, linewidth=2, zorder=3, label="Intensity")
+                ax.set_xlim(s_um[0], s_um[-1])
+                # Luft nach oben fuer die Legende: bei EINEM Schnitt ist die
+                # Achse schmal (sie liegt genau unter dem quadratischen
+                # Spot-Plot), die Legende deckt sonst die Kurve zu.
+                ax.set_ylim(0, max(1.05, float(np.max(I_cut)) * 1.08) * headroom)
+                ax.grid(True, alpha=0.3)
+                ax.set_xlabel(axis_label, fontsize=EXPORT_FONTSIZE_LABEL)
+                ax.set_ylabel(LBL_I, fontsize=EXPORT_FONTSIZE_LABEL)
+                ax.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
+                ax.set_title(title, fontsize=EXPORT_FONTSIZE_TITLE)
+                ax.locator_params(axis="both", nbins=6)
 
-            ax4.plot(y * 1e6, I_ort[:, mid_x_idx], "g-", linewidth=2)
-            ax4.set_title(f"Cut along y  (x = {x_pos_um:.3f} µm)", fontsize=EXPORT_FONTSIZE_TITLE)
+            if ax_cut_v is None:
+                draw_cut(ax_cut_h, x_line * um, I_cut_h, pdf_h, atom_cx_um, LBL_X,
+                         "Cross section", "tab:blue")
+            else:
+                draw_cut(ax_cut_h, x_line * um, I_cut_h, pdf_h, atom_cx_um, LBL_X,
+                         "Horizontal cross section", "tab:blue")
+                draw_cut(ax_cut_v, y_line * um, I_cut_v, pdf_v, atom_cy_um, LBL_Y,
+                         "Vertical cross section", "tab:green")
 
-        ax3.set_xlabel("Position $x$ (µm)", fontsize=EXPORT_FONTSIZE_LABEL)
-        ax3.set_ylabel("Intensity", fontsize=EXPORT_FONTSIZE_LABEL)
-        ax3.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
-        ax3.grid(True, alpha=0.3)
-        ax3.set_ylim(0, 1.05)
+            # EINE Legende fuer die ganze Abbildung, unterhalb aller Achsen.
+            # In den einzelnen Plots deckte sie bei dieser Schriftgroesse die
+            # Kurve zu; hier stoert sie nichts und wird nur einmal gelesen.
+            legend_handles = region_patches()
+            if show_pdf:
+                legend_handles.append(Patch(facecolor="magenta", alpha=0.30,
+                                            label="Atom probability density (norm.)"))
+            try:
+                fig_save.legend(handles=legend_handles, loc="outside lower center",
+                                ncol=len(legend_handles), frameon=False,
+                                fontsize=EXPORT_FONTSIZE_LEGEND)
+            except Exception:
+                # aeltere matplotlib-Versionen kennen "outside ..." nicht
+                fig_save.legend(handles=legend_handles, loc="lower center",
+                                bbox_to_anchor=(0.5, -0.03),
+                                ncol=len(legend_handles), frameon=False,
+                                fontsize=EXPORT_FONTSIZE_LEGEND)
 
-        ax4.set_xlabel("Position $y$ (µm)", fontsize=EXPORT_FONTSIZE_LABEL)
-        ax4.set_ylabel("Intensity", fontsize=EXPORT_FONTSIZE_LABEL)
-        ax4.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
-        ax4.grid(True, alpha=0.3)
-        ax4.set_ylim(0, 1.05)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            mode_tag = "weighted" if weighted else "hard"
+            out_file = out_dir / (f"FlatMultiTone_GUI_{mode_tag}_"
+                                  f"{self.state['N_x']}x{self.state['N_y']}_{timestamp}.pdf")
+            txt_file = out_file.with_suffix(".txt")
+            try:
+                fig_save.savefig(out_file, bbox_inches="tight")
+                # Parameter IMMER mitschreiben - auch (und gerade) wenn der
+                # Titel abgeschaltet ist, sonst waere die Abbildung nicht mehr
+                # reproduzierbar.
+                txt_file.write_text(
+                    self._export_parameter_text(
+                        uniformity, crosstalk, crosstalk_edge, crosstalk_diag,
+                        weighted, sigma_atom, r_center, atom_cx, atom_cy,
+                        half_u, half_c, half_win, opts, out_file.name
+                    ),
+                    encoding="utf-8"
+                )
+                self.label_save_status.setText(f"Gespeichert: {short_name(out_file)} (+ .txt)")
+                self.label_save_status.setToolTip(f"{out_file}\n{txt_file}")
+            except Exception as e:
+                self.label_save_status.setText(f"Error while saving: {e}")
+                self.label_save_status.setToolTip(str(out_file))
+                QMessageBox.warning(self, "Save failed", str(e))
+            finally:
+                plt.close(fig_save)
 
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        mode_tag = "weighted" if weighted else "hard"
-        out_file = out_dir / f"FlatMultiTone_GUI_{mode_tag}_{timestamp}.png"
-        try:
-            fig_save.savefig(out_file, dpi=150, bbox_inches="tight")
-            self.label_save_status.setText(f"Gespeichert: {short_name(out_file)}")
-            self.label_save_status.setToolTip(str(out_file))
-            self.label_save_status.setToolTip(str(out_file))
-        except Exception as e:
-            self.label_save_status.setText(f"Error while saving: {e}")
-            self.label_save_status.setToolTip(str(out_file))
-            QMessageBox.warning(self, "Save failed", str(e))
-        finally:
-            plt.close(fig_save)
+    def _export_parameter_text(self, uniformity, crosstalk, crosstalk_edge, crosstalk_diag,
+                               weighted, sigma_atom, r_center, atom_cx, atom_cy,
+                               half_u, half_c, half_win, opts, fig_name):
+        """Alle Parameter der gespeicherten Abbildung als reiner Text.
+
+        Wird immer neben das PDF geschrieben. Damit bleibt die Abbildung auch
+        dann reproduzierbar, wenn der Parameter-Titel im Bild abgeschaltet ist
+        (fuer LaTeX gehoert das in die Bildunterschrift, nicht ins Bild)."""
+        st = self.state
+        prof = "Airy" if st["use_airy"] else "Gaussian"
+        lines = [
+            f"# {fig_name}",
+            f"created            {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "",
+            "[Spot grid]",
+            f"N_x, N_y           {st['N_x']} x {st['N_y']}",
+            f"width              {st['width']*1e-6:.6f} MHz",
+            f"offset             {offset*1e-6:.3f} MHz",
+            f"pitch              {pitch*1e6:.4f} um",
+            f"lattice centre     {r_center*1e6:.4f} um",
+            "",
+            "[Beam / optics]",
+            f"profile            {prof}"
+            + (f"   (airy scale factor {AIRY_SCALE_FACTOR:.4f})" if st["use_airy"] else ""),
+            f"waist after lenses {st['win']*1e6:.4f} um",
+            f"waist before lens  {st['win_in']*1e3:.4f} mm",
+            f"waist mode         {st['win_mode']}",
+            f"f1, f2             {st['f1']*1e3:g} mm, {st['f2']*1e3:g} mm",
+            f"fLO                {fLO*1e3:g} mm",
+            f"wavelength         {lambda_opt*1e9:g} nm",
+            "",
+            "[Amplitudes]",
+            f"custom amplitudes  {st['custom_amps']}",
+            f"amp_x              {np.array2string(np.asarray(st['amp_x']), precision=4)}",
+            f"amp_y              {np.array2string(np.asarray(st['amp_y']), precision=4)}",
+            "",
+            "[Coherence]",
+            f"static interfer.  {'on' if st.get('coherent', True) else 'OFF'}",
+            f"tone phases        {st.get('phase_mode', 'zero')}",
+            f"degenerate pairs   {self.cache.get('n_degenerate_pairs', 0)}",
+            f"static share       {self.cache.get('static_share', 0.0)*100:.3f} %",
+            "",
+            "[Regions]",
+            f"metric             {'atom-weighted' if weighted else 'hard box'}",
+            f"uniformity shape   {st.get('uniformity_shape', 'square')}",
+            f"uniformity size    {2*half_u*1e6:.4f} um (full width/diameter)",
+            f"crosstalk square   {2*half_c*1e6:.4f} um",
+            f"atom offset x, y   {st['atom_offset_x']*1e6:.4f} um, {st['atom_offset_y']*1e6:.4f} um",
+            f"atom position      {atom_cx*1e6:.4f} um, {atom_cy*1e6:.4f} um",
+            "",
+            "[Atom]",
+            f"species            {st['atom_species']}",
+            f"temperature        {st['atom_temperature']*1e6:.3f} uK",
+            f"trap frequency     {st['atom_trap_freq']*1e-3:.3f} kHz",
+            f"sigma_atom         {sigma_atom*1e9:.2f} nm" if (sigma_atom is not None and np.isfinite(sigma_atom))
+            else "sigma_atom         invalid",
+            "",
+            "[Metrics]",
+            f"uniformity         {uniformity*100:.4f} %",
+            f"crosstalk          {crosstalk*100:.5f} %",
+        ]
+        if np.isfinite(crosstalk_edge) and np.isfinite(crosstalk_diag):
+            lines += [
+                f"  edge neighbours  {crosstalk_edge*100:.5f} % each (4)",
+                f"  diagonal neigh.  {crosstalk_diag*100:.5f} % each (4)",
+            ]
+        lines += [
+            "",
+            "[Export settings]",
+            f"cross sections     {opts['n_cuts']}",
+            f"2D window          +/- {half_win*1e6:.4f} um  (crosstalk square x {opts['zoom_factor']:.2f})",
+            f"crosshair          {'on' if opts['crosshair'] else 'off'}",
+            f"regions in cut     {'on' if opts['regions_in_cut'] else 'off'}",
+            f"atom density       {'on' if opts['atom_pdf'] else 'off'}",
+            f"parameter title    {'on' if opts['title'] else 'off'}",
+            f"grid resolution    {GRID_N_HIGHRES} x {GRID_N_HIGHRES}",
+            "",
+        ]
+        return "\n".join(lines)
 
     # --------------------------------------------------------
     # Drag & Drop im Hauptplot: Region-Handles ODER Fadenkreuz

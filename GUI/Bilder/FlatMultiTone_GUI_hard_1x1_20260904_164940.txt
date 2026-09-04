@@ -1,0 +1,56 @@
+# FlatMultiTone_GUI_hard_1x1_20260904_164940.pdf
+created            2026-09-04 16:49:41
+
+[Spot grid]
+N_x, N_y           1 x 1
+width              0.000000 MHz
+offset             100.000 MHz
+pitch              5.2880 um
+lattice centre     0.0000 um
+
+[Beam / optics]
+profile            Gaussian
+waist after lenses 1.9000 um
+waist before lens  0.7043 mm
+waist mode         output
+f1, f2             75 mm, 750 mm
+fLO                52.88 mm
+wavelength         795 nm
+
+[Amplitudes]
+custom amplitudes  False
+amp_x              [1.]
+amp_y              [1.]
+
+[Coherence]
+static interfer.  on
+tone phases        zero
+degenerate pairs   0
+static share       0.000 %
+
+[Regions]
+metric             hard box
+uniformity shape   circle
+uniformity size    2.0000 um (full width/diameter)
+crosstalk square   5.2880 um
+atom offset x, y   0.0000 um, 0.0000 um
+atom position      0.0000 um, 0.0000 um
+
+[Atom]
+species            Rb-85
+temperature        17.000 uK
+trap frequency     60.400 kHz
+sigma_atom         107.64 nm
+
+[Metrics]
+uniformity         15.9948 %
+crosstalk          1.08399 %
+
+[Export settings]
+cross sections     1
+2D window          +/- 4.3700 um  (crosstalk square x 1.15)
+crosshair          off
+regions in cut     on
+atom density       on
+parameter title    off
+grid resolution    1000 x 1000

@@ -10,6 +10,7 @@ importiert:
     ../run_penalty_only.py   ->  lib.paths, lib.penalty_opt
     ../run_hard_check.py     ->  lib.paths, lib.combine, lib.hard_check,   lib.report
     ../run_plots.py          ->  lib.paths, lib.combine, lib.report
+    ../run_single_beam.py    ->  lib.paths, lib.single_beam, lib.single_beam_report
 
 Inhalt:
 
@@ -31,4 +32,13 @@ Inhalt:
                    ohne erneute Optimierung, plus Konsistenzanalyse.
 - report.py        Plots (Vektor-PDF) und Markdown-Berichte fuer beide
                    Datensatz-Arten.
+- single_beam.py   EIN Strahl statt eines Tonarrays: Sweep ueber den Waist
+                   und Sweep ueber die Atomposition bei festem Waist,
+                   harte Metriken ueber einer Kreisregion (Beam-Pointing),
+                   atom-gewichtete Metriken und deren Penalty-Kombination.
+                   Weder width noch r_x/r_y - beides ist bei einem Ton nicht
+                   definiert.
+- single_beam_report.py  Kurven ueber dem Waist als PDF (Stil, Farben und
+                   Achsen-Buendelung aus report.py) und der zugehoerige
+                   Markdown-Bericht.
 """

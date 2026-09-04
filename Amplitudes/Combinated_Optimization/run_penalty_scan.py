@@ -52,6 +52,7 @@ sys.path.insert(0, str(FilePath(__file__).resolve().parent))
 # (lib/penalty_scan.py kapselt sie, siehe Hinweis in lib/paths.py).
 from lib import paths, combine, penalty_scan, report  # noqa: E402
 import resume_picker            # aus ../Weighted_Optimization (siehe lib/paths.py)
+import coherence                # dito
 
 
 N_X_FIXED = 3
@@ -219,6 +220,11 @@ class PenaltyScanDialog(QDialog):
         profile_group.setLayout(profile_layout)
         main_layout.addWidget(profile_group)
         self._sync_airy_mode()
+
+        # Statische Interferenz frequenzentarteter Spots. Per Default AN -
+        # sie ist da, ob man sie mitrechnet oder nicht.
+        self.coherence_group = coherence.CoherenceGroup(N_X_FIXED, N_Y_FIXED)
+        main_layout.addWidget(self.coherence_group)
 
         # -- Atom-Gewichtung --
         atom_group = QGroupBox("Atom-Gewichtung (fuer den gewichteten Anteil)")
@@ -411,6 +417,7 @@ class PenaltyScanDialog(QDialog):
             combo_percentile=self.combo_percentile.value(),
             n_grid=self.n_grid.value(),
             airy_scale_factor=self.airy_scale_factor.value(),
+            coherent=self.coherence_group.value(),
             atom_temperature=self.atom_temperature_uK.value() * 1e-6,
             trap_freq_r=self.trap_freq_r_kHz.value() * 1e3,
             weighted_n_grid=self.weighted_n_grid.value(),
@@ -442,6 +449,7 @@ def main():
         f1=75e-3, f2=750e-3, N_x=N_X_FIXED, N_y=N_Y_FIXED,
         n_grid=params["n_grid"],
         airy_scale_factor=params["airy_scale_factor"],
+        coherent=params["coherent"],
         atom_temperature=params["atom_temperature"],
         trap_freq_r=params["trap_freq_r"],
         weighted_n_grid=params["weighted_n_grid"],
@@ -457,7 +465,8 @@ def main():
             alpha=params["alpha"], r_bounds=params["r_bounds"],
             combo_lambda=params["combo_lambda"],
             airy_scale_factor=params["airy_scale_factor"],
-            optics_match=dict(n_grid=params["n_grid"],
+            optics_match=dict(coherent=params["coherent"],
+                              n_grid=params["n_grid"],
                               weighted_n_grid=params["weighted_n_grid"]))
         if resumable is not None:
             n_done, total_pts = resumable

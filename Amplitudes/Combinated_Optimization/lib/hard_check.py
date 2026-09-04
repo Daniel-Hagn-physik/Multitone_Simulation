@@ -47,19 +47,28 @@ from weighted_multitone_flattop_optimizer import (  # noqa: E402
 # Parameter, die aus einem gewichteten Scan-Datensatz uebernommen werden,
 # damit die Nachrechnung dieselbe Geometrie/Physik verwendet.
 INHERITED_KEYS = ('N_x', 'N_y', 'f1', 'f2', 'fLO', 'lambda_opt', 'theta_max',
-                  'f_band', 'profile', 'airy_scale_factor',
+                  'f_band', 'profile', 'airy_scale_factor', 'coherent',
                   'atom_mass', 'atom_temperature', 'trap_freq_r')
 # airy_scale_factor MUSS mituebernommen werden: er setzt die physikalische
 # Spotgroesse. Rechnete die Nachrechnung mit einem anderen Faktor als der
 # gewichtete Scan, verglichen wir zwei verschiedene Optiken miteinander.
 # Datensaetze von vor dem 2026-09-01 fuehren ihn nicht - dort greift der
 # Optimierer-Default 1.19, also derselbe Wert, mit dem sie gerechnet wurden.
+#
+# Dasselbe Argument gilt fuer 'coherent': der Hard-Check soll pruefen, ob hart
+# und gewichtet AM SELBEN MODELL uebereinstimmen. Rechnete die Nachrechnung
+# die statische Interferenz mit und der gewichtete Scan nicht, verglichen wir
+# zwei verschiedene Physiken. Deshalb wird der Wert uebernommen - und wo er
+# fehlt (Datensatz von vor dem 2026-09-04), gilt inkohaerent, denn so wurde
+# der Datensatz gerechnet. Nicht der heutige Default True: der wuerde genau
+# den stillen Modellbruch erzeugen, den die Uebernahme verhindern soll.
 
 
 def optimizer_from_results(results, n_grid=None, extra_params=None):
     """Baut eine MultitoneFlatTopOptimizer-Instanz mit den Parametern des
     uebergebenen Datensatzes."""
     params = {k: results[k] for k in INHERITED_KEYS if k in results and results[k] is not None}
+    params.setdefault('coherent', False)      # siehe INHERITED_KEYS oben
     if n_grid is not None:
         params['n_grid'] = n_grid
     if extra_params:
@@ -296,6 +305,7 @@ def run_hard_check(weighted_results, n_grid=None, n_jobs=1,
         lambda_opt=opt.lambda_opt, theta_max=opt.theta_max, f_band=opt.f_band,
         profile=opt.profile,
         airy_scale_factor=getattr(opt, "airy_scale_factor", None),
+        coherent=bool(getattr(opt, "coherent", False)),
         sigma_atom=opt.sigma_atom,
         atom_mass=opt.atom_mass, atom_temperature=opt.atom_temperature,
         trap_freq_r=opt.trap_freq_r,

@@ -522,6 +522,20 @@ def describe(results):
     ]
     if results.get('checkpoint') or results.get('_checkpoint'):
         lines.append("ACHTUNG: das ist ein unvollstaendiger Zwischenstand (Checkpoint).")
+    # Mit oder ohne die statische Interferenz frequenzentarteter Spots
+    # gerechnet? Ohne den Schluessel: der Scan lief vor dieser Option, also
+    # inkohaerent. Das gehoert sichtbar an die Oberflaeche - die Zahlen
+    # beider Modelle stehen sonst unbemerkt nebeneinander.
+    koh = results.get('coherent')
+    if koh is None:
+        lines.append(
+            "ACHTUNG: ohne Kohaerenz gerechnet (Datensatz von vor dieser Option) - "
+            "die statische Interferenz frequenzentarteter Spots fehlt. Nicht direkt "
+            "mit kohaerent gerechneten Datensaetzen vergleichbar.")
+    elif koh:
+        lines.append("Kohaerenz: statische Interferenz mitgerechnet (Phasendifferenz 0)")
+    else:
+        lines.append("Kohaerenz: AUS - reine Intensitaetssumme")
     params = [f"{name}={results[name]}" for name in ('alpha', 'combo_lambda', 'combo_percentile')
               if results.get(name) is not None]
     if params:

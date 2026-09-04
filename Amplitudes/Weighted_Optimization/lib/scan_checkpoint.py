@@ -129,6 +129,15 @@ def _values_equal(a, b):
 AIRY_SCALE_LEGACY_DEFAULT = 1.19
 
 
+# Fehlende Schluessel, deren Bedeutung trotzdem FESTSTEHT: eine Datei ohne
+# "coherent" stammt aus der Zeit vor dieser Option und wurde inkohaerent
+# gerechnet. Das ist bekannt, nicht unbekannt - deshalb wird hier nicht bloss
+# gewarnt, sondern verglichen und im Zweifel NICHT fortgesetzt. Ein halb
+# kohaerent, halb inkohaerent gerechneter Datensatz waere von aussen nicht
+# mehr als solcher zu erkennen.
+OPTICS_LEGACY_DEFAULTS = {"coherent": False}
+
+
 def load_resumable(checkpoint_path, win_input_range, width_range, n_win_input, n_width,
                     N_x, N_y, extra_match=None, airy_scale_factor=None,
                     optics_match=None, verbose=True):
@@ -189,11 +198,16 @@ def load_resumable(checkpoint_path, win_input_range, width_range, n_win_input, n
         if optics_match:
             for key, value in optics_match.items():
                 if key not in saved or saved.get(key) is None:
-                    optics_unknown.append(key)      # Datei von vor 2026-09-01
-                    continue
-                if not _values_equal(saved.get(key), value):
+                    if key in OPTICS_LEGACY_DEFAULTS:
+                        gespeichert = OPTICS_LEGACY_DEFAULTS[key]
+                    else:
+                        optics_unknown.append(key)  # Datei von vor 2026-09-01
+                        continue
+                else:
+                    gespeichert = saved.get(key)
+                if not _values_equal(gespeichert, value):
                     optics_ok = False
-                    optics_problem = (key, saved.get(key), value)
+                    optics_problem = (key, gespeichert, value)
                     break
         extra_ok = True
         if extra_match:
@@ -216,11 +230,15 @@ def load_resumable(checkpoint_path, win_input_range, width_range, n_win_input, n
 
     if not optics_ok and verbose and optics_problem is not None:
         key, was, now = optics_problem
+        # coherent ist kein Aufloesungs-, sondern ein Modellunterschied - das
+        # soll die Meldung auch sagen.
+        grund = ("der Datensatz waere sonst halb kohaerent und halb inkohaerent "
+                 "gerechnet" if key == "coherent"
+                 else "der Datensatz haette sonst zwei verschiedene Aufloesungen")
         print(f"[Checkpoint] '{checkpoint_path}' wurde mit {key}={was} gerechnet, dieser "
-              f"Scan laeuft mit {key}={now} - NICHT fortgesetzt (der Datensatz haette "
-              f"sonst zwei verschiedene Aufloesungen). Bitte einen anderen Speicherpfad "
-              f"waehlen, sonst wird die vorhandene Datei beim naechsten "
-              f"Zwischenspeichern ueberschrieben.")
+              f"Scan laeuft mit {key}={now} - NICHT fortgesetzt ({grund}). Bitte einen "
+              f"anderen Speicherpfad waehlen, sonst wird die vorhandene Datei beim "
+              f"naechsten Zwischenspeichern ueberschrieben.")
 
     if optics_unknown and optics_ok and verbose:
         print(f"[Checkpoint] WARNUNG: '{checkpoint_path}' fuehrt "
