@@ -22,6 +22,9 @@ Erzeugt in Fit_Plots/ bzw. Fit_Results/:
   {Praefix}_valley_{X}_over_{Y}.pdf   Querschnitt entlang des Minimums von X,
                                       aufgetragen ueber Y (Waist oder width),
                                       auf Wunsch mit Gerade durch den Talpfad
+  {Praefix}_line_panels_over_{Y}.pdf  jede Groesse der Uebersicht als eigener
+                                      Schnitt entlang der Geraden, in der
+                                      Anordnung der Metrik-Karten
   {Praefix}_line_{X}_over_{Y}.pdf     derselbe Querschnitt, aber entlang der
                                       Geraden statt entlang des Minimums
   {Praefix}_Report.md                 Bericht mit allen Kennzahlen
@@ -1220,9 +1223,13 @@ def main():
                 lines.append("Talpfad-Gerade: zu wenige brauchbare Talpunkte - "
                              "siehe Bericht.")
             else:
-                lines.append(f"Talpfad-Gerade: {report.valley_line_formula(fit)}")
+                lines.append("Talpfad-Gerade: "
+                             + report.valley_line_formula_with_error(fit))
                 lines.append(f"   R² = {report._r2_text(fit['r2'])}, "
                              f"{fit['n_used']} von {fit['n_total']} Talpunkten verwendet")
+                if out['plots'].get('line_panels'):
+                    lines.append("   dazu die Panel-Datei mit allen Groessen "
+                                 "einzeln (..._line_panels_...pdf)")
         lines.append("")
     if out.get('report'):
         lines.append(f"Bericht: {out['report']}")

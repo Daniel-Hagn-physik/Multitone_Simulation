@@ -18,6 +18,7 @@ dieselben PDFs sollen neben den Multitone-Bildern im selben Dokument
 stehen, ohne dass man den Bruch sieht.
 """
 
+import contextlib
 from datetime import date
 from pathlib import Path as FilePath
 
@@ -27,15 +28,14 @@ import matplotlib.pyplot as plt
 from . import paths  # noqa: F401
 from . import single_beam as sb
 
-# Bewusst aus report.py uebernommen statt neu geschrieben: Massstab,
-# Farben und die Achsen-Buendelung sollen in beiden Auswertungen dieselben
-# sein. Die mit _ beginnenden Namen sind modulintern gedacht, werden hier
-# aber genau so benutzt wie dort - eine zweite Fassung waere die
-# schlechtere Loesung.
+# Bewusst aus report.py uebernommen statt neu geschrieben: Grundstil,
+# Farben und die Achsen-Hilfen sollen in beiden Auswertungen dieselben sein.
+# Die mit _ beginnenden Namen sind dort modulintern gedacht, werden hier
+# aber genau so benutzt wie dort - eine zweite Fassung waere die schlechtere
+# Loesung.
 from .report import (  # noqa: E402
-    AXIS_GROUP_MAX_RATIO, BEST_POINT_STYLE, TRACE_SPECS,
-    ZUSATZ_ACHSE_PT, S, SD, _entzerre_achse, _finish, _ist_verrauscht,
-    _wertebereich, dokument_stil,
+    BEST_POINT_STYLE, LATEX_STYLE, TRACE_SPECS,
+    _entzerre_achse, _finish, _ist_verrauscht, _wertebereich,
 )
 
 
@@ -52,6 +52,17 @@ from .report import (  # noqa: E402
 # die TRACE_SPECS in report.py hat. Einen festen Linienstil gibt es NICHT:
 # gezeichnet wird durchgezogen, und nur wo zwei Kurven im Bild aufeinander
 # liegen, wird eine von ihnen gestrichelt (siehe _entwirre_ueberlapp).
+def _als_prozent(spec, symbol=None):
+    """Eintrag aus TRACE_SPECS, aber sicher in Prozent gerechnet.
+
+    In report.py traegt `penalty_raw` (J) die Einheit "" und wird NICHT in
+    Prozent gerechnet - dort steht J neben Amplituden. Hier stehen alle
+    Groessen in Prozent nebeneinander, sonst koennten sie sich keine Achse
+    teilen und die Zahlen waeren nicht vergleichbar."""
+    label, _einheit, farbe, _prozent = spec
+    return (symbol or label, "%", farbe, True)
+
+
 TRACES = {
     "uniformity_hart":      TRACE_SPECS["uniformity_hard"],
     "crosstalk_hart":       TRACE_SPECS["crosstalk_hard"],
@@ -59,14 +70,15 @@ TRACES = {
     # im Exponenten. Der Kreis behaelt das Amber von eta_h - er ist
     # dieselbe Groesse -, das Pitch-Quadrat bekommt das Violett, das in
     # diesem Ordner sonst r_x traegt (Amplituden gibt es beim Einzelstrahl
-    # nicht).
+    # nicht, die Farbe ist hier also frei).
     "crosstalk_hart_kreis": (r"$\eta_h^{\mathrm{circ}}$",) + TRACE_SPECS["crosstalk_hard"][1:],
-    "crosstalk_hart_pitch": (r"$\eta_h^{\mathrm{box}}$", "%", "#785EF0", True),
+    "crosstalk_hart_pitch": (r"$\eta_h^{\mathrm{box}}$", "%", TRACE_SPECS["r_x"][2], True),
     "uniformity_weighted":  TRACE_SPECS["uniformity_weighted"],
     "crosstalk_weighted":   TRACE_SPECS["crosstalk_weighted"],
-    "uniformity_kombi":     (r"$U_c$", "%", "#785EF0", True),
-    "crosstalk_kombi":      (r"$\eta_c$", "%", "#CC3311", True),
-    "combined_score":       TRACE_SPECS["penalty_raw"],
+    # U_c und eta_c stehen in report.py bereits mit eigener Farbe.
+    "uniformity_kombi":     TRACE_SPECS["uniformity_kombi"],
+    "crosstalk_kombi":      TRACE_SPECS["crosstalk_kombi"],
+    "combined_score":       _als_prozent(TRACE_SPECS["penalty_raw"]),
 }
 
 # Reihenfolge, in der Achsen und Legendeneintraege sortiert werden.
@@ -171,13 +183,77 @@ def zeilen_namen(results):
 # ohne dass das Panel selbst flach wird.
 CURVE_FIGSIZE = (6.3, 4.4)
 
-# Schrift- und Linienstaerke, gemessen an DOC_RC aus report.py (dessen
-# Grundschrift ist auf eine ueber die ganze Textbreite eingebundene Karte
-# ausgelegt). Eine Kurvenfigur wird im Text oft kleiner gesetzt und lebt
-# von wenigen Beschriftungen - hier ist mehr Gewicht besser lesbar. Der
-# Faktor geht als `dichte` in dokument_stil() und skaliert Schrift,
-# Linien, Marker und Teilstriche gemeinsam.
-SCHRIFT_DICHTE = 1.45
+# Schrift- und Linienstaerke, gemessen an LATEX_STYLE aus report.py (dem
+# gemeinsamen Grundstil dieses Ordners: Serifen, Computer-Modern-Mathtext,
+# 10 pt). Eine Kurvenfigur wird im Text oft kleiner gesetzt als eine Karte
+# und lebt von wenigen Beschriftungen - hier ist mehr Gewicht besser
+# lesbar. Der Faktor skaliert Schrift, Linien, Marker und Teilstriche
+# gemeinsam.
+SCHRIFT_DICHTE = 1.30
+
+# Was zum Grundstil dazukommt: Linien- und Markergroessen, die LATEX_STYLE
+# nicht festlegt. Alles hier sind Laengen in Punkt und wird mitskaliert.
+KURVEN_RC_ZUSATZ = {
+    "lines.linewidth": 1.4,
+    "lines.markersize": 3.0,
+    "xtick.major.width": 0.8,
+    "ytick.major.width": 0.8,
+    "xtick.major.size": 3.5,
+    "ytick.major.size": 3.5,
+    "grid.linewidth": 0.8,
+    "patch.linewidth": 0.8,
+}
+
+# Nicht skalierbar: das sind Namen und Zahlencodes, keine Laengen.
+_NICHT_SKALIEREN = ("font.family", "mathtext.fontset", "pdf.fonttype", "ps.fonttype")
+
+# Platz, den jede zusaetzliche y-Achse rechts braucht - Zahlen, Teilstriche
+# und die gedrehte Beschriftung, in Punkt. Derselbe Wert, den der
+# Querschnitt in report.py benutzt.
+ZUSATZ_ACHSE_PT = 52.0
+
+# Aktueller Skalierungsfaktor, gesetzt von kurven_stil() und gelesen von
+# S()/SD(). Es wird immer genau eine Figur zur Zeit gezeichnet, deshalb
+# reicht ein Modul-Zustand (dieselbe Loesung wie in report.py frueher).
+_SKALA = 1.0
+
+
+@contextlib.contextmanager
+def kurven_stil(dichte=SCHRIFT_DICHTE, **ueberschreiben):
+    """Zeichen-Kontext einer Kurvenfigur: LATEX_STYLE + KURVEN_RC_ZUSATZ,
+    alle Laengen mit `dichte` multipliziert."""
+    global _SKALA
+    rc = dict(LATEX_STYLE)
+    rc.update(KURVEN_RC_ZUSATZ)
+    rc.update(ueberschreiben)
+    for schluessel, wert in list(rc.items()):
+        if schluessel not in _NICHT_SKALIEREN and isinstance(wert, (int, float)):
+            rc[schluessel] = wert * float(dichte)
+    vorher = _SKALA
+    _SKALA = float(dichte)
+    try:
+        with plt.rc_context(rc):
+            yield _SKALA
+    finally:
+        _SKALA = vorher
+
+
+def S(laenge):
+    """Eine in Punkt gedachte Laenge auf die aktuelle Figur umrechnen."""
+    return laenge * _SKALA
+
+
+def SD(stil, **ueberschreiben):
+    """Dasselbe fuer ein Stil-dict: alle Laengen-Eintraege mitskalieren."""
+    laengen = ("linewidth", "markersize", "markeredgewidth", "elinewidth",
+               "capsize", "capthick", "width")
+    neu = {k: (v * _SKALA if k in laengen and isinstance(v, (int, float)) else v)
+           for k, v in stil.items()}
+    if isinstance(stil.get("s"), (int, float)):
+        neu["s"] = stil["s"] * _SKALA ** 2
+    neu.update(ueberschreiben)
+    return neu
+
 
 # Luft ueber den Kurven, damit die Legende oben links nicht auf ihnen
 # liegt - als Anteil der Datenspanne der jeweiligen Achse.
@@ -187,8 +263,16 @@ LEGENDEN_LUFT = 0.28
 # matplotlib-loc-String geht.
 LEGENDEN_ORT = "upper left"
 
-WAIST_LABEL = r"Waist in the atomic plane $w$ (µm)"
-WIN_INPUT_LABEL = r"Waist before first lens $w_\mathrm{in}$ (mm)"
+# Einheiten stehen im Mathe-Satz, nicht als Unicode-Zeichen: die Figuren
+# werden mit mathtext.fontset="cm" gesetzt, ein direkt getipptes "µ" kommt
+# dagegen aus der Textschrift und faellt neben dem uebrigen Mathe-Satz
+# (w, R, eta) sichtbar heraus. `\mathrm{\mu m}` setzt beide Zeichen in
+# derselben CM-Schrift; das aufrechte \upmu kennt mathtext nicht, das
+# schraege \mu ist die uebliche LaTeX-Schreibweise dafuer.
+UM = r"\mathrm{\mu m}"
+
+WAIST_LABEL = r"Waist in the atomic plane $w$ [$\mathrm{\mu m}$]"
+WIN_INPUT_LABEL = r"Waist before first lens $w_\mathrm{in}$ [$\mathrm{mm}$]"
 
 # Mindestabstand zweier Teilstriche der oberen Achse, als Anteil der
 # Achsenbreite (siehe _zweite_x_achse).
@@ -280,13 +364,14 @@ def hard_title(results):
     radius_um = p["hard_radius"] * 1e6
     region = p.get("hard_crosstalk_region", "kreis")
     if region == "kreis":
-        return r"Single beam, hard region (circle $R = %.2f$ µm)" % radius_um
+        return r"Single beam, hard region (circle $R = %.2f\,\mathrm{\mu m}$)" % radius_um
     if region == "beide":
         return (r"Single beam, hard region ($U_h$ and $\eta_h^{\mathrm{circ}}$: "
-                r"circle $R = %.2f$ µm, $\eta_h^{\mathrm{box}}$: pitch box "
-                r"$p = %.3f$ µm)" % (radius_um, p["pitch"] * 1e6))
-    return (r"Single beam, hard region ($U_h$: circle $R = %.2f$ µm, "
-            r"$\eta_h$: pitch box $p = %.3f$ µm)"
+                r"circle $R = %.2f\,\mathrm{\mu m}$, $\eta_h^{\mathrm{box}}$: "
+                r"pitch box $p = %.3f\,\mathrm{\mu m}$)"
+                % (radius_um, p["pitch"] * 1e6))
+    return (r"Single beam, hard region ($U_h$: circle $R = %.2f\,\mathrm{\mu m}$, "
+            r"$\eta_h$: pitch box $p = %.3f\,\mathrm{\mu m}$)"
             % (radius_um, p["pitch"] * 1e6))
 
 
@@ -360,7 +445,7 @@ def _passt_zusammen(bereiche, kandidaten, werte, min_share=SICHTBAR_MIN_ANTEIL):
     return True
 
 
-def gruppen_fuer_achsen(keys, werte, modus="auto", max_ratio=AXIS_GROUP_MAX_RATIO):
+def gruppen_fuer_achsen(keys, werte, modus="auto"):
     """Aufteilung der Kurven auf y-Achsen.
 
     'auto' buendelt nach Sichtbarkeit (siehe _passt_zusammen), 'eine' und
@@ -431,7 +516,9 @@ def _achsen_label(gruppe):
             labels.append(label)
     einheit = TRACES[gruppe[0]][1]
     text = ", ".join(labels)
-    return f"{text} ({einheit})" if einheit else text
+    # Einheit in eckigen Klammern - "Groesse [Einheit]", wie an den
+    # x-Achsen auch.
+    return f"{text} [{einheit}]" if einheit else text
 
 
 # Leiter, aus der die Schrittweite der oberen Achse gewaehlt wird, und wie
@@ -564,7 +651,7 @@ def _zeichne_arbeitspunkt(ax0, achsen_und_gruppen, x, werte, waist_um):
     # wo sie eine Kurve kreuzt.
     linie = ax0.axvline(waist_um, color=BEST_POINT_STYLE["color"],
                         linestyle="--", linewidth=S(1.1), alpha=0.8, zorder=1.5,
-                        label=r"$w$ = %.3f µm" % waist_um)
+                        label=r"$w = %.3f\,\mathrm{\mu m}$" % waist_um)
     for ax, gruppe in achsen_und_gruppen:
         for key in gruppe:
             y = float(np.interp(waist_um, x, werte[key]))
@@ -626,7 +713,7 @@ def plot_curves(results, keys, filename, titel=None, out_dir=None, achsen="auto"
     gruppen = gruppen_fuer_achsen(keys, werte, modus=achsen)
     x = np.asarray(results[x_key], dtype=float)
 
-    with dokument_stil(CURVE_FIGSIZE[0], dichte=dichte):
+    with kurven_stil(dichte):
         fig, ax0 = plt.subplots(figsize=CURVE_FIGSIZE, constrained_layout=True)
 
         linien = []
@@ -733,7 +820,7 @@ def make_plots(results, out_dir=None, getrennt=True, achsen="auto",
             hard_title(results) if titel else None, **gemeinsam))
         pfade.append(plot_curves(
             results, WEIGHTED_KEYS, f"{prefix}_weighted.pdf",
-            (r"Single beam, atom-weighted ($\sigma_\mathrm{atom} = %.0f$ nm)"
+            (r"Single beam, atom-weighted ($\sigma_\mathrm{atom} = %.0f\,\mathrm{nm}$)"
              % (results["sigma_atom"] * 1e9)) if titel else None, **gemeinsam))
     else:
         pfade.append(plot_curves(
@@ -753,7 +840,7 @@ def make_plots(results, out_dir=None, getrennt=True, achsen="auto",
 # ======================================================================
 # Positions-Sweep: Kurven ueber dem Atom-Versatz
 # ======================================================================
-OFFSET_LABEL = r"Atom offset from site centre $r$ (µm)"
+OFFSET_LABEL = r"Atom offset from site centre $r$ [$\mathrm{\mu m}$]"
 OFFSET_LABEL_REL = r"$r / w$"
 
 

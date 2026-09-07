@@ -23,7 +23,10 @@ Erzeugt in Fit_Plots/ bzw. Fit_Results/:
                                     aufgetragen ueber Y (Waist oder width),
                                     auf Wunsch mit Gerade durch den Talpfad
   {Praefix}_line_{X}_over_{Y}.pdf   derselbe Querschnitt, aber entlang der
-                                    Geraden statt entlang des Minimums
+                                    Geraden statt entlang des Minimums; dort
+                                    fest J, U_c und eta_c
+  {Praefix}_line_panels_over_{Y}.pdf  die sechs Groessen der Uebersicht
+                                    einzeln, als Schnitt entlang der Geraden
   {Praefix}_Report.md               Bericht mit allen Kennzahlen
   (optional) die 6-Panel-Uebersicht und die Schnitte des AmplitudeScanPlotter
 
@@ -45,7 +48,7 @@ from pathlib import Path as FilePath
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QFormLayout, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QDoubleSpinBox, QPushButton, QGroupBox, QMessageBox,
-    QFileDialog, QCheckBox, QComboBox, QScrollArea, QWidget,
+    QFileDialog, QCheckBox, QComboBox, QScrollArea, QWidget, QSpinBox,
 )
 
 sys.path.insert(0, str(FilePath(__file__).resolve().parent))
@@ -176,29 +179,15 @@ class PlotsDialog(QDialog):
             "Gerade auch in den Metrik-Vergleich einzeichnen (2x2-Karten)")
         self.fit_line_on_maps.setToolTip(
             "Zeichnet die Gerade, die unten durch den Talpfad gelegt wird, zusaetzlich\n"
-            "in alle Karten von ..._metric_comparison.pdf.\n\n"
+            "in alle vier Karten von ..._metric_comparison.pdf - durchgezogen im\n"
+            "gefitteten Bereich, gepunktet in der Extrapolation.\n\n"
             "Welche Groesse gefittet wird, bestimmt \"Groesse fuer Talpfad/Gerade\"\n"
             "in der Talschnitt-Gruppe. Die Gerade ist immer die ueber dem effektiven\n"
             "Waist in µm - auf einer mm-Achse erscheint sie deshalb leicht gekruemmt,\n"
             "weil win_input und effektiver Waist nichtlinear zusammenhaengen.\n\n"
-            "Gezeichnet wird eine durchgezogene Linie ueber den ganzen gescannten\n"
-            "Bereich - aus welchem Bereich sie bestimmt wurde, steht im Bericht.\n\n"
             "Ohne brauchbare Gerade bleiben die Karten unveraendert (Hinweis auf der\n"
             "Konsole).")
-        self.fit_line_on_maps.toggled.connect(self._sync_fit_line_style)
         display_layout.addRow(self.fit_line_on_maps)
-
-        self.fit_line_dashed = QCheckBox(
-            "   ... ausserhalb des Fit-Bereichs gepunktet statt durchgezogen")
-        self.fit_line_dashed.setToolTip(
-            "Ohne Haken ist die Gerade in den Karten eine einzige durchgezogene\n"
-            "Linie - eine Gerade ist eine Gerade, und aus welchem Bereich sie\n"
-            "bestimmt wurde, steht im Bericht.\n\n"
-            "Mit Haken wird sie zweiteilig gezeichnet: durchgezogen im gefitteten\n"
-            "Bereich, gepunktet in der Verlaengerung. Der gepunktete Teil bekommt\n"
-            "keinen eigenen Legendeneintrag - der Unterschied steckt allein im\n"
-            "Linienformat.")
-        display_layout.addRow(self.fit_line_dashed)
         self.amplitude_maps = QCheckBox(
             "Metrik-Vergleich zusaetzlich mit Amplituden (6 Karten, eigene PDF)")
         self.amplitude_maps.setToolTip(
@@ -262,6 +251,9 @@ class PlotsDialog(QDialog):
         )
         self.valley_path_mode.currentIndexChanged.connect(
             lambda _i: self._sync_valley_fit_state())
+        # Der Modus entscheidet auch, ob die Kurven-Haken ueberhaupt wirken.
+        self.valley_path_mode.currentIndexChanged.connect(
+            lambda _i: self._sync_valley_options())
         valley_form.addRow("Schnitt entlang:", self.valley_path_mode)
         self.valley_follow = QComboBox()
         for _key, label in report.FOLLOW_CHOICES:
@@ -357,20 +349,6 @@ class PlotsDialog(QDialog):
         self.valley_fit_line.setToolTip(self._fit_line_tooltip)
         valley_layout.addWidget(self.valley_fit_line)
 
-        self.valley_map_show_path = QCheckBox(
-            "Talpfad und ausgelassene/extrapolierte Punkte in die Karte zeichnen")
-        self.valley_map_show_path.setToolTip(
-            "Ohne Haken zeigt die KARTE (linkes Panel) nur den verbotenen Bereich\n"
-            "und die Ausgleichsgerade. Die einzelnen Pfadpunkte werden dann gar\n"
-            "nicht erst gezeichnet - also auch nicht in der Legende gefuehrt.\n"
-            "Ihre Anzahl steht im Bericht.\n\n"
-            "Mit Haken kommen der Talpfad, die nicht benutzten und die\n"
-            "extrapolierten Punkte zurueck, jeweils mit ihrer Anzahl in der\n"
-            "Legende.\n\n"
-            "Ausnahme: kommt gar keine Gerade zustande, waere die Karte sonst\n"
-            "leer - dann wird der Talpfad auch ohne Haken gezeichnet.")
-        valley_layout.addWidget(self.valley_map_show_path)
-
 
         traces_label = QLabel("Welche Groessen sollen entlang dieses Wegs gezeigt werden?")
         valley_layout.addWidget(traces_label)
@@ -384,23 +362,106 @@ class PlotsDialog(QDialog):
                 "crosstalk_weighted": "Crosstalk, atom-gewichtet",
                 "uniformity_hard": "Uniformity, hart",
                 "crosstalk_hard": "Crosstalk, hart",
+                "uniformity_kombi": "Uniformity, KOMBINIERT (U_c)",
+                "crosstalk_kombi": "Crosstalk, KOMBINIERT (eta_c)",
                 "penalty_raw": "Penalty ROH (J der Optimierung, = Score)",
                 "r_x": "r_x (Amplituden-Verhaeltnis x)",
                 "r_y": "r_y (Amplituden-Verhaeltnis y)",
             }[key]
             box = QCheckBox(klartext)
-            box.setChecked(True)
+            # Die beiden kombinierten Groessen sind die Haelften von J
+            # (J = alpha*U_c + (1-alpha)*eta_c). Im Talpfad-Modus sind sie
+            # anhakbar, aber nicht voreingestellt - sonst waeren es neun
+            # Kurven. Im Geradenmodus stehen sie ohnehin immer im Bild.
+            box.setChecked(key not in ("uniformity_kombi", "crosstalk_kombi"))
+            if key in ("uniformity_kombi", "crosstalk_kombi"):
+                box.setToolTip(
+                    "Eine der beiden Haelften der Zielfunktion:\n"
+                    "  U_c = 0.5*(U_hart + U_w) + lambda*|U_hart - U_w|\n"
+                    "  eta_c analog, und J = alpha*U_c + (1-alpha)*eta_c.\n\n"
+                    "Im Schnitt entlang der GERADEN werden diese beiden\n"
+                    "zusammen mit J immer gezeigt - dort wirkt der Haken nicht.")
             self.trace_boxes[key] = box
             traces_grid.addWidget(box, position // 2, position % 2)
         valley_layout.addLayout(traces_grid)
 
-        traces_hint = QLabel(
-            "Je mehr Haken, desto mehr y-Achsen - mit allen sieben wird es voll. "
-            "Die Fuehrungsgroesse wird immer mitgezeichnet, auch ohne Haken."
-        )
+        self.traces_hint = QLabel("")
+        traces_hint = self.traces_hint
         traces_hint.setWordWrap(True)
         traces_hint.setStyleSheet("color: gray;")
         valley_layout.addWidget(traces_hint)
+
+        achsen_form = QFormLayout()
+        self.valley_max_axes = QSpinBox()
+        self.valley_max_axes.setRange(*report.MAX_CUT_AXES_RANGE)
+        self.valley_max_axes.setValue(report.MAX_CUT_AXES_DEFAULT)
+        self.valley_max_axes.setToolTip(
+            "Obergrenze fuer die Zahl der y-Achsen im Querschnitt.\n\n"
+            "Normalerweise buendelt der Plot selbst: Kurven mit derselben Einheit\n"
+            "und derselben Groessenordnung teilen sich eine Achse. Reicht das nicht,\n"
+            "werden hier zusaetzlich Gruppen zusammengelegt - zuerst solche mit\n"
+            "GLEICHER Einheit, denn das ist nur eine Frage der Skalierung.\n\n"
+            "J, U_c und eta_c stehen seit der Prozent-Darstellung von J ohnehin auf\n"
+            "EINER Achse; die Grenze ist dort nur die Absicherung.")
+        achsen_form.addRow("Maximale y-Achsen im Schnitt:", self.valley_max_axes)
+        valley_layout.addLayout(achsen_form)
+
+        marks_label = QLabel("Was ausser der Geraden in die 2D-Karten gezeichnet wird:")
+        valley_layout.addWidget(marks_label)
+
+        # Vier unabhaengige Schalter statt eines Sammelhakens: es sind vier
+        # verschiedene Aussagen, und wer nur die Verlaengerung weghaben will,
+        # soll dafuer nicht auch die Talpunkte verlieren.
+        self.mark_boxes = {}
+        marks_grid = QGridLayout()
+        beschriftung = {
+            "extension": ("Gerade ueber den gefitteten Bereich hinaus verlaengern",
+                          "Zeigt, wohin die lineare Beziehung fuehrt. Der\n"
+                          "verlaengerte Teil sieht aus wie der Rest der Geraden -\n"
+                          "er IST dieselbe Gerade - und bekommt keinen eigenen\n"
+                          "Legendeneintrag.\n\n"
+                          "Ohne Haken endet die Linie dort, wo der Fit endet."),
+            "dashed": ("den verlaengerten Teil gestrichelt zeichnen",
+                       "Setzt den verlaengerten Teil optisch ab: \"hier wurde\n"
+                       "nicht gefittet\". Der Preis ist eine zweigeteilte\n"
+                       "Gerade, deshalb nicht voreingestellt.\n\n"
+                       "Ohne die Verlaengerung ohne Wirkung."),
+            "path": ("Talpfad als Linie",
+                     "Der Weg der tatsaechlichen Minima. Beantwortet, wie krumm\n"
+                     "das echte Minimum gegenueber der Geraden laeuft.\n\n"
+                     "Die Linie bricht an den ausgelassenen Stellen ab, statt\n"
+                     "quer darueber hinwegzuziehen.\n\n"
+                     "Im Talpfad-Modus ohne Wirkung: dort IST der Pfad der Schnitt\n"
+                     "und wird immer gezeichnet."),
+            "used": ("benutzte Talpunkte markieren",
+                     "Die Punkte, die IN den Fit eingegangen sind - gefuellt, in\n"
+                     "der Farbe der Geraden. Zusammen mit dem naechsten Haken\n"
+                     "beantworten sie: worauf stuetzt sich die Gerade?"),
+            "unused": ("ausgelassene Talpunkte markieren",
+                       "Die Punkte, die herausgefallen sind: Randminima, ein\n"
+                       "abgesetzter Nebenzweig oder ein Kink am Rand. Offene\n"
+                       "dunkle Kreise, mit ihrer Zahl in der Legende - dieselbe\n"
+                       "Markierung wie im Querschnitt."),
+        }
+        for position, key in enumerate(report.MAP_MARK_KEYS):
+            text, tip = beschriftung[key]
+            box = QCheckBox(text)
+            box.setChecked(bool(report.MAP_MARKS_DEFAULT[key]))
+            box.setToolTip(tip)
+            self.mark_boxes[key] = box
+            marks_grid.addWidget(box, position, 0)
+        self.mark_boxes["extension"].toggled.connect(
+            lambda _b: self._sync_valley_options())
+        valley_layout.addLayout(marks_grid)
+
+        marks_hint = QLabel(
+            "Gilt fuer ALLE 2D-Karten - Metrik-Vergleich, Score-Karte und die "
+            "Karte im Schnittplot. Voreingestellt ist nur die Verlaengerung: das "
+            "ist das Bild fuers Dokument, die drei anderen sind die Herleitung."
+        )
+        marks_hint.setWordWrap(True)
+        marks_hint.setStyleSheet("color: gray;")
+        valley_layout.addWidget(marks_hint)
 
         self.valley_limit = QCheckBox(
             "Suchbereich einschraenken (sagen, wo der Talpfad gesucht wird)")
@@ -530,7 +591,6 @@ class PlotsDialog(QDialog):
         recombine_group.setLayout(recombine_layout)
         main_layout.addWidget(recombine_group)
         self._on_recombine_toggled(False)
-        self._sync_fit_line_style()
         self._sync_forbidden_state()
         self._sync_guide_state()
         self._fill_best_point_combo()
@@ -575,7 +635,8 @@ class PlotsDialog(QDialog):
         for widget in [self.valley_path_mode, self.valley_follow, self.valley_axis,
                        self.valley_select, self.valley_guide_follow,
                        self.valley_guide_halfwidth, self.valley_limit,
-                       self.valley_map_show_path,
+                       self.valley_max_axes,
+                       *self.mark_boxes.values(),
                        *self.trace_boxes.values()]:
             widget.setEnabled(bool(checked))
         self._sync_valley_fit_state()
@@ -713,22 +774,34 @@ class PlotsDialog(QDialog):
                     self.valley_follow.setCurrentIndex(index)
                     break
         moegliche_traces = report.available_trace_keys(self.loaded)
-        aktiv = self.do_valley.isChecked()
+        # Im Geradenmodus steht die Kurvenauswahl fest (J, U_c, eta_c) - die
+        # vier Einzelgroessen und die Amplituden stehen dort in der eigenen
+        # Panel-Datei. Die Haken waeren also wirkungslos und werden gesperrt,
+        # statt so zu tun, als taeten sie etwas.
+        geraden_modus = self._current_path_mode() == "line"
+        aktiv = self.do_valley.isChecked() and not geraden_modus
         for key, box in self.trace_boxes.items():
             verfuegbar = key in moegliche_traces
             box.setEnabled(aktiv and verfuegbar)
             if not verfuegbar:
                 box.setChecked(False)
                 box.setToolTip("In diesem Datensatz nicht enthalten.")
+        # "Talpfad als Linie" ist im Talpfad-Modus wirkungslos - dort IST der
+        # Pfad der Schnitt und wird immer gezeichnet.
+        self.mark_boxes["path"].setEnabled(
+            self.do_valley.isChecked() and geraden_modus)
+        # Ohne Verlaengerung gibt es nichts zu stricheln.
+        self.mark_boxes["dashed"].setEnabled(
+            self.do_valley.isChecked() and self.mark_boxes["extension"].isChecked())
+        self.traces_hint.setText(
+            "Im Geradenmodus fest: J, U_c und eta_c neben der Karte, dazu eine "
+            "eigene Datei ..._line_panels_....pdf mit den Schnitten aller sechs "
+            "Groessen der Uebersicht (r_x unten links wie dort). Die Haken "
+            "wirken deshalb nur im Talpfad-Modus."
+            if geraden_modus else
+            "Je mehr Haken, desto mehr y-Achsen - mit allen wird es voll. "
+            "Die Fuehrungsgroesse wird immer mitgezeichnet, auch ohne Haken.")
         self._sync_valley_fit_state()
-
-    def _sync_fit_line_style(self, _checked=None):
-        """Der Punktier-Haken ergibt nur Sinn, wenn ueberhaupt eine Gerade in
-        die Karten gezeichnet wird."""
-        an = self.fit_line_on_maps.isChecked()
-        self.fit_line_dashed.setEnabled(an)
-        if not an:
-            self.fit_line_dashed.setChecked(False)
 
     def _sync_forbidden_state(self, _checked=None):
         aktiv = self.forbidden_draw.isChecked() or self.forbidden_exclude.isChecked()
@@ -966,7 +1039,6 @@ class PlotsDialog(QDialog):
             best_point_follow=self._current_best_point_follow(),
             best_point_value=self.best_point_value.value(),
             fit_line_on_maps=self.fit_line_on_maps.isChecked(),
-            fit_line_dashed_extrapolation=self.fit_line_dashed.isChecked(),
             amplitude_maps=self.amplitude_maps.isChecked(),
             plot_amplitudes=self.plot_amplitudes.isChecked(),
             show=self.show_interactive.isChecked(),
@@ -980,7 +1052,9 @@ class PlotsDialog(QDialog):
             valley_follow=report.FOLLOW_CHOICES[self.valley_follow.currentIndex()][0],
             valley_axis=report.VALLEY_AXIS_CHOICES[self.valley_axis.currentIndex()][0],
             valley_traces=[key for key, box in self.trace_boxes.items() if box.isChecked()],
-            valley_map_show_path=self.valley_map_show_path.isChecked(),
+            valley_max_axes=int(self.valley_max_axes.value()),
+            map_marks=report.map_marks(
+                **{key: box.isChecked() for key, box in self.mark_boxes.items()}),
             valley_fit_line=self.valley_fit_line.isChecked(),
             valley_path_mode=self._current_path_mode(),
             valley_select=self._current_select(),
@@ -1052,7 +1126,6 @@ def main():
             best_point_follow=params["best_point_follow"],
             best_point_value=params["best_point_value"],
             fit_line_on_maps=params["fit_line_on_maps"],
-            fit_line_dashed_extrapolation=params["fit_line_dashed_extrapolation"],
             amplitude_maps=params["amplitude_maps"],
             forbidden_factor=(params["forbidden_factor"]
                               if (params["forbidden_draw"] or params["forbidden_exclude"])
@@ -1067,7 +1140,6 @@ def main():
             valley_axis=params["valley_axis"],
             valley_follow=params["valley_follow"],
             valley_traces=params["valley_traces"],
-            valley_map_show_path=params["valley_map_show_path"],
             valley_fit_line=params["valley_fit_line"],
             valley_path_mode=params["valley_path_mode"],
             valley_select=params["valley_select"],
@@ -1081,10 +1153,7 @@ def main():
         sys.exit(1)
 
     lines = [f"Auswertung fertig ({combine.KIND_LABELS.get(out['kind'], out['kind'])}).", ""]
-    # Der Tagesordner, in den dieser Lauf tatsaechlich geschrieben hat -
-    # nicht die Konstante, die beim Import galt.
-    lines.append(f"Plots: {out.get('plots_dir', paths.fit_plots_dir())}")
-    lines.append(f"Bericht: {out.get('results_dir', paths.FIT_RESULTS_DIR)}")
+    lines.append(f"Plots: {paths.FIT_PLOTS_DIR}")
     if params["forbidden_draw"] or params["forbidden_exclude"]:
         grenze = combine.forbidden_boundary(results, params["forbidden_factor"])
         lines.append("")

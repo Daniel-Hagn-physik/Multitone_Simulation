@@ -41,6 +41,7 @@ zweien - damit die Ergebnisse der drei Ordner direkt vergleichbar sind.
 import contextlib
 from datetime import date
 
+import re
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
@@ -230,6 +231,50 @@ ZWEI_PANEL_DICHTE = 0.70
 VALLEY_FIGSIZE = (11.4, 5.2)
 
 WORKING_POINT_LABEL = "Working point"
+
+WORKING_POINT_LINE_STYLE = dict(color="red", linewidth=1.2, linestyle="--",
+                                alpha=0.8)
+
+
+def working_point_label(best, at_edge=False):
+    """Legendentext des Arbeitspunkts: seine beiden Koordinaten, sonst nichts.
+
+    Wo er liegt, soll man ablesen koennen, ohne im Bericht nachzuschlagen.
+    Beide Koordinaten, auch wenn nur eine vorgegeben wurde - die andere kommt
+    aus der Geraden und ist genauso ein Ergebnis. Das Wort "Working point"
+    steht bewusst nicht davor: ein einzelner roter Stern ist selbsterklaerend,
+    und die Legende soll die Zahlen tragen.
+    """
+    if not best or best.get('width') is None or best.get('waist_um') is None:
+        return WORKING_POINT_LABEL + (" (at scan edge)" if at_edge else "")
+    text = (r"$\omega$ = %.3f $\mu$m, width = %.3f MHz"
+            % (best['waist_um'], best['width'] * 1e-6))
+    return text + " (at scan edge)" if at_edge else text
+
+
+def draw_working_point_line(ax, best, axis, label=True):
+    """Der Arbeitspunkt in einem KURVENplot: eine senkrechte Linie an seiner
+    Stelle auf der Schnittachse.
+
+    In einer Karte ist der Punkt ein Punkt; in einem Schnitt ueber den Waist
+    (oder ueber width) ist von ihm nur die eine Koordinate uebrig - also eine
+    Linie. Gibt zurueck, ob gezeichnet wurde.
+    """
+    if not best or best.get('width') is None:
+        return False
+    if axis == "width":
+        x = best['width'] * 1e-6
+    elif axis == "waist_um":
+        x = best.get('waist_um')
+    else:
+        x = best.get('win_input')
+        x = None if x is None else x * 1e3
+    if x is None or not np.isfinite(x):
+        return False
+    ax.axvline(x, label=(working_point_label(best, best.get('at_edge'))
+                         if label else "_nolegend_"),
+               **SD(WORKING_POINT_LINE_STYLE))
+    return True
 WIDTH_LABEL = "Width (MHz)"
 
 # ----------------------------------------------------------------------
@@ -378,7 +423,8 @@ def draw_best_point_marker(ax, results, win_axis, legend=True, best=None,
         x = _x_of_index(results, j, win_axis)
     am_rand = bool(best.get('at_edge'))
     stil = SD(BEST_POINT_EDGE_STYLE if am_rand else BEST_POINT_STYLE)
-    beschriftung = WORKING_POINT_LABEL + (" (at scan edge)" if am_rand else "")
+    best = _mit_waist_um(results, best)
+    beschriftung = working_point_label(best, am_rand)
     ax.plot([x], [best['width'] * 1e-6],
             label=(beschriftung if label else "_nolegend_"), **stil)
     handles, _ = ax.get_legend_handles_labels()
@@ -588,6 +634,16 @@ def _manual_point(results, follow, waist_um, width_mhz, win_input,
     )
 
 
+def _mit_waist_um(results, best):
+    """`waist_um` nachtragen, wo es fehlt - Legende und Bericht brauchen es
+    in jedem Fall, die Karten sind auf der µm-Achse beschriftet."""
+    if best is None or best.get('win_input') is None or 'waist_um' in best:
+        return best
+    best = dict(best)
+    best['waist_um'] = float(_waist_um(results, best['win_input']))
+    return best
+
+
 def best_point_by(results, follow=None, value=None, fit=None, value2=None):
     """Der beste Gitterpunkt nach einer frei gewaehlten Groesse.
 
@@ -671,6 +727,44 @@ def metric_panels(results):
         dict(key=u_key, cbar=U_CBAR, title=U_TITLE, cmap="viridis_r", scale=100.0),
         dict(key=c_key, cbar=C_CBAR, title=C_TITLE, cmap="Oranges", scale=100.0),
     ]
+
+
+def _label_laenge(text):
+    """Ungefaehre DARGESTELLTE Laenge eines Legendentextes.
+
+    Mathtext zaehlt anders als der Rohstring: "$\\omega$" sind neun Zeichen
+    im Code und eines im Bild. Ohne diese Korrektur waere jeder Eintrag mit
+    Formelzeichen viel zu lang geschaetzt.
+    """
+    s = re.sub(r"\\[a-zA-Z]+", "x", str(text))
+    return len(s.replace("$", "").replace("{", "").replace("}", ""))
+
+
+def legend_ncol(labels, max_chars=78, symbol_breite=6):
+    """Wie viele Legendeneintraege nebeneinander gesetzt werden.
+
+    Die Regel ist bewusst grob und in zwei Stufen:
+
+    1. Passt ALLES in eine Zeile (geschaetzte Breite <= `max_chars`), kommt
+       auch alles in eine Zeile.
+    2. Sonst ZWEI pro Zeile, zentriert. Drei waeren technisch oft noch
+       moeglich, aber eine Legende, die die Figur fast ausfuellt, liest sich
+       schlechter als zwei ruhige Spalten.
+
+    `symbol_breite` ist der Platz fuer Linie/Marker und den Abstand vor dem
+    Text, ebenfalls in Zeichen gerechnet.
+
+    Eins nur dann, wenn schon ein einzelner Eintrag breiter ist als die
+    Zeile - dann hilft auch Zweispaltigkeit nicht.
+    """
+    n = len(labels)
+    if n <= 1:
+        return max(1, n)
+    laengen = [_label_laenge(l) + symbol_breite for l in labels]
+    if sum(laengen) <= max_chars:
+        return n
+    zwei = sorted(laengen)[-2:]
+    return 2 if sum(zwei) <= max_chars else 1
 
 
 def log_ticks(vmin, vmax, max_ticks=7):
@@ -858,7 +952,7 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
             labels.append(R_CLAMP_LABEL)
         if handles:
             fig.legend(handles, labels, loc="outside lower center",
-                       ncol=min(3, len(handles)), framealpha=0.9)
+                       ncol=legend_ncol(labels), framealpha=0.9)
         dateiname = (f"{prefix}_metric_comparison_amp.pdf" if with_amplitudes
                      else f"{prefix}_metric_comparison.pdf")
         return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite)
@@ -1050,7 +1144,7 @@ def plot_point_cuts(results, prefix, best=None, out_dir=None,
         # Schriftgroesse kommt aus dokument_stil() - nicht noch einmal von
         # Hand setzen, sonst waere sie nicht mitskaliert.
         fig.legend(handles, labels, loc="outside lower center",
-                   ncol=min(3, len(handles)), framealpha=0.9)
+                   ncol=legend_ncol(labels), framealpha=0.9)
         return _finish(fig, out_dir, f"{prefix}_point_cuts.pdf", save, show,
                        confirm_overwrite)
 
@@ -1573,6 +1667,9 @@ def make_all(results, win_axis="before_lens", draw_best_point=True,
     stern = (best_point_by(results, best_point_follow, value=best_point_value,
                            fit=stern_fit, value2=best_point_value2)
              if draw_best_point else None)
+    # waist_um nachtragen: Legende und die senkrechte Linie im Schnitt
+    # brauchen es, best_point_by liefert es nur beim manuellen Punkt.
+    stern = _mit_waist_um(results, stern)
     out['best_point'] = stern
     if stern is not None and stern.get('outside'):
         print("Hinweis: der selbst gewaehlte Punkt liegt ausserhalb des "
@@ -1639,13 +1736,29 @@ def make_all(results, win_axis="before_lens", draw_best_point=True,
             select=valley_select, guide_follow=valley_guide_follow,
             guide_halfwidth=valley_guide_halfwidth,
             waist_range=valley_waist_range, width_range=valley_width_range,
-            map_show_path=valley_map_show_path)
+            map_show_path=valley_map_show_path,
+            draw_best_point=draw_best_point, best_point=stern)
         if braucht_fit:
             out['valley_line'] = fit_valley_line(
                 results, axis=valley_axis, follow=valley_follow,
                 select=valley_select, guide_follow=valley_guide_follow,
                 guide_halfwidth=valley_guide_halfwidth,
                 waist_range=valley_waist_range, width_range=valley_width_range)
+        if valley_path_mode == "line":
+            # Zweite Datei: dieselbe Gerade, aber jede Groesse der Uebersicht
+            # in einem eigenen Feld - in derselben Anordnung wie die Karten.
+            panels = plot_line_panels(
+                results, prefix, axis=valley_axis, follow=valley_follow,
+                out_dir=plots_dir, save=save, show=show,
+                confirm_overwrite=confirm_overwrite,
+                legend_fontsize=legend_fontsize, select=valley_select,
+                guide_follow=valley_guide_follow,
+                guide_halfwidth=valley_guide_halfwidth,
+                waist_range=valley_waist_range, width_range=valley_width_range,
+                draw_best_point=draw_best_point, best_point=stern,
+                show_extrapolated=valley_map_show_path)
+            if panels is not None:
+                out['plots']['line_panels'] = panels
     if point_cuts:
         if stern is None:
             print("Hinweis: kein Schnitt durch den Punkt - es ist kein Punkt "
@@ -2248,7 +2361,7 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
                     guide_follow=GUIDE_FOLLOW_DEFAULT,
                     guide_halfwidth=GUIDE_HALFWIDTH_DEFAULT,
                     waist_range=None, width_range=None,
-                    map_show_path=False):
+                    map_show_path=False, draw_best_point=True, best_point=None):
     """Querschnitt: links die Heatmap der Fuehrungsgroesse mit dem Pfad,
     rechts der Schnitt entlang dieses Pfads.
 
@@ -2398,6 +2511,9 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
                                 **SD(UNUSED_STYLE))
             if fit is not None:
                 draw_valley_line(ax_map, fit)
+        if draw_best_point:
+            draw_best_point_marker(ax_map, results, win_axis, legend=False,
+                                   label=True, best=best_point)
         # Ohne einen einzigen Eintrag gar keinen leeren Kasten zeichnen.
         if ax_map.get_legend_handles_labels()[0]:
             # Die Kartenlegende liegt bewusst IM Bild, ueber der Heatmap. Sie
@@ -2439,6 +2555,9 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
             if position > 0:
                 ax.spines["right"].set_color(achsen_farbe)
 
+        # Ohne Legendeneintrag: den traegt der Stern in der Karte links.
+        if draw_best_point:
+            draw_working_point_line(ax_cut, best_point, axis, label=False)
         ax_cut.set_xlabel(valley["x_label"])
         # Ueberschrift des rechten Panels. Im Geradenmodus ist der Schnitt
         # entlang der Fit-Geraden gelegt, im Talmodus entlang des Minimums -
@@ -2455,7 +2574,8 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
                       # Massstab, ein fester Bruchteil der Achsenhoehe schob die
                       # Legende sonst mitten in die x-Beschriftung.
                       bbox_to_anchor=(0.5, -(S(0.09) + 0.04)),
-                      ncol=min(4, len(linien)), framealpha=0.9)
+                      ncol=legend_ncol([ln.get_label() for ln in linien]),
+                      framealpha=0.9)
 
         pfad_tag = "line" if path_mode == "line" else "valley"
         dateiname = f"{prefix}_{pfad_tag}_{follow}_over_{axis}.pdf"
@@ -2636,12 +2756,14 @@ def _fit_line_through_valley(valley, win_axis):
         a, b = np.polyfit(t[keep], u[keep], 1)
         ss_res = float(np.sum((u[keep] - (a * t[keep] + b)) ** 2))
         r2 = 1.0 - ss_res / ss_tot
+        sigma_a, sigma_b = _fit_uncertainty(t[keep], u[keep], ss_res)
     else:
         # Entartet: alle verbliebenen Punkte haben denselben u-Wert. Dann ist
         # die Gerade waagerecht, und ein R² gibt es nicht. polyfit lieferte
         # hier sonst eine Steigung der Groessenordnung 1e-15 -
         # Rundungsrauschen, das im Bericht wie ein Ergebnis aussaehe.
         a, b, r2 = 0.0, float(np.mean(u[keep])), float("nan")
+        sigma_a = sigma_b = float("nan")
 
     raus = (~keep) & (~rand)                          # in Stufe 2/3 verworfen
     t_ends = np.array([float(np.min(t[keep])), float(np.max(t[keep]))])
@@ -2654,6 +2776,7 @@ def _fit_line_through_valley(valley, win_axis):
 
     return dict(
         a=float(a), b=float(b), r2=float(r2),
+        sigma_a=float(sigma_a), sigma_b=float(sigma_b),
         t_tex=t_tex, t_plain=t_plain, t_unit=t_unit,
         u_tex=u_tex, u_plain=u_plain, u_unit=u_unit,
         t_min=float(t_ends[0]), t_max=float(t_ends[1]),
@@ -2760,6 +2883,49 @@ def fit_valley_line(results, axis="waist_um", follow="score",
     return _fit_line_through_valley(valley, _VALLEY_AXIS_TO_WIN_AXIS[axis])
 
 
+def _fit_uncertainty(t, u, ss_res):
+    """Standardfehler von Steigung und Achsenabschnitt einer Geraden.
+
+    Die uebliche Formel der linearen Regression:
+
+        s^2    = SS_res / (n - 2)              (Reststreuung)
+        S_tt   = sum (t - mean(t))^2
+        sig_a  = sqrt(s^2 / S_tt)
+        sig_b  = sig_a * sqrt(sum t^2 / n)
+
+    Sie beschreibt, wie stark a und b schwanken wuerden, wenn man den Scan
+    mit gleichartigem Rauschen wiederholte - NICHT, wie gut die Gerade das
+    Problem beschreibt; dafuer steht R^2 daneben.
+
+    Weil die Talpunkte Ergebnisse einer Optimierung auf einem Gitter sind
+    und keine unabhaengigen Messungen, ist die Zahl eine untere Schranke.
+
+    nan bei weniger als drei Punkten - durch zwei geht eine Gerade exakt.
+    """
+    n = int(len(t))
+    if n < 3:
+        return float("nan"), float("nan")
+    S_tt = float(np.sum((t - np.mean(t)) ** 2))
+    if S_tt <= 0:
+        return float("nan"), float("nan")
+    s2 = float(ss_res) / (n - 2)
+    sigma_a = float(np.sqrt(s2 / S_tt))
+    sigma_b = float(sigma_a * np.sqrt(float(np.sum(np.asarray(t, float) ** 2)) / n))
+    return sigma_a, sigma_b
+
+
+def _mit_fehler(wert, sigma, stellen=6):
+    """'0.28316 +- 0.00440' - oder nur den Wert, wenn es keinen Fehler gibt.
+
+    Der Fehler bekommt zwei signifikante Stellen; mehr suggeriert eine
+    Genauigkeit, die eine Schaetzung aus wenigen Punkten nicht hat.
+    """
+    if sigma is None or not np.isfinite(sigma) or sigma <= 0:
+        return f"{wert:.{stellen}g}"
+    nk = max(0, int(-np.floor(np.log10(sigma))) + 1)
+    return f"{wert:.{nk}f} +- {sigma:.{nk}f}"
+
+
 def _r2_text(r2):
     return "n/a" if not np.isfinite(r2) else f"{r2:.4f}"
 
@@ -2772,6 +2938,20 @@ def valley_line_formula(fit, latex=False):
     zeichen = "-" if fit["b"] < 0 else "+"
     return (f"{u}/{fit['u_unit']} = {fit['a']:.5g} · {t}/{fit['t_unit']} "
             f"{zeichen} {abs(fit['b']):.5g}")
+
+
+def valley_line_formula_with_error(fit):
+    """Wie valley_line_formula, aber mit den Standardfehlern - fuer den
+    Bericht, wo Platz dafuer ist."""
+    zeichen = "-" if fit["b"] < 0 else "+"
+    a_txt = _mit_fehler(fit["a"], fit.get("sigma_a"), stellen=5)
+    b_txt = _mit_fehler(abs(fit["b"]), fit.get("sigma_b"), stellen=5)
+    if " +- " in a_txt:
+        a_txt = f"({a_txt})"
+    if " +- " in b_txt:
+        b_txt = f"({b_txt})"
+    return (f"{fit['u_plain']}/{fit['u_unit']} = {a_txt} · "
+            f"{fit['t_plain']}/{fit['t_unit']} {zeichen} {b_txt}")
 
 
 def _valley_selection_lines(fit):
@@ -2842,11 +3022,13 @@ def _valley_line_report_lines(fit, axis_label, path_mode="valley"):
         f"aufgetragen ueber {axis_label}:",
         "",
         "```",
-        valley_line_formula(fit),
+        valley_line_formula_with_error(fit),
         "```",
         "",
-        f"- Steigung a = {fit['a']:.6g} {fit['u_unit']}/{fit['t_unit']}",
-        f"- Achsenabschnitt b = {fit['b']:.6g} {fit['u_unit']}",
+        f"- Steigung a = {_mit_fehler(fit['a'], fit.get('sigma_a'))} "
+        f"{fit['u_unit']}/{fit['t_unit']}",
+        f"- Achsenabschnitt b = {_mit_fehler(fit['b'], fit.get('sigma_b'))} "
+        f"{fit['u_unit']}",
         f"- R² = {_r2_text(fit['r2'])}"
         + ("  (die verbliebenen Punkte liegen alle auf demselben Wert - eine "
            "Varianz, die eine Gerade erklaeren koennte, gibt es hier nicht)"
@@ -2858,6 +3040,20 @@ def _valley_line_report_lines(fit, axis_label, path_mode="valley"):
         f"Rand-Kink",
         "",
     ]
+    if np.isfinite(fit.get('sigma_a', float('nan'))):
+        lines += [
+            "Die angegebenen Fehler sind die Standardfehler der linearen "
+            "Regression (`s² = SS_res/(n-2)`, daraus `sigma_a = sqrt(s²/S_tt)`). "
+            "Sie sagen, wie stark a und b schwanken wuerden, wenn man den Scan "
+            "mit gleichartigem Rauschen wiederholte - NICHT, wie gut eine Gerade "
+            "das Problem beschreibt; dafuer steht R² daneben.",
+            "",
+            "**Sie sind eine untere Schranke.** Die Talpunkte sind Ergebnisse "
+            "einer Optimierung auf einem Gitter, keine unabhaengigen Messungen. "
+            "Gitterschrittweite und die Wahl der Fuehrungsgroesse verschieben die "
+            "Gerade um deutlich mehr, als hier herauskommt.",
+            "",
+        ]
     lines += _valley_selection_lines(fit)
     lines += [
         "",
@@ -2987,6 +3183,112 @@ def _interp_at(werte, koordinate, ziel):
     spanne = c[i] - c[i - 1]
     t = 0.0 if spanne == 0 else (ziel - c[i - 1]) / spanne
     return float((1.0 - t) * v[i - 1] + t * v[i])
+
+
+# ======================================================================
+# Panel-Plot: dieselben Karten, aber als Schnitte
+# ======================================================================
+# Anordnung EXAKT wie plot_metric_comparison(with_amplitudes=True), also
+# Uniformity und Crosstalk oben, r_x und r_y unten - nur steht in jedem Feld
+# der SCHNITT entlang der Geraden statt der Karte. Wer die beiden Dateien
+# nebeneinander legt, findet jede Groesse an derselben Stelle.
+#
+# Welche Karte zu welcher Kurve gehoert, sagt diese Tabelle: die Karten sind
+# ueber Gitternamen definiert, die Kurven ueber TRACE_SPECS-Schluessel.
+_PANEL_KEY_TO_TRACE = {
+    "uniformity_grid": "uniformity",
+    "uniformity_weighted_grid": "uniformity",
+    "crosstalk_grid": "crosstalk",
+    "eta_weighted_grid": "crosstalk",
+    "r_x_grid": "r_x",
+    "r_y_grid": "r_y",
+}
+
+
+def line_panels(results):
+    """Die Felder des Panel-Plots, in der Reihenfolge der Metrik-Karten."""
+    felder = list(metric_panels(results))
+    amp = amplitude_panels(results)
+    if amp is not None:
+        felder = felder + amp
+    verfuegbar = available_trace_keys(results)
+    raus = []
+    for panel in felder:
+        key = _PANEL_KEY_TO_TRACE.get(panel["key"])
+        if key is None or key not in verfuegbar:
+            continue
+        # Die y-Achse traegt nur das Symbol; was die Groesse ist, sagt der
+        # Titel darueber. Zweimal derselbe Name im selben Feld kostet nur
+        # Platz.
+        einheit = TRACE_SPECS[key][1]
+        ylabel = TRACE_SPECS[key][0] + (f" [{einheit}]" if einheit else "")
+        raus.append(dict(trace=key, title=panel["title"], ylabel=ylabel))
+    return raus
+
+
+def plot_line_panels(results, prefix, axis="waist_um", follow="score",
+                     out_dir=None, save=True, show=False, confirm_overwrite=None,
+                     legend_fontsize=9, select="global",
+                     guide_follow=GUIDE_FOLLOW_DEFAULT,
+                     guide_halfwidth=GUIDE_HALFWIDTH_DEFAULT,
+                     waist_range=None, width_range=None, path=None,
+                     draw_best_point=True, best_point=None,
+                     show_extrapolated=False):
+    """Jede Groesse der Uebersicht als Schnitt entlang der Geraden.
+
+    `path`: fertiges Ergebnis von extract_line_cut() - sonst wird es selbst
+    geholt. Der Aufrufer reicht es durch, damit Gerade und Schnitt in beiden
+    Dateien garantiert dieselben sind.
+
+    Gibt None zurueck, wenn der Datensatz keine der Groessen hergibt.
+    """
+    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
+    if path is None:
+        path = extract_line_cut(results, axis=axis, follow=follow, select=select,
+                                guide_follow=guide_follow,
+                                guide_halfwidth=guide_halfwidth,
+                                waist_range=waist_range, width_range=width_range)
+    felder = line_panels(results)
+    if not felder:
+        return None
+
+    x = np.asarray(path["x"], dtype=float)
+    extrap = (np.asarray(path["extrapolated"], dtype=bool) if show_extrapolated
+              else np.zeros(len(x), dtype=bool))
+
+    n_rows = (len(felder) + 1) // 2
+    figsize = HALF_PAGE_FIGSIZE if n_rows >= 2 else ROW_FIGSIZE
+    with dokument_stil(figsize[0], legend_fontsize=legend_fontsize):
+        fig, axes = plt.subplots(n_rows, 2, figsize=figsize, sharex="all",
+                                 squeeze=False, constrained_layout=True)
+        for ax, feld in zip(axes.flat, felder):
+            y = np.asarray(path["values"][feld["trace"]], dtype=float)
+            ax.plot(x, y, color=TRACE_SPECS[feld["trace"]][2], linewidth=S(1.6))
+            if extrap.any():
+                ax.plot(x[extrap], y[extrap], **SD(EXTRAPOLATED_MARKER))
+            if draw_best_point:
+                # In jedem Feld dieselbe Stelle - so liest man alle Werte am
+                # Arbeitspunkt in einem Blick ab.
+                draw_working_point_line(ax, best_point, axis,
+                                        label=(ax is axes.flat[0]))
+            ax.set_ylabel(feld["ylabel"])
+            ax.set_title(feld["title"])
+            ax.grid(True, alpha=0.25)
+        for ax in axes.flat[len(felder):]:
+            ax.set_visible(False)
+        for ax in axes[-1, :]:
+            ax.set_xlabel(path["x_label"])
+
+        handles, labels = axes.flat[0].get_legend_handles_labels()
+        if extrap.any():
+            handles.append(plt.Line2D([], [], **SD(EXTRAPOLATED_MARKER)))
+            labels.append(f"extrapolated ({int(extrap.sum())})")
+        if handles:
+            fig.legend(handles, labels, loc="outside lower center",
+                       ncol=legend_ncol(labels), framealpha=0.9)
+
+        dateiname = f"{prefix}_line_panels_over_{axis}.pdf"
+        return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite)
 
 
 def extract_line_cut(results, axis="waist_um", follow="score", fit=None,

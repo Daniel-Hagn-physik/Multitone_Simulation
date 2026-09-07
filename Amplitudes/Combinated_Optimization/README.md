@@ -4,7 +4,7 @@
 Schritt in `ANLEITUNG.md`.** Dieses Dokument beschreibt, was die Verfahren
 rechnen und wie der Code aufgebaut ist.
 
-Fuenf Skripte zum Ausfuehren, ein Ordner `lib/` mit dem, was sie benutzen.
+Vier Skripte zum Ausfuehren, ein Ordner `lib/` mit dem, was sie benutzen.
 
 ## Was will ich gerade?
 
@@ -14,9 +14,8 @@ Fuenf Skripte zum Ausfuehren, ein Ordner `lib/` mit dem, was sie benutzen.
 | pruefen, **ob mein vorhandener Weighted-Datensatz auch im Hard Case gut ist** | `run_hard_check.py` |
 | **vorhandene Datensaetze plotten** und den Bericht (neu) erzeugen | `run_plots.py` |
 | **einen einzelnen Parametersatz suchen**: einen Teil der Groessen vorgeben, die uebrigen gegen die Penalty optimieren lassen (kein Gitter) | `run_penalty_only.py` |
-| **einen EINZELNEN Strahl** ueber dem Waist durchrechnen (kein Tonarray, kein width, keine Amplituden) | `run_single_beam.py` |
 
-Alle fuenf oeffnen einen Dialog, in dem die Parameter stehen. Nichts muss
+Alle vier oeffnen einen Dialog, in dem die Parameter stehen. Nichts muss
 im Code geaendert werden.
 
 **Welchen Datensatz?** `run_plots.py` und `run_hard_check.py` zeigen im
@@ -101,6 +100,7 @@ Erkennt automatisch, welche Art Datensatz vorliegt, und erzeugt in
 | `..._score_scatter.pdf` (gewichtet vs. hart je Gitterpunkt) | - | x |
 | `..._valley_{X}_over_{Y}.pdf` (Querschnitt entlang des Minimums) | x | x |
 | `..._line_{X}_over_{Y}.pdf` (Querschnitt entlang der Geraden) | x | x |
+| `..._line_panels_over_{Y}.pdf` (die sechs Groessen einzeln, entlang der Geraden) | x | x |
 | `..._Report.md` (alle Kennzahlen) | x | x |
 | 6-Panel-Uebersicht + Schnitte (PNG, optional) | x | x |
 
@@ -290,22 +290,6 @@ gescannten Fenster (dieselbe Physik, anderer Scan-Bereich, andere Zahlen);
 und er hebt die atom-gewichteten Groessen um das Fuenf- bis Zehnfache an,
 weil deren rohe Spannen 4-7 pp betragen gegen 41 pp bei U_hart.
 
-**J wird in Prozent gezeigt.** J ist eine Kombination von `Uniformity` und
-`Crosstalk`, also relativer Groessen, und hat damit dieselbe Einheit wie sie.
-Karte, Querschnitt und Bericht zeigen es deshalb wie U und eta in Prozent -
-und nur so kann es ueberhaupt mit ihnen auf eine gemeinsame y-Achse kommen,
-wenn es in derselben Groessenordnung liegt: `group_traces_by_axis()` trennt
-zuerst nach EINHEIT und erst danach nach Groessenordnung. Vorher stand J
-dimensionslos daneben (0.046 statt 4.6 %) und bekam zwangslaeufig immer eine
-eigene Achse. Hard_Optimization und Weighted_Optimization halten es seit
-jeher so.
-
-Das Wort **"roh"** bezieht sich weiterhin auf die fehlende gitterweite
-Normierung, nicht auf die Einheit. Wo der rohe Zahlenwert zum Vergleich mit
-der Konsolenausgabe des Optimierers gebraucht wird - Bestpunkt und
-Region-Schwellwert im Bericht -, steht er in Klammern daneben
-(`J (Score) = 4.387% (roh 0.04387)`).
-
 Der Schluessel im gespeicherten dict heisst weiterhin `combined_score`
 (Dateiformat), traegt aber jetzt J; neue Datensaetze bekommen zusaetzlich
 `score_is_raw=True`. **Aeltere Dateien tragen dort noch den normierten
@@ -362,13 +346,27 @@ width = 0.200 MHz, dem unteren Fensterrand (41x41: 1.3400 mm, 21x21:
 Bestpunkt sucht, braucht einen Scan mit groesserem width-Bereich oder
 schliesst den verbotenen Bereich aus.
 
-**Kurven im Querschnitt.** `TRACE_ORDER` fuehrt acht Groessen; voreingestellt
-sind alle ausser `combined` (dem NORMIERTEN Score `S`). Gezeigt wird
-stattdessen `penalty_raw` = `J`, die Zielfunktion der Optimierung, roh und
-nicht in Prozent. `J` erbt dabei das Schwarz, das vorher `S` hatte, damit der
-auf Farbabstand gepruefte 7er-Satz im Regelfall unveraendert bleibt; `S`
-bekommt Dunkelgrau (#555555, dE = 36 zu Schwarz, normalsichtig wie unter
-Deuteranopie) und erscheint nur, wenn man es zusaetzlich anhakt.
+**Kurven im Querschnitt.** `TRACE_ORDER` fuehrt neun Groessen. Gezeigt wird
+als Score `penalty_raw` = `J`, die Zielfunktion der Optimierung; der frueher
+ebenfalls angebotene NORMIERTE Score ist am 2026-09-01 ersatzlos entfallen.
+`J` traegt dabei das Schwarz des Satzes.
+
+**`J` wird in Prozent gezeigt (2026-09-07).** Bis dahin stand es roh im Bild
+(0.058 statt 5.8 %), mit der Begruendung, es trage eine eigene Einheit. Das
+stimmt nicht: `J = alpha*U_c + (1-alpha)*eta_c` ist eine Linearkombination
+zweier Bruchteile und damit selbst einer. Roh gezeigt brauchte es
+zwangslaeufig eine eigene y-Achse - in Prozent steht es auf DERSELBEN wie
+`U_c` und `eta_c`, und aus drei Kurven auf zwei Achsen wird eine Achse.
+
+Umgestellt ist es ueberall, damit nicht zwei `J`-Skalen nebeneinander stehen:
+Schnittkurven, die Colorbar der Score-Karte (`plot_region`), die Colorbar der
+Karte im Talschnitt und der Bericht (bester Punkt und Wertetabelle). Auch
+`U_c`/`eta_c` stehen im Bericht jetzt in Prozent statt roh.
+
+Die Karte im Talschnitt skaliert seitdem generell wie die Kurve daneben: ist
+die Fuehrungsgroesse eine Prozentgroesse, zeigt auch die Colorbar Prozent.
+Vorher stand dort 0.01, wo die Kurve daneben 1.0 % zeigte - dieselbe Groesse
+in zwei Einheiten im selben Bild.
 
 **Der Airy-Skalenfaktor ist einstellbar (2026-09-01).** `first_zero_radius =
 airy_scale_factor * waist` - der Faktor setzt die physikalische Spotgroesse
@@ -468,16 +466,12 @@ und Anzahl betroffener Punkte.
 
 **Die Gerade in den Metrik-Karten.** Der Haken "Gerade auch in den
 Metrik-Vergleich einzeichnen" in der Gruppe *Darstellung* zeichnet dieselbe
-Gerade zusaetzlich in alle vier Karten von `..._metric_comparison.pdf`, als
-EINE durchgezogene Linie ueber den ganzen gescannten Bereich (auf den
-gescannten width-Bereich beschnitten). Eine Gerade ist eine Gerade; aus
-welchem Bereich sie bestimmt wurde, steht im Bericht und nicht im
-Linienformat. Wer den Unterschied doch im Bild haben will, setzt den Haken
-*... ausserhalb des Fit-Bereichs gepunktet statt durchgezogen*: dann wird sie
-zweiteilig gezeichnet, durchgezogen im gefitteten Bereich und gepunktet in
-der Verlaengerung. Der gepunktete Teil bekommt bewusst KEINEN eigenen
-Legendeneintrag - der Unterschied steckt im Linienformat, nicht in einem
-zweiten Kasten. Welche Groesse gefittet wird, bestimmt
+Gerade zusaetzlich in alle vier Karten von `..._metric_comparison.pdf` -
+durchgezogen im gefitteten Bereich, gepunktet in der Extrapolation, auf den
+gescannten width-Bereich beschnitten. Der extrapolierte Teil bekommt dabei
+KEINEN eigenen Legendeneintrag: der Unterschied zwischen Fit und
+Verlaengerung steckt im Linienformat, nicht in einem zweiten Kasten. Wie weit
+gefittet wurde, steht im Bericht. Welche Groesse gefittet wird, bestimmt
 "Groesse fuer Talpfad/Gerade" in der Talschnitt-Gruppe. Die Gerade ist immer
 die ueber dem effektiven Waist in µm; auf der mm-Achse erscheint sie deshalb
 leicht gekruemmt, weil win_input und effektiver Waist nichtlinear
@@ -544,10 +538,208 @@ sagt, warum.
   gezaehlt). Zum Vergleich bleibt der echte Talpfad blass im Bild. Datei
   `..._line_...pdf`.
 
+**Der Geradenmodus zeigt drei Kurven, nicht sieben (2026-09-07).** Neben der
+Karte standen frueher alle angehakten Groessen - bis zu sieben Kurven auf vier
+gestaffelten y-Achsen. Das war nicht mehr zu lesen. Dort stehen jetzt fest die
+Zielgroesse und ihre beiden Haelften:
+
+```
+U_c = 0.5*(U_hart + U_w) + combo_lambda*|U_hart - U_w|
+eta_c analog,   J = alpha*U_c + (1-alpha)*eta_c
+```
+
+`U_c` und `eta_c` sind beide in %, teilen sich also eine Achse - macht **zwei**
+y-Achsen statt vier. Die beiden werden wie `penalty_raw` aus den gespeicherten
+ROHEN Gittern nachgerechnet (`report._grid_for`), kosten also keinen neuen Scan
+und gibt es auch fuer aeltere Datensaetze. Als Kurven sind sie im Talpfad-Modus
+anhakbar, aber nicht voreingestellt.
+
+**Und daneben: dieselben sechs Felder wie die Metrik-Uebersicht, nur als
+Schnitte.** Datei `..._line_panels_over_{Y}.pdf`, seitenfuellend auf A4 wie der
+6-Karten-Plot und in genau derselben Anordnung - `U_h` oben links, `U_w` oben
+rechts, `eta_h` und `eta_w` in der Mitte, `r_x` unten links, `r_y` unten
+rechts. Wo dort die Karte steht, steht hier der Schnitt entlang der Geraden.
+Jedes Feld hat seine eigene y-Achse, also gibt es das Staffel-Problem gar
+nicht erst. Extrapolierte Stellen sind mit offenen Kreisen markiert, wie in
+der Karte.
+
+An den y-Achsen dieser sechs Felder steht nur das Symbol - `$U_h$ (%)`,
+`$U_w$ (%)`, `$\eta_h$ (%)`, `$\eta_w$ (%)`, `$r_x$`, `$r_y$`. Was die Groesse
+ist, sagt schon der Titel darueber ("Uniformity (hard mask)"); den
+ausgeschriebenen Namen zweimal ins selbe Feld zu schreiben kostet nur Platz.
+
+Die Datei entsteht automatisch, sobald "Schnitt entlang: Gerade" gewaehlt ist.
+
+**Zwei Schalter fuer den Schnitt daneben:**
+
+- **"Maximale y-Achsen im Schnitt"** (Vorgabe 2, Bereich 1-5). Normalerweise
+  buendelt `group_traces_by_axis` selbst - gleiche Einheit, gleiche
+  Groessenordnung, eine Achse. `_limit_axis_count` legt zusaetzlich Gruppen
+  zusammen, bis die Grenze eingehalten ist: zuerst zwei Gruppen mit GLEICHER
+  Einheit (das ist nur eine Frage der Skalierung), erst danach verschiedene.
+  Fuer `J`/`U_c`/`eta_c` greift die Grenze seit der Prozent-Darstellung gar
+  nicht mehr - sie ist die Absicherung, nicht der Normalfall.
+- **Die Gerade heisst in JEDER 2D-Karte "Linear fit"** (`report.FIT_LINE_LABEL`)
+  - Metrik-Karten, Score-Karte und die Karte im Schnittplot. Dort stand vorher
+  "cut along the fitted line (33/41 pts)" bzw. "Linear model fit"; die Zahl der
+  benutzten Punkte gehoert in den Bericht, nicht in die Legende.
+
+**Was ausser der Geraden in die 2D-Karten kommt - vier Schalter.**
+`report.MAP_MARK_KEYS` / `MAP_MARKS_DEFAULT`, im Dialog vier Haken. Es sind
+bewusst VIER und nicht einer, weil es vier verschiedene Aussagen sind:
+
+| Schalter | Vorgabe | was er zeichnet |
+|---|---|---|
+| `extension` | **an** | die Gerade ueber den gefitteten Bereich hinaus |
+| `dashed` | aus | diesen verlaengerten Teil gestrichelt statt durchgezogen |
+| `path` | aus | den Talpfad als Linie, an den ausgelassenen Stellen abbrechend |
+| `used` | aus | die Talpunkte, die IN den Fit eingegangen sind (gefuellt) |
+| `unused` | aus | die herausgefallenen Talpunkte (offene Kreise, mit Zahl) |
+
+Die Verlaengerung sieht seit dem 2026-09-07 aus wie der Rest der Geraden - sie
+IST dieselbe Gerade. Vorher war sie fest gepunktet; das sagte zwar "hier wurde
+nicht gefittet", machte die Gerade aber optisch zweiteilig. Wer die Aussage
+braucht, setzt `dashed`.
+
+Sie gelten fuer ALLE 2D-Karten - Metrik-Vergleich, Score-Karte und die Karte
+im Schnittplot -, damit ein Dokument nicht zwei Bildsprachen mischt.
+Voreingestellt ist nur die Verlaengerung: das ist das Bild fuers Dokument, die
+drei anderen sind die Herleitung. `report.map_marks(**kwargs)` baut das dict
+und wirft bei unbekannten Namen einen `ValueError` - ein vertippter Schalter
+soll nicht stillschweigend nichts tun.
+
+Zwei Sonderfaelle: im Talpfad-Modus ist `path` wirkungslos (dort IST der Pfad
+der Schnitt und wird immer gezeichnet), und die Score-Karte bekommt die Gerade
+ueberhaupt erst, seit sie `fit_line` durchgereicht bekommt.
+Die Kurven-Haken im Dialog sind dann grau - sie wirken nur noch im
+Talpfad-Modus, wo die alte Fassung mit freier Kurvenauswahl unveraendert
+bleibt.
+
 Im Geradenmodus wird die Gerade immer bestimmt - sie ist ja der Schnitt
 selbst; der Haken "Gerade durch den Talpfad legen" ist dort gesetzt und
 gesperrt. Laesst sich fuer die gewaehlte Groesse keine Gerade legen, sagt der
 Dialog das VOR dem Start, statt mitten in der Auswertung abzubrechen.
+
+**Die Waist-Achse heisst "Waist in the atomic plane" (2026-09-07).** Frueher
+stand dort `Waist at focus $\omega'$ ($\mu$m, after lenses)`. Der Strich an
+omega sollte "nach der Linse" heissen, sagte das aber nur dem, der die
+Konvention schon kennt - im Fliesstext eines Dokuments liest er sich wie eine
+Ableitung. Jetzt: `Waist in the atomic plane $\omega$ ($\mu$m)`, ohne Strich,
+und die Sache steht im Namen statt in einem Zeichen. Der Text liegt als
+`report.WAIST_UM_LABEL` an genau einer Stelle und gilt fuer alle Plots -
+Karten, Region, Talschnitt, Panel-Plot. Der Input-Waist vor den Linsen heisst
+unveraendert `$\omega_{\mathrm{in}}$` (`report.WIN_INPUT_LABEL`).
+
+**Einheiten stehen in eckigen Klammern (2026-09-07).** `Width [MHz]`,
+`Waist in the atomic plane $\omega$ [$\mu$m]`, `$U_h$ [%]` - in allen Plots,
+an Achsen wie an Colorbars. Runde Klammern bleiben den ERKLAERUNGEN
+vorbehalten, die keine Einheit sind: `(hard mask)`, `(atom-weighted)`,
+`(raw, lower is better)`, `(before lenses)`, `(log)`. Dimensionslose Groessen
+- `J`, `r_x`, `r_y` - bekommen gar keine Klammer.
+
+**Der Querschnitt hat dieselbe Schrift wie die Karten (2026-09-07).** Er war
+11.4 Zoll breit und wurde im Dokument auf 55 % geschrumpft, waehrend die
+Kartenplots seit dem A4-Umbau 1:1 ankommen - nebeneinander im selben Dokument
+sah das aus wie zwei Schriftgroessen. Jetzt `CUT_FIGSIZE = (6.3, 3.9)` Zoll und
+`MAP_STYLE` wie die Karten.
+
+**Die y-Achsen im Querschnitt sind schwarz.** Sie trugen frueher die Farbe
+ihrer Kurve (abgedunkelt ueber `_achsenfarbe`), was Achse und Kurve zuordnete -
+bei mehreren Achsen aber ebenso viele verschiedenfarbige Beschriftungen ergab.
+In einem Schriftsatz ist das unruhig, und die Zuordnung leistet die Legende
+ohnehin. `_achsenfarbe` und `MULTI_TRACE_AXIS_COLOR` sind damit entfallen.
+
+**Der markierte Punkt steht in ALLEN Plots (2026-09-07).** Frueher zeigten ihn
+nur die Metrik-Karten und die Score-Karte. Jetzt auch:
+
+- die Karte im Schnittplot - als Stern, wie in jeder anderen Karte;
+- der Querschnitt daneben - als senkrechte Linie an seiner Stelle auf der
+  Schnittachse (in einem Schnitt ist von einem Punkt nur die eine Koordinate
+  uebrig, also eine Linie);
+- alle sechs Felder des Panel-Plots - dieselbe Linie an derselben Stelle, so
+  liest man die sechs Werte am Arbeitspunkt in einem Blick ab.
+
+**Die Legende nennt seine Koordinaten und sonst nichts**: `omega = 1.262 µm,
+width = 0.370 MHz`. Beide, auch wenn nur eine davon vorgegeben wurde - die
+andere kommt aus der Geraden und ist genauso ein Ergebnis. Das Wort "Working
+point" steht bewusst NICHT davor: der rote Stern ist in einer Karte mit genau
+einem Stern selbsterklaerend, und die Legende soll die Zahlen tragen, nicht
+eine Bezeichnung fuer sie. (`WORKING_POINT_LABEL` bleibt als Rueckfallwert
+fuer den Fall, dass der Punkt keine Koordinaten hat.)
+
+Dafuer traegt jeder Punkt jetzt `waist_um` mit (`report._mit_waist_um`);
+vorher hatte ihn nur der manuell gesetzte Punkt, und die Legende haette bei
+den anderen `nan` angezeigt.
+
+**Die einzelnen extrapolierten Stuetzstellen** - die offenen Kreise auf der
+Geraden bzw. auf den Schnittkurven - erscheinen nur noch, wenn auch die
+Talpunkte eingeschaltet sind (`used`/`unused`). Sie gehoeren zur Herleitung;
+im fertigen Bild unterbrechen sie eine sonst glatte Linie ohne Gewinn. Das
+gilt fuer den Schnittplot wie fuer den Panel-Plot.
+
+**Die Colorbar der Karte im Schnittplot traegt ihre Einheit** (`... [%]`),
+seit die Karte wie die Kurve daneben in Prozent skaliert - vorher standen dort
+Prozentzahlen ohne Prozentzeichen.
+
+Der Schnittplot hat **zwei** Legenden, je eine unter ihrem Panel: Karte und
+Querschnitt zeigen verschiedene Dinge, und in einem gemeinsamen Kasten muss der
+Leser erst sortieren, was wohin gehoert. Die Karte ist schmaler, ihre Legende
+deshalb einspaltig; die des Querschnitts nimmt bis zu drei Spalten.
+
+`CUT_FIGSIZE = (6.3, 3.6)` und `CUT_WIDTH_RATIOS = [1.0, 1.0]` sind nicht
+geschaetzt, sondern an den uebrigen Plots GEMESSEN. Eine Achse ist dort:
+
+| Plot | Achse (Zoll) | Breite/Hoehe |
+|---|---|---|
+| 2x2-Karten | 2.04 x 2.34 | 0.87 |
+| 3x2-Karten | 2.00 x 2.37 | 0.84 |
+| Panel-Schnitte | 2.35 x 2.50 | 0.94 |
+| **Schnittplot** | **2.03 x 2.40** | **0.84** |
+
+Vorher stand hier 4.0 Zoll bei 1 : 1.15, was 1.81 x 2.75 Zoll ergab
+(Breite/Hoehe 0.66) - sichtbar hochkant gegenueber allen anderen Plots. Beim
+Formatieren solcher Figuren lohnt es, die Achsenmasse mit
+`ax.get_position()` gegen die anderen Plots zu HALTEN, statt die Figurhoehe zu
+raten: der Aufbau des Schnittplots (Colorbar auf der einen, y-Achse auf der
+anderen Seite) frisst rund 2.3 Zoll Breite, die in einer reinen Kartenfigur
+nicht anfallen.
+
+**Die x-Achse traegt dort die Kurzform** `Waist $\omega$ [$\mu$m]`
+(`report.short_axis_label`). Bei Textbreite bleiben zwei Panels nebeneinander
+rund 2.5 Zoll breit - der ausgeschriebene Name lief ueber den Figurrand hinaus,
+gemessen fiel das schliessende "]" weg. In den einzeln stehenden Karten steht
+weiterhin der volle Name.
+
+**Der Bericht listet alle Werte am markierten Punkt** - `U_h`, `U_w`,
+`eta_h`, `eta_w`, `U_c`, `eta_c`, `r_x`, `r_y` und `J`, bilinear interpoliert
+UND am naechstgelegenen Gitterpunkt. `U_c`/`eta_c` sind seit dem 2026-09-07
+dabei (`POINT_VALUE_KEYS`).
+
+**Der Geradenfit bringt seine Unsicherheit mit (2026-09-07).** `sigma_a` und
+`sigma_b` stehen im Fit-dict und im Bericht (`a = 0.2949 +- 0.0023`), berechnet
+mit der ueblichen Formel der linearen Regression - gegengeprueft gegen
+`np.polyfit(..., cov=True)`, Abweichung in der sechsten Stelle:
+
+```
+s²    = SS_res / (n - 2)
+sig_a = sqrt(s² / S_tt),   S_tt = sum (t - mean t)²
+sig_b = sig_a * sqrt(sum t² / n)
+```
+
+Der Bericht sagt dabei ausdruecklich, was die Zahl NICHT ist. Die Talpunkte
+sind Ergebnisse einer Optimierung auf einem Gitter, keine unabhaengigen
+Messungen - die Streuung durch Gitterschrittweite und Wahl der Fuehrungsgroesse
+ist um ein Vielfaches groesser: am 41x41-Datensatz liegen 0.196 (globales
+Minimum) und 0.283 (gefuehrt) auseinander, bei sigma_a von rund 0.004. Die
+Fehlerangabe ist damit eine untere Schranke, kein Gesamtfehler.
+
+**Die Legende bricht auf zwei Eintraege pro Zeile um**, sobald eine Zeile zu
+voll wird (`report.legend_ncol`). Die Regel ist zweistufig: passt alles in eine
+Zeile, kommt alles in eine Zeile; sonst zwei, zentriert. Geschaetzt wird ueber
+die DARGESTELLTE Zeichenzahl - `_label_laenge` rechnet Mathtext heraus, weil
+`$\omega$` neun Zeichen im Code und eines im Bild ist. Ohne das waere jeder
+Eintrag mit Formelzeichen viel zu lang geschaetzt und die Legende immer
+einspaltig.
 
 **Aussehen der PDFs.** Alle Plots dieses Ordners sind auf einen LaTeX-Satz
 ausgelegt: englische Beschriftungen, knappe Titel, Serifenschrift mit
@@ -685,213 +877,6 @@ Ergebnis ueberhaupt sein kann.
 
 ---
 
-## 5. `run_single_beam.py` - ein einzelner Strahl ueber dem Waist
-
-Kein Tonarray, sondern EIN Strahl. Vorgegeben wird ein Waistbereich -
-wahlweise vor der ersten Linse in mm oder in der Atomebene in µm -, heraus kommen
-Uniformity und Crosstalk ueber dem Waist, in allen drei Metrik-Familien.
-
-**Warum es hier weder width noch r_x/r_y gibt.** Beides ist bei einem Ton
-nicht definiert: `width` spannt nichts auf (die harte Uniformity-Region der
-Multitone-Skripte ist das Quadrat, das die Spot-Zentren aufspannen - ein
-einzelner Punkt spannt kein Quadrat auf), und ein Aussen/Innen-Verhaeltnis
-braucht mindestens zwei Toene je Achse.
-
-**Was an die Stelle des Ton-Quadrats tritt.** Eine KREISREGION mit frei
-einstellbarem Radius (Default 1 µm) um die Site - die Beam-Pointing-Region:
-das Atom kann irgendwo in diesem Kreis sitzen. Sie traegt die Uniformity:
-
-```
-U_h   = std(I) / mean(I)               ueber dem Kreis
-eta_h = sum(I_nachbar) / sum(I_eigen)  ueber der gewaehlten Region
-```
-
-**Die Crosstalk-Region ist waehlbar** (`hard_crosstalk_region`, im Dialog
-eine Auswahlliste):
-
-- `"kreis"` - derselbe Kreis. Beide harten Groessen sagen dann
-  etwas ueber dieselbe Flaeche aus.
-- `"pitch"` - das Pitch-Quadrat mit Seitenlaenge `pitch`, also genau die
-  Region, die `_build_masks()` im Multitone-Optimierer fuer den Crosstalk
-  ausschneidet. Damit ist `eta_h` direkt mit den Multitone-Scans
-  vergleichbar - bezieht sich dann aber auf eine ANDERE Flaeche als die
-  Uniformity daneben. Bericht und Plot-Titel nennen beide Regionen, und der
-  Dateiname bekommt `_pitchbox`, damit sich die beiden Faelle nicht
-  ueberschreiben.
-- `"beide"` (Default) - beide in EINEM Lauf. Der Datensatz bekommt dann zwei Kurven,
-  `crosstalk_hart_kreis` und `crosstalk_hart_pitch`; die harte Figur zeigt
-  sie als `eta_h^circ` und `eta_h^box` neben derselben Uniformity. Die
-  haengt gar nicht an der Crosstalk-Region und wird deshalb nur EINMAL
-  gerechnet; die beiden Crosstalks laufen ueber ihre je eigenen Gitter.
-
-  Die beiden Kurven teilen sich IMMER eine y-Achse (`IMMER_ZUSAMMEN` in
-  `single_beam_report.py`, dasselbe Prinzip wie `r_x`/`r_y` im
-  Querschnitt): es ist dieselbe Groesse ueber zwei Flaechen, und genau ihr
-  Verhaeltnis will man ablesen - auf getrennten Achsen saehen sie gleich
-  gross aus.
-
-  Die Penalty-Kombination braucht EINE Definition von `eta_h`. Welche der
-  beiden das ist, sagt `penalty_crosstalk_region` (Dialog: "davon in eta_c /
-  J"); nur sie geht in `eta_c` und `J` ein, und der Bericht schreibt es dazu.
-  Der Dateiname bekommt `_beide` bzw. `_beide-pitchbox`.
-
-Fuer das Pitch-Quadrat wird ein zweites Gitter aufgebaut statt eines
-gemeinsamen, groesseren: sonst haenge die Aufloesung des Kreises daran, wie
-gross der Pitch gerade ist, und `U_h` aenderte sich mit einer Einstellung,
-die es gar nicht betrifft.
-
-Die atom-gewichteten Groessen sind unveraendert die des Optimierers
-(`weighted_uniformity`, `weighted_crosstalk` auf dem lokalen Sub-Gitter),
-die Kombination unveraendert die Penalty-Formel aus `lib/combine.py`. Alle
-drei Formeln werden importiert, nicht neu geschrieben - eine zweite Fassung
-waere genau die Sorte Abweichung, die spaeter niemand mehr findet.
-
-**Crosstalk bei einem Strahl** ist weiterhin `sum(I_nachbar)/sum(I_eigen)`,
-wobei `I_nachbar` die um +-pitch verschobenen Kopien desselben Strahls sind
-(Default: die 8 direkten Nachbarn, wie im Optimierer). Weil das Profil
-translationsinvariant ist, ist das dieselbe Zahl wie "wieviel von diesem
-Strahl faellt auf die Nachbar-Sites".
-
-**Nicht normiert wird bewusst.** Der Peak des Profils ist analytisch 1, und
-beide Metriken sind gegen eine gemeinsame Skalierung invariant. Eine
-Normierung auf ein Gitter-Maximum waere hier sogar falsch: das Maximum der
-Nachbar-Summe liegt ~pitch entfernt, also ausserhalb der ausgewerteten
-Region - derselbe Fehler, den `_local_neighbor_intensity()` im Optimierer
-beschreibt.
-
-**Die Plots.** Uniformity und Crosstalk stehen IMMER zusammen in einer
-Figur; ob sie sich eine y-Achse teilen, entscheidet dieselbe Regel wie im
-Querschnitt (`report.group_traces_by_axis`): gemeinsame Achse, solange die
-Wertebereiche innerhalb einer Groessenordnung liegen und jede Kurve dort
-noch etwas zu sehen gibt, sonst eine zweite Achse rechts in der Farbe ihrer
-Kurve. Im Dialog laesst sich das auf "immer eine Achse", "logarithmisch"
-oder "je Kurve eine eigene" stellen. Ob hart und gewichtet in GETRENNTE
-Figuren gehen, ist ein Haken im Dialog; die Penalty-Kombination bekommt auf
-Wunsch ihre eigene Figur (`U_c`, `eta_c`, `J`).
-
-Jede Figur traegt oben eine zweite x-Achse mit dem Waist vor der ersten
-Linse. Die ist nicht linear - `waist = C/win_input` -, und ihre Teilstriche
-werden selbst gesetzt, weil der automatische Ticker die grossen
-win_input-Werte am linken Rand zu einem Klumpen schiebt.
-
-**Linienstile.** Alle Kurven sind durchgezogen; unterschieden werden sie
-ueber die Farbe. Gestrichelt wird nur, wo zwei Kurven im Bild
-UEBEREINANDER liegen - dort taeuscht die obere sonst eine Einzelkurve vor
-und die untere ist schlicht nicht mehr da. Betroffen ist regelmaessig das
-Paar U_c/J, das sich fast deckt.
-
-Entschieden wird das am fertigen Bild, nicht an den Rohwerten: zwei Kurven
-koennen auf verschiedenen y-Achsen laufen und sich trotzdem exakt decken.
-Verglichen werden deshalb die Lagen in Achsen-Anteilen, nachdem alle
-Achsengrenzen stehen (`_entwirre_ueberlapp`); decken sie sich ueber mehr
-als die Haelfte des Bereichs auf weniger als 2 % der Achsenhoehe, bekommt
-die spaeter gezeichnete den naechsten Strichel-Stil. Die senkrechte Linie
-des Arbeitspunkts ist immer gestrichelt - sie ist eine Markierung, keine
-Messkurve.
-
-**Ohne Ueberschrift, Legende im Bild.** Die Figuren tragen per Default
-keinen Titel: in LaTeX steht die Bildunterschrift darunter, und was der
-Titel sagen wuerde (Region, sigma_atom, Penalty-Parameter), steht im
-Bericht und im Dateinamen. Im Dialog laesst er sich zuschalten. Die Legende
-sitzt im Bild (Vorgabe oben links); damit sie nicht auf den Kurven liegt,
-wird die Achse oben um `LEGENDEN_LUFT` aufgeweitet - abgeschnitten wird
-nichts.
-
-**Schrift und Linien** liegen ueber `SCHRIFT_DICHTE` (Default 1.45) ueber
-dem Massstab der Multitone-Karten. Das ist kein Bruch mit dem
-gemeinsamen Stil, sondern seine Anwendung: `DOC_RC` ist auf eine ueber die
-volle Textbreite eingebundene Karte ausgelegt, eine Kurvenfigur wird im
-Text meist schmaler gesetzt und muss dafuer schwerer gezeichnet sein. Der
-Faktor steht im Dialog.
-
-**Arbeitspunkt.** Auf Wunsch wird ein Waist in allen Figuren markiert -
-senkrechte Linie plus ein Stern auf jeder Kurve, und im Bericht ein
-Abschnitt mit den Werten aller Groessen dort (zwischen den benachbarten
-Stuetzstellen linear interpoliert; die Kurven sind hier glatte Funktionen
-des Waists). Der Waist kommt entweder aus dem Dialog oder aus dem Minimum
-von J, eta_c oder U_h - dann als Stuetzstelle, nicht interpoliert.
-
-### Zweiter Lauf: die Atomposition durchfahren
-
-Bei FESTEM Waist wandert das Atom aus der Mitte heraus - gefahren wird der
-Betrag `r` des Versatzes, von 0 bis zum Waist (oder bis zu einem eigenen
-Wert). Berechnet werden ALLE Groessen, in jeder gewaehlten Richtung; die
-Schluessel tragen die Richtung als Endung
-(`crosstalk_weighted__diagonal`). Es gibt eigene Figuren, einen eigenen
-Bericht und einen eigenen Datensatz (`SingleBeamOffset_...`,
-`single_beam_offset_...pkl`).
-
-**Zwei Richtungen, nicht drei.** Waagerecht fehlt mit Absicht: das
-Strahlprofil ist rotationssymmetrisch, waagerecht ist dasselbe wie
-senkrecht. Diagonal ist es NICHT - nicht wegen des Strahls, sondern wegen
-der Nachbar-Sites: die liegen auf einem Quadratgitter, und diagonal ist die
-naechste Site sqrt(2) mal weiter weg. Der Unterschied zwischen den beiden
-Richtungen steckt deshalb ganz im Crosstalk; die Uniformity ist in beiden
-identisch (und genau das ist eine brauchbare Kontrolle, dass die Rechnung
-stimmt).
-
-**Was sich bewegt.** Nur das Atom, und mit ihm die Auswertebereiche: das
-lokale Sub-Gitter und die Gauss-Gewichtung W sitzen zentriert auf der
-jeweiligen Atomposition. Das Lichtfeld steht - der Spot im Ursprung, die
-8 Nachbarkopien bei +-pitch darum herum. Wanderten sie mit, waere es eine
-reine Translation und alle Kurven waeren konstant. Dieselbe Semantik wie
-`atom_offset_x/y` im Multitone-Optimierer; sie deckt auch eine
-Pointing-Drift ab, die alle Strahlen gemeinsam verschiebt (aequivalent zu
-einem Versatz des Atoms um -r, und der Satz der 8 Nachbarn ist
-inversionssymmetrisch).
-
-**Was sich mit dem Versatz aendert.** Die atom-gewichteten Groessen immer -
-das Atom sitzt im Strahl woanders. Die HARTEN nur, wenn
-`offset_hard_follows_atom` gesetzt ist (Default): dann wandert die Kreis-
-bzw. Pitch-Region mit dem Atom. Das ist hier die sinnvolle Lesart, denn die
-Atomposition IST die abgefahrene Groesse. Steht der Schalter aus, bleibt
-die Region auf der Site und die harten Kurven sind ueber dem Versatz
-konstant - auch eine Aussage, nur eben eine langweilige.
-
-Bei `r = 0` stimmen alle Werte exakt mit dem Waist-Sweep an diesem Waist
-ueberein; der Positions-Sweep faengt also dort an, wo jener steht.
-
-In den Figuren steht die Richtung im LINIENSTIL (senkrecht durchgezogen,
-diagonal gestrichelt) und die Groesse in der Farbe - hier traegt der Stil
-also Bedeutung, und die automatische Ueberlapp-Strichelung ist
-abgeschaltet. Die obere x-Achse zeigt den Versatz in Einheiten des Waists
-(`r/w`), die untere in µm.
-
-**Womit der Dialog aufgeht.** Die Auftragung beginnt bei **1.8 mm vor der
-ersten Linse** und endet bei **2.5 µm in der Atomebene** - in der Einheit
-der x-Achse also 0.7434 .. 2.5 µm. Festgelegt sind die beiden Enden, die
-jeweils andere Schreibweise wird daraus ausgerechnet (siehe
-`WIN_INPUT_START_DEFAULT_MM` / `WAIST_ENDE_DEFAULT_UM`), damit nicht zwei
-gerundete Zahlenpaare nebeneinander stehen, die dasselbe meinen sollen.
-Dazu Kreisradius 1 µm, beide
-Crosstalk-Regionen, und der Arbeitspunkt bei 1.9 µm eingezeichnet. Das ist
-der Arbeitsbereich dieses Aufbaus; alles davon steht im Dialog und ist
-umstellbar.
-
-- Ergebnis: `Fit_Plots/<Datum>/SingleBeam_..._hard.pdf` (bzw. `_metrics.pdf`),
-  `..._weighted.pdf`, `..._penalty.pdf`
-- Bericht: `Fit_Results/SingleBeam_..._Report.md`
-- Datensatz: `Results/single_beam_....pkl` (optional)
-- Braucht keinen vorhandenen Datensatz
-
-**Gitteraufloesung.** Jede harte Region wird mit 401 Zellen je Achse
-ausgewertet, und zwar an den ZELLMITTEN (Mittelpunktsregel). Das ist nicht
-Kosmetik: mit `linspace(-a, a, n)` liegen Punkte auf beiden Raendern und
-werden doppelt so stark gewichtet, wie ihnen zusteht - beim Pitch-Quadrat,
-dessen Rand mitten im Signal liegt, waren das gemessen 0.6 % Fehler, der
-erst mit 1/n verschwand. Mit den Zellmitten stimmen U_h und eta_h fuer
-BEIDE Regionen schon bei 401 Zellen auf sechs Stellen (nachgerechnet gegen
-3201). Das gewichtete Sub-Gitter (241 Punkte ueber +-6 sigma_atom) ist
-ebenfalls auf sechs Stellen konvergiert.
-
-**Wieviele Nachbarn.** Default sind die 8 Sites im Kranz direkt um die
-Site (die 3x3-Umgebung ohne die Mitte) - genau das, was der
-Multitone-Optimierer rechnet, und die einzige Wahl, mit der die Zahlen mit
-dessen Scans vergleichbar sind. Zwei Kraenze (24 Sites) bringen bei Airy
-rund 20 % mehr Crosstalk; im Dialog einstellbar.
-
----
-
 ## Ordner
 
 ```
@@ -900,21 +885,18 @@ Combinated_Optimization/
     run_penalty_only.py     <- ausfuehren: ein Parametersatz, kein Gitter
     run_hard_check.py       <- ausfuehren: Hard Case zu vorhandenem Weighted
     run_plots.py            <- ausfuehren: plotten/auswerten
-    run_single_beam.py      <- ausfuehren: EIN Strahl ueber dem Waist
-    lib/                    <- wird von den Skripten benutzt,
+    lib/                    <- wird von den drei Skripten benutzt,
                                nicht direkt ausfuehren
         paths.py            Ordner-Konstanten, Anbindung an Weighted_Optimization
         combine.py          Penalty-Kombination, Region, Laden/Speichern
         penalty_scan.py     die gemeinsame Amplituden-Optimierung (Gitter)
         penalty_opt.py      dieselbe Zielfunktion ohne Gitter (freie Parameter)
         hard_check.py       harte Nachrechnung + Konsistenz-Analyse
-        single_beam.py      ein Strahl: Sweep ueber den Waist (Kreisregion)
-        single_beam_report.py   dessen Kurven-PDFs und Bericht
         report.py           Plots und Markdown-Berichte
     Results/                gespeicherte Datensaetze (.pkl)
-    Fit_Plots/2026-09-03/   Vektor-PDFs der Auswertung, tageweise
-    Fit_Results/            Markdown-Berichte (flach, Datum im Namen)
-    Bilder/2026-09-03/      PNG-Ausgaben, tageweise
+    Fit_Plots/              Vektor-PDFs der Auswertung
+    Fit_Results/            Markdown-Berichte
+    Bilder/                 PNG-Ausgaben
     Old_Combine/            Archiv des verworfenen GETRENNTEN Verfahrens
 ```
 
@@ -939,45 +921,6 @@ Zwei Dinge dagegen:
    auf den Ordner **`Weighted_Optimization`** → **"Mark Directory as"** →
    **"Sources Root"**. Danach kennt PyCharm die Module und färbt sie normal
    ein — auch in `lib/`.
-
-## Plot-Stil: ein Massstab fuer alle drei Ordner
-
-Alle PDFs sind zum Einbinden mit `\includegraphics[width=\textwidth]`
-gedacht (A4, 2.5-cm-Raender = 16 cm = 6.3 Zoll). Die Schriftgroessen stehen
-genau einmal, und zwar so, wie sie **im Dokument** ankommen sollen (`DOC_RC`
-in `lib/report.py`, Grundschrift 9 pt). Eine Figur, die breiter angelegt ist
-- der Talschnitt mit zwei Panels -, wird beim Einbinden verkleinert;
-`dokument_stil(figurbreite)` skaliert Schrift, Linienbreiten, Markergroessen
-und Achsenabstaende deshalb vorher um genau denselben Faktor hoch. Die
-Einzeldatei sieht dadurch grossschriftig aus, im Dokument stimmt es.
-
-**Zweispaltige Figuren stehen eine Stufe kleiner.** Der Talschnitt (Karte +
-Schnitt) teilt sich die Textbreite auf zwei Panels; jedes ist damit etwa halb
-so breit wie eine einzelne Karte. Seine Beschriftung wird deshalb mit
-`ZWEI_PANEL_DICHTE = 0.70` gesetzt - genauso, wie in LaTeX eine Subfigure ihre
-Bildunterschrift kleiner setzt als die Hauptabbildung. Das ist kein Geschmack:
-mit der vollen Dokumentgroesse war die Legende der Karte breiter als die Karte
-selbst und ueberragte den Plot, um den es geht. Im Dokument sind es dort rund
-7 pt statt 10 pt.
-
-Der Block ist buchstabengleich der aus `Hard_Optimization/lib/report.py` und
-`Weighted_Optimization/lib/report.py` - genau darum geht es: die drei Ordner
-liefern Bilder in dasselbe Dokument. Gemessen kamen vorher 4.7 bis 11.7 pt
-an (Faktor 2.5, weil die PDFs 6.2 bis 14.8 Zoll breit waren), jetzt ueberall
-9.8 bis 10.2 pt.
-
-Zwei sichtbare Folgen: die Colorbar des Talschnitts traegt nur noch das
-Symbol (`J (raw)`, `U_w`, `eta_h`) statt des ausgeschriebenen Namens -
-hochkant neben einer schmalen Leiste war der lange Text hoeher als die
-Leiste -, und die Karte im Talschnitt beschriftet ihre x-Achse kurz
-(`omega' (µm)`); die lange Fassung steht weiterhin am Schnitt daneben. Die
-Figurbreite des Talschnitts haengt ausserdem **nicht** mehr an der Zahl der
-y-Achsen: da die Schrift mitskaliert, aenderte Breitermachen am Bild im
-Dokument nichts mehr, es machte nur die Datei groesser.
-
-Ebenfalls angeglichen: die Metrik-Karten tragen den Index `h` bzw. `w` an
-`U` und `eta` (Colorbar wie Titel), dieselbe Konvention wie in den beiden
-anderen Ordnern und wie in der Legende des Querschnitts.
 
 ## Was hier bewusst NICHT mehr drin ist
 

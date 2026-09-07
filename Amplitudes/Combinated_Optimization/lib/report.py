@@ -27,20 +27,21 @@ Schnitt laesst sich statt entlang des Minimums auch entlang genau dieser
 Geraden legen, ueber den ganzen gescannten Bereich hinweg (_line_...).
 """
 
-import contextlib
+import re
+import functools
 from datetime import date
 
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, LogNorm
-from matplotlib.patches import Patch
-from matplotlib.ticker import FormatStrFormatter, MaxNLocator
+from matplotlib.patches import Patch, Rectangle
+from matplotlib.ticker import FormatStrFormatter
 
 from . import paths
 from .combine import (
     FORBIDDEN_FACTOR_DEFAULT, dataset_kind, forbidden_boundary, forbidden_mask,
-    penalty_objective, waist_um_vals,
+    penalty_objective, penalty_pair, waist_um_vals,
 )
 
 from weighted_multitone_amplitude_dependence_plots import (  # noqa: E402
@@ -48,182 +49,96 @@ from weighted_multitone_amplitude_dependence_plots import (  # noqa: E402
 )
 
 
-# ======================================================================
-# EIN Massstab fuer alle PDFs dieses Projekts
-# ======================================================================
-# Alle Grafiken sind zum Einbinden mit \includegraphics[width=\textwidth]
-# gedacht (A4, 2.5-cm-Raender -> 16 cm = 6.3 Zoll). Eine Figur, die breiter
-# angelegt ist, wird dabei VERKLEINERT - und mit ihr Schrift und Linien.
-#
-# Genau das war das Problem: dieselben 11 pt kamen im Dokument je nach Plot
-# als 4.7 bis 11.7 pt an (gemessen ueber alle Plot-Arten der drei Ordner,
-# Faktor 2.5), weil die PDFs 6.2 bis 14.8 Zoll breit sind. Ein Talschnitt war
-# im Text unlesbar, eine Metrik-Karte groesser als die Grundschrift.
-#
-# Loesung: die Zielgroessen stehen EINMAL, und zwar so, wie sie IM DOKUMENT
-# ankommen sollen (DOC_RC). Beim Zeichnen werden sie mit dem Faktor
-# Figurbreite/Textbreite vorskaliert - eine 13-Zoll-Figur bekommt also die
-# doppelte Schrift und doppelt dicke Linien, damit nach dem Verkleinern
-# wieder genau DOC_RC herauskommt. Die Einzeldatei sieht dadurch
-# "grossschriftig" aus; im Dokument stimmt es.
-#
-# Dieser Block ist buchstabengleich der aus Hard_Optimization/lib/report.py
-# und Weighted_Optimization/lib/report.py - genau darum geht es: die drei
-# Ordner liefern Bilder ins selbe Dokument und duerfen dort nicht
-# auseinanderfallen.
-TEXT_WIDTH_IN = 6.3
-
-# So sollen die Grafiken im Dokument ankommen (Grundschrift dort ~11 pt).
-DOC_RC = {
+# Plot-Stil fuer alle PDFs dieses Moduls: Serifen + Computer-Modern-Mathtext,
+# damit die Grafiken in einem LaTeX-Dokument nicht aus dem Satz fallen.
+# pdf.fonttype=42 bettet TrueType statt Type-3 ein - Type-3-Schriften werden
+# von vielen Journals und von pdffonts-Pruefungen abgelehnt.
+LATEX_STYLE = {
     "font.family": "serif",
     "mathtext.fontset": "cm",
+    "font.size": 10,
+    "axes.titlesize": 11,
+    "axes.labelsize": 10,
+    "xtick.labelsize": 9,
+    "ytick.labelsize": 9,
+    "legend.fontsize": 9,
+    "figure.titlesize": 12,
+    "axes.linewidth": 0.8,
     "pdf.fonttype": 42,
     "ps.fonttype": 42,
-    # Groessen in pt - werden vorskaliert
-    "font.size": 9.0,
-    "axes.titlesize": 10.0,
-    "axes.labelsize": 9.5,
-    "xtick.labelsize": 8.5,
-    "ytick.labelsize": 8.5,
-    "legend.fontsize": 8.5,
-    "figure.titlesize": 11.0,
-    "axes.linewidth": 0.8,
-    "lines.linewidth": 1.4,
-    "lines.markersize": 3.0,
-    "xtick.major.width": 0.8,
-    "ytick.major.width": 0.8,
-    "xtick.minor.width": 0.6,
-    "ytick.minor.width": 0.6,
-    "xtick.major.size": 3.5,
-    "ytick.major.size": 3.5,
-    "xtick.minor.size": 2.0,
-    "ytick.minor.size": 2.0,
-    "grid.linewidth": 0.8,
-    "patch.linewidth": 0.8,
-    "hatch.linewidth": 1.0,
 }
 
-# Welche rcParams eine Laenge in Punkten sind und deshalb mitskalieren.
-_SKALIERBARE_RC = tuple(k for k in DOC_RC if k not in (
-    "font.family", "mathtext.fontset", "pdf.fonttype", "ps.fonttype"))
-
-# Aktueller Vorskalierungsfaktor. Wird von dokument_stil() gesetzt und von
-# S()/SD() gelesen - die Zeichenfunktionen geben ihn nicht durch, weil sie
-# sonst alle einen zusaetzlichen Parameter braeuchten (draw_best_point_marker,
-# draw_forbidden_region, draw_fit_line_on_map, ...). Es wird immer genau eine
-# Figur zur Zeit gezeichnet, deshalb reicht ein Modul-Zustand.
-_SKALA = 1.0
-
-
-def _skalierte_rc(faktor, **ueberschreiben):
-    rc = dict(DOC_RC)
-    for key in _SKALIERBARE_RC:
-        rc[key] = DOC_RC[key] * faktor
-    for key, wert in ueberschreiben.items():
-        if wert is None:
-            continue
-        rc[key] = wert * faktor if key in _SKALIERBARE_RC else wert
-    return rc
-
-
-def _skalierte_rc_dotted(faktor, ueberschreiben):
-    """Wie _skalierte_rc(), aber mit einem fertigen dict statt Schluesselworten."""
-    return _skalierte_rc(faktor, **ueberschreiben)
-
-
-@contextlib.contextmanager
-def dokument_stil(fig_width_in, legend_fontsize=None, dichte=1.0,
-                  **ueberschreiben):
-    """Zeichen-Kontext fuer eine Figur dieser Breite.
-
-    Setzt die rcParams auf DOC_RC * dichte * (fig_width / TEXT_WIDTH_IN) und
-    merkt sich den Faktor fuer S()/SD().
-
-    dichte < 1 setzt die Schrift EINE STUFE KLEINER, gemessen am Plot - fuer
-    Figuren, die sich die Textbreite auf zwei Panels aufteilen (siehe
-    ZWEI_PANEL_DICHTE). Nicht kosmetisch: mit voller Groesse ueberragte die
-    Legende die Karte, um die es geht.
-
-    legend_fontsize (aus dem Dialog) ist ebenfalls eine DOKUMENT-Groesse und
-    wird mitskaliert; weitere rcParams lassen sich unter ihrem gepunkteten
-    Namen als Schluesselwort mit Unterstrichen uebergeben
-    (axes_titlesize=... -> "axes.titlesize")."""
-    global _SKALA
-    faktor = float(dichte) * float(fig_width_in) / TEXT_WIDTH_IN
-    rc_namen = {k.replace(".", "_"): k for k in DOC_RC}
-    ueber = {rc_namen.get(k, k.replace("_", ".")): v
-             for k, v in ueberschreiben.items()}
-    if legend_fontsize is not None:
-        ueber["legend.fontsize"] = legend_fontsize
-    vorher = _SKALA
-    _SKALA = faktor
-    try:
-        with plt.rc_context(_skalierte_rc(faktor, **ueber)):
-            yield faktor
-    finally:
-        _SKALA = vorher
-
-
-def S(laenge):
-    """Eine in Dokument-Punkten gedachte Laenge auf die aktuelle Figur
-    umrechnen (Linienbreiten, Markergroessen)."""
-    return laenge * _SKALA
-
-
-def SA(flaeche):
-    """Wie S(), aber fuer scatter(s=...): das ist eine FLAECHE in pt^2, die
-    also quadratisch mitwachsen muss, sonst schrumpfen die Punkte relativ."""
-    return flaeche * _SKALA ** 2
-
-
-def SD(stil, **ueberschreiben):
-    """Dasselbe fuer ein Stil-dict: alle Laengen-Eintraege mitskalieren."""
-    laengen = ("linewidth", "markersize", "markeredgewidth", "elinewidth",
-               "capsize", "capthick", "width")
-    neu = {k: (v * _SKALA if k in laengen and isinstance(v, (int, float)) else v)
-           for k, v in stil.items()}
-    if isinstance(stil.get("s"), (int, float)):
-        neu["s"] = SA(stil["s"])
-    neu.update(ueberschreiben)
-    return neu
-
-
-# Die Figurgroessen. Breite = Textbreite, wo es geht; die breiteren
-# Figuren (Karten-Paare, Querschnitte) behalten ihr Layout und werden
-# ueber dokument_stil() in Schrift und Linien ausgeglichen.
+# Die Metrik-Karten sind zum direkten Einbinden in ein A4-Dokument gedacht:
+# Breite = Textbreite bei 2.5-cm-Raendern (16 cm), Hoehe = Texthoehe minus
+# Platz fuer die Bildunterschrift. \includegraphics[width=\textwidth] skaliert
+# eine so gebaute Datei NICHT mehr - erst dadurch kommen die unten
+# eingestellten Schriftgroessen 1:1 im Dokument an. Vorher war die Figur
+# 12 Zoll breit und wurde auf Textbreite geschrumpft (Faktor 0.52), 10-pt-Text
+# kam als 5 pt heraus.
 PAGE_FIGSIZE = (6.3, 9.0)        # 3x2, ganze Seite
 HALF_PAGE_FIGSIZE = (6.3, 6.2)   # 2x2, gleiche Kartenhoehe wie oben
-REGION_FIGSIZE = (8.0, 6.0)      # eine Karte (Score/Region)
-AGREEMENT_FIGSIZE = (8.6, 6.0)   # eine Karte, breitere Colorbar-Legende
-SCATTER_FIGSIZE = (7.6, 7.0)     # Streudiagramm, quadratisch
-
-# Platz, den jede zusaetzliche y-Achse im Querschnitt rechts braucht - Zahlen,
-# Teilstriche und die gedrehte Beschriftung, gemessen in DOKUMENT-Punkten.
-# Steht hier oben, weil zwei Stellen ihn brauchen: die Breite der Figur
-# (plot_valley_cut) und der Versatz der Achsen selbst.
-ZUSATZ_ACHSE_PT = 40.0
-
-# Zweispaltige Figuren (Talschnitt: Karte + Schnitt; Kreuzschnitt: zwei
-# Schnitte) teilen sich die Textbreite auf zwei Panels. Jedes Panel ist damit
-# etwa halb so breit wie eine einzelne Karte - die Beschriftung darf dort eine
-# Stufe kleiner stehen, so wie in LaTeX eine Subfigure ihre Bildunterschrift
-# kleiner setzt als die Hauptabbildung.
+# Karte + Querschnitt nebeneinander, plus je eine Legende darunter.
 #
-# Das ist nicht Geschmack: mit der vollen Dokumentgroesse war die Legende der
-# Karte breiter als die Karte selbst und ueberragte den eigentlichen Plot.
-# 0.7 ist gemessen die Grenze, ab der die Legende in die Karte passt und
-# gleichzeitig im Dokument noch lesbar bleibt (Grundschrift 6.3 pt,
-# Titel 7 pt bei Textbreite).
-ZWEI_PANEL_DICHTE = 0.70
+# Die Hoehe ist nicht geschaetzt, sondern an den uebrigen Plots GEMESSEN: dort
+# ist eine Achse rund 2.0 x 2.35 Zoll gross, Breite/Hoehe also 0.84 (2x2- und
+# 3x2-Karten) bis 0.94 (Panel-Schnitte). Mit diesen Werten kommt der
+# Schnittplot auf 2.03 x 2.40 Zoll je Panel und damit auf dieselben 0.84 -
+# die Figuren eines Dokuments sehen dann nach demselben Format aus.
+#
+# Vorher stand hier 4.0 Zoll bei 1 : 1.15, was 1.81 x 2.75 ergab (B/H = 0.66):
+# sichtbar hochkant gegenueber allen anderen Plots.
+CUT_FIGSIZE = (6.3, 3.6)
+CUT_WIDTH_RATIOS = [1.0, 1.0]
 
-# Querschnitt: Karte und Schnitt nebeneinander. Im Dokument sind das
-# 6.3 x 2.87 Zoll - breiter als hoch, aber hoch genug, dass Titel,
-# Achsenbeschriftung und Legende unter den Panels Platz haben.
-VALLEY_FIGSIZE = (11.4, 5.2)
+# Groesser als LATEX_STYLE, weil diese Figuren im Dokument nicht mehr
+# verkleinert werden.
+MAP_STYLE = dict(LATEX_STYLE)
+MAP_STYLE.update({
+    "font.size": 10,
+    "axes.titlesize": 11.5,
+    "axes.labelsize": 11,
+    "xtick.labelsize": 9.5,
+    "ytick.labelsize": 9.5,
+    "legend.fontsize": 10,
+})
 
 WORKING_POINT_LABEL = "Working point"
 
-WIDTH_LABEL = "Width (MHz)"
+
+def working_point_label(best, at_edge=False):
+    """Legendentext des Sterns: seine beiden Koordinaten, sonst nichts.
+
+    Der Punkt IST die Aussage des Plots; wo er liegt, soll man ablesen
+    koennen, ohne im Bericht nachzuschlagen. Beide Koordinaten, auch wenn nur
+    eine davon vorgegeben wurde - die andere kommt aus der Geraden und ist
+    genauso ein Ergebnis.
+
+    Das Wort "Working point" steht bewusst NICHT davor: der rote Stern ist in
+    einer Karte mit genau einem Stern selbsterklaerend, und die Legende soll
+    die Zahlen tragen, nicht eine Bezeichnung fuer sie.
+    """
+    if not best or best.get('width') is None:
+        return WORKING_POINT_LABEL
+    text = (r"$\omega$ = %.3f $\mu$m, width = %.3f MHz"
+            % (best.get('waist_um', float('nan')), best['width'] * 1e-6))
+    return text + " (at scan edge)" if at_edge else text
+
+# Der Waist NACH den Linsen, also der in der Atomebene wirksame. Frueher hiess
+# er "Waist at focus omega' (µm, after lenses)"; der Strich sollte "nach der
+# Linse" heissen, sagte das aber nur fuer den, der die Konvention schon kennt.
+# "in the atomic plane" sagt es direkt und macht den Strich ueberfluessig.
+WAIST_UM_LABEL = r"Waist in the atomic plane $\omega$ [$\mu$m]"
+# Kurzform fuer zwei Panels nebeneinander: bei Textbreite bleiben dort nur
+# rund 2.5 Zoll je Panel, und der ausgeschriebene Name laeuft ueber den
+# Figurrand hinaus (gemessen: das schliessende "]" fiel weg). Das Symbol
+# traegt die Aussage, der volle Name steht in jeder einzeln stehenden Karte.
+WAIST_UM_LABEL_SHORT = r"Waist $\omega$ [$\mu$m]"
+WAIST_UM_SYMBOL = r"$\omega$"
+WIN_INPUT_LABEL = r"Input waist $\omega_{\mathrm{in}}$ [mm] (before lenses)"
+WIN_INPUT_LABEL_SHORT = r"Input waist $\omega_{\mathrm{in}}$ [mm]"
+WIN_INPUT_SYMBOL = r"$\omega_{\mathrm{in}}$"
+
+WIDTH_LABEL = "Width [MHz]"
 
 
 # ======================================================================
@@ -266,6 +181,53 @@ VALLEY_SELECT_CHOICES = [
 ]
 GUIDE_FOLLOW_DEFAULT = "uniformity_weighted"
 GUIDE_HALFWIDTH_DEFAULT = 0.03          # MHz, halbe Korridorbreite
+# Wie viele y-Achsen der Querschnitt hoechstens bekommt. Zwei sind die
+# Grenze der Lesbarkeit; seit J in Prozent gezeigt wird, reicht fuer
+# J/U_c/eta_c sogar eine. Im Dialog einstellbar.
+MAX_CUT_AXES_DEFAULT = 2
+MAX_CUT_AXES_RANGE = (1, 5)
+
+# Was ausser der Geraden noch in eine 2D-Karte gezeichnet wird. Vier
+# unabhaengige Schalter, weil es vier verschiedene Aussagen sind:
+#
+#   extension - die Gerade ueber den gefitteten Bereich hinaus verlaengern.
+#               Zeigt, wohin die lineare Beziehung fuehrt.
+#   dashed    - den verlaengerten Teil GESTRICHELT statt durchgezogen. Sagt
+#               "hier wurde nicht gefittet", macht die Gerade aber optisch
+#               zweiteilig. Deshalb nur auf Nachfrage.
+#   path      - der Talpfad als Linie. Beantwortet "wie krumm ist das echte
+#               Minimum gegenueber der Geraden".
+#   used      - die Talpunkte, die IN den Fit eingegangen sind.
+#   unused    - die Talpunkte, die herausgefallen sind (Randminima,
+#               Nebenzweig, Rand-Kink). Zusammen mit `used` beantworten die
+#               beiden "worauf stuetzt sich die Gerade eigentlich".
+#
+# Voreingestellt ist nur die Verlaengerung: das ist das Bild fuers Dokument.
+# Die drei anderen sind die Herleitung - beim Pruefen wichtig, im fertigen
+# Plot ueberfluessig.
+MAP_MARK_KEYS = ("extension", "dashed", "path", "used", "unused")
+MAP_MARKS_DEFAULT = dict(extension=True, dashed=False,
+                         path=False, used=False, unused=False)
+
+# Benutzte Talpunkte: gefuellt, in der Farbe der Geraden - sie GEHOEREN zu
+# ihr. Ausgelassene: offene dunkle Kreise (UNUSED_STYLE, weiter unten),
+# dieselbe Markierung wie im Querschnitt.
+USED_POINT_STYLE = dict(linestyle="none", marker="o", markersize=4.0,
+                        markerfacecolor="#00c2ff", markeredgecolor="white",
+                        markeredgewidth=0.6)
+VALLEY_PATH_STYLE = dict(linewidth=0.9, color="#8a8a8a", linestyle="-")
+
+
+def map_marks(**kwargs):
+    """Vollstaendiges Schalter-dict; nicht genannte Schalter behalten die
+    Voreinstellung. Unbekannte Namen sind ein Fehler, kein stilles Nichts."""
+    unbekannt = set(kwargs) - set(MAP_MARK_KEYS)
+    if unbekannt:
+        raise ValueError(f"Unbekannte Karten-Schalter: {sorted(unbekannt)}. "
+                         f"Erlaubt sind {list(MAP_MARK_KEYS)}.")
+    marks = dict(MAP_MARKS_DEFAULT)
+    marks.update({k: bool(v) for k, v in kwargs.items()})
+    return marks
 
 
 def valley_select_label(select):
@@ -273,9 +235,15 @@ def valley_select_label(select):
 
 
 
-# Die frueheren Dekoratoren @_mit_stil/@_mit_kartenstil sind entfallen: der
-# Stil haengt jetzt an der Figurbreite, die erst INNERHALB der Zeichenfunktion
-# feststeht. Jede von ihnen oeffnet deshalb selbst ein dokument_stil(...).
+def _mit_stil(func):
+    """Zeichnet die Funktion im LATEX_STYLE - auch beim Einzelaufruf, nicht
+    nur ueber make_all(). Bewusst ueber rc_context statt global, damit der
+    Stil nicht auf andere Skripte abfaerbt."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with plt.rc_context(LATEX_STYLE):
+            return func(*args, **kwargs)
+    return wrapper
 
 # Am Rand des gescannten Fensters wird der Stern OFFEN gezeichnet: dort ist
 # das "Minimum" vermutlich nur der Fensterrand. Beim rohen J ist das der
@@ -286,7 +254,10 @@ BEST_POINT_EDGE_STYLE = dict(marker='*', markerfacecolor='none',
 BEST_POINT_STYLE = dict(marker='*', color='red', markersize=16,
                         markeredgecolor='white', markeredgewidth=1.2, linestyle='none')
 # Einheitliche Bezeichnung der Ausgleichsgeraden in allen Legenden.
-FIT_LINE_LABEL = "Linear model fit"
+# Der Name der Geraden in JEDER 2D-Karte - Metrik-Karten, Score-Karte und
+# die Karte im Schnittplot. Bewusst nur diese zwei Worte: die Zahl der
+# benutzten Punkte, die hier frueher mit drinstand, gehoert in den Bericht.
+FIT_LINE_LABEL = "Linear fit"
 # Das groesste Rechteck ("Region") wird weiterhin berechnet und steht mit
 # seinen Grenzen im Bericht - eingezeichnet wird es nicht mehr.
 
@@ -300,34 +271,16 @@ def win_axis_values(results, win_axis):
     daher wird dort ggf. umgedreht."""
     win_input_vals = np.asarray(results['win_input_vals'], dtype=float)
     if win_axis == "before_lens":
-        return win_input_vals * 1e3, r"Input waist $\omega_{\mathrm{in}}$ (mm, before lenses)", False
+        return win_input_vals * 1e3, WIN_INPUT_LABEL, False
     if win_axis == "after_lens":
         x = np.array([win_input_to_win(w, results['f1'], results['f2'],
                                        results['lambda_opt'], results['fLO'])
                       for w in win_input_vals]) * 1e6
-        label = r"Waist at focus $\omega'$ ($\mu$m, after lenses)"
+        label = WAIST_UM_LABEL
         if len(x) > 1 and x[0] > x[-1]:
             return x[::-1], label, True
         return x, label, False
     raise ValueError(f"win_axis muss 'before_lens' oder 'after_lens' sein, nicht {win_axis!r}.")
-
-
-# Kurzform derselben Achsenbeschriftung fuer schmale Panels (die Karte im
-# Talschnitt). Die lange Fassung ist breiter als das Panel selbst und ragte
-# links aus der Figur heraus; welche Konvention gemeint ist, sagt das Symbol
-# (omega' = nach den Linsen, omega_in = davor) und die Achse des Schnitts
-# daneben, die die lange Fassung weiterhin traegt.
-_KURZE_ACHSENLABEL = {
-    r"Input waist $\omega_{\mathrm{in}}$ (mm, before lenses)":
-        r"$\omega_{\mathrm{in}}$ (mm)",
-    r"Waist at focus $\omega'$ ($\mu$m, after lenses)":
-        r"$\omega'$ ($\mu$m)",
-}
-
-
-def kurzes_achsenlabel(label):
-    """Kurzform, wenn es eine gibt - sonst unveraendert."""
-    return _KURZE_ACHSENLABEL.get(label, label)
 
 
 def _x_of_index(results, j, win_axis):
@@ -356,6 +309,9 @@ def draw_best_point_marker(ax, results, win_axis, legend=True, best=None,
         best = results.get('best') or {}
     if not best or best.get('win_input') is None:
         return
+    # Auch bei einem direkt aus dem Datensatz gereichten Punkt: die Legende
+    # nennt beide Koordinaten, und waist_um steht dort nicht drin.
+    best = _mit_waist_um(results, best)
     if best.get('on_line'):
         # Selbst gewaehlter Punkt: er liegt exakt auf der Geraden und damit
         # zwischen den Gitterpunkten - also auch genau dort zeichnen.
@@ -366,11 +322,11 @@ def draw_best_point_marker(ax, results, win_axis, legend=True, best=None,
         j = int(np.argmin(np.abs(win_input_vals - best['win_input'])))
         x = _x_of_index(results, j, win_axis)
     am_rand = bool(best.get('at_edge'))
-    stil = SD(BEST_POINT_EDGE_STYLE if am_rand else BEST_POINT_STYLE)
+    stil = BEST_POINT_EDGE_STYLE if am_rand else BEST_POINT_STYLE
     # Ein Name fuer alle drei Faelle: im Dokument ist es der Arbeitspunkt,
     # ob nun selbst gesetzt oder als bester Gitterpunkt gefunden. Der Zusatz
     # am Rand bleibt - der offene Stern allein erklaert ihn nicht.
-    beschriftung = WORKING_POINT_LABEL + (" (at scan edge)" if am_rand else "")
+    beschriftung = working_point_label(best, am_rand)
     # Ohne eigene Legende bekommt der Stern auch KEINEN Legendeneintrag:
     # sonst sammelt ihn der Aufrufer ueber get_legend_handles_labels() in
     # seine gemeinsame Legende ein, und genau die soll knapp bleiben.
@@ -442,10 +398,10 @@ def draw_forbidden_region(ax, results, win_axis, factor=FORBIDDEN_FACTOR_DEFAULT
         return
     ax.fill_between(x, y_unten, y_clip, where=sichtbar,
                     label=(FORBIDDEN_LABEL if legend else "_nolegend_"),
-                    **SD(FORBIDDEN_FILL_STYLE))
+                    **FORBIDDEN_FILL_STYLE)
     innen = (y >= y_unten) & (y <= y_oben)
     if np.any(innen):
-        ax.plot(x[innen], y[innen], label="_nolegend_", **SD(FORBIDDEN_LINE_STYLE))
+        ax.plot(x[innen], y[innen], label="_nolegend_", **FORBIDDEN_LINE_STYLE)
 
 
 def score_grid(results):
@@ -567,6 +523,23 @@ def manual_point_on_line(results, follow, value, fit):
     )
 
 
+def _mit_waist_um(results, best):
+    """`waist_um` nachtragen, wo es fehlt.
+
+    Der manuell gesetzte Punkt bringt es mit (er liegt zwischen den
+    Gitterpunkten), die beiden anderen Faelle nicht. Legende und Bericht
+    brauchen es aber in jedem Fall - die Karten sind auf der µm-Achse
+    beschriftet, nicht auf win_input.
+    """
+    if best is None or best.get('win_input') is None or 'waist_um' in best:
+        return best
+    best = dict(best)
+    best['waist_um'] = float(win_input_to_win(
+        best['win_input'], results['f1'], results['f2'],
+        results['lambda_opt'], results['fLO']) * 1e6)
+    return best
+
+
 def best_point_by(results, follow=None, value=None, fit=None):
     """Der beste Gitterpunkt nach einer frei gewaehlten Groesse.
 
@@ -583,7 +556,7 @@ def best_point_by(results, follow=None, value=None, fit=None):
     win_input_vals = np.asarray(results['win_input_vals'], dtype=float)
     width_vals = np.asarray(results['width_vals'], dtype=float)
     if follow in MANUAL_POINT_KEYS:
-        return manual_point_on_line(results, follow, value, fit)
+        return _mit_waist_um(results, manual_point_on_line(results, follow, value, fit))
     if follow in (None, BEST_POINT_FOLLOW_STORED):
         best = dict(results.get('best') or {})
         if best.get('win_input') is None:
@@ -595,7 +568,7 @@ def best_point_by(results, follow=None, value=None, fit=None):
             best['at_edge'] = bool(i in (0, len(width_vals) - 1)
                                    or j in (0, len(win_input_vals) - 1))
         best['follow'] = BEST_POINT_FOLLOW_STORED
-        return best
+        return _mit_waist_um(results, best)
     grid = _grid_for(results, follow)
     if grid is None:
         return None
@@ -603,11 +576,11 @@ def best_point_by(results, follow=None, value=None, fit=None):
     if not np.any(finite):
         return None
     i, j = np.unravel_index(int(np.argmin(np.where(finite, grid, np.inf))), grid.shape)
-    return dict(
+    return _mit_waist_um(results, dict(
         win_input=float(win_input_vals[j]), width=float(width_vals[i]),
         row=int(i), col=int(j), value=float(grid[i, j]), follow=follow,
         at_edge=bool(i in (0, grid.shape[0] - 1) or j in (0, grid.shape[1] - 1)),
-    )
+    ))
 
 
 def output_prefix(results):
@@ -639,21 +612,15 @@ def _finish(fig, out_dir, filename, save, show, confirm_overwrite):
 # Die vier Metrik-Karten. Als dicts statt Tupel, weil die Amplituden-Karten
 # zusaetzlich vmin/vmax mitbringen (gemeinsame Farbskala, siehe unten) und
 # nicht in Prozent gerechnet werden.
-# Der Index h/w steht ueberall dabei - an der Colorbar wie im Titel. Er sagt,
-# WELCHE Metrik-Familie gemeint ist (h = harte Pitch-Box-Maske, w =
-# atom-gewichtet), und ist dieselbe Konvention, die Hard_Optimization und
-# Weighted_Optimization benutzen und die die Kurven im Querschnitt tragen.
-# Ohne ihn hiess dieselbe Groesse hier "Uniformity" und dort "U_h".
 METRIC_PANELS = [
-    dict(key="uniformity_grid", cbar=r"Uniformity $U_h = \sigma/\mu$ (%)",
-         title=r"Uniformity $U_h$ (hard mask)", cmap="viridis_r", scale=100.0),
-    dict(key="uniformity_weighted_grid",
-         cbar=r"Uniformity $U_w = \sigma_w/\mu_w$ (%)",
-         title=r"Uniformity $U_w$ (atom-weighted)", cmap="viridis_r", scale=100.0),
-    dict(key="crosstalk_grid", cbar=r"Crosstalk $\eta_h$ (%)",
-         title=r"Crosstalk $\eta_h$ (hard mask)", cmap="Oranges", scale=100.0),
-    dict(key="eta_weighted_grid", cbar=r"Crosstalk $\eta_w$ (%)",
-         title=r"Crosstalk $\eta_w$ (atom-weighted)", cmap="Oranges", scale=100.0),
+    dict(key="uniformity_grid", cbar=r"Uniformity $\sigma/\mu$ [%]",
+         title="Uniformity (hard mask)", cmap="viridis_r", scale=100.0),
+    dict(key="uniformity_weighted_grid", cbar=r"Uniformity$_w$ $\sigma_w/\mu_w$ [%]",
+         title=r"Uniformity$_w$ (atom-weighted)", cmap="viridis_r", scale=100.0),
+    dict(key="crosstalk_grid", cbar=r"Crosstalk $\eta$ [%]",
+         title="Crosstalk (hard mask)", cmap="Oranges", scale=100.0),
+    dict(key="eta_weighted_grid", cbar=r"Crosstalk$_w$ $\eta_w$ [%]",
+         title=r"Crosstalk$_w$ (atom-weighted)", cmap="Oranges", scale=100.0),
 ]
 
 # Eigene Farbtabelle fuer die Amplituden, damit man sie auf einen Blick von
@@ -668,6 +635,44 @@ R_CLAMP_LABEL = "at optimizer bound $r_{\\mathrm{bounds}}$"
 # Toleranz, ab der ein Amplitudenwert als "auf der Schranke" gilt. 1e-6 ist
 # grob das, was Nelder-Mead an einer geklemmten Grenze uebrig laesst.
 R_BOUND_TOL = 1e-6
+
+
+def _label_laenge(text):
+    """Ungefaehre DARGESTELLTE Laenge eines Legendentextes.
+
+    Mathtext zaehlt anders als der Rohstring: "$\\omega$" sind neun Zeichen
+    im Code und eines im Bild. Ohne diese Korrektur waere jeder Eintrag mit
+    Formelzeichen viel zu lang geschaetzt.
+    """
+    s = re.sub(r"\\[a-zA-Z]+", "x", str(text))
+    return len(s.replace("$", "").replace("{", "").replace("}", ""))
+
+
+def legend_ncol(labels, max_chars=78, symbol_breite=6):
+    """Wie viele Legendeneintraege nebeneinander gesetzt werden.
+
+    Die Regel ist bewusst grob und in zwei Stufen:
+
+    1. Passt ALLES in eine Zeile (geschaetzte Breite <= `max_chars`), kommt
+       auch alles in eine Zeile.
+    2. Sonst ZWEI pro Zeile, zentriert. Drei waeren technisch oft noch
+       moeglich, aber eine Legende, die die Figur fast ausfuellt, liest sich
+       schlechter als zwei ruhige Spalten.
+
+    `symbol_breite` ist der Platz fuer Linie/Marker und den Abstand vor dem
+    Text, ebenfalls in Zeichen gerechnet.
+
+    Eins nur dann, wenn schon ein einzelner Eintrag breiter ist als die
+    Zeile - dann hilft auch Zweispaltigkeit nicht.
+    """
+    n = len(labels)
+    if n <= 1:
+        return max(1, n)
+    laengen = [_label_laenge(l) + symbol_breite for l in labels]
+    if sum(laengen) <= max_chars:
+        return n
+    zwei = sorted(laengen)[-2:]
+    return 2 if sum(zwei) <= max_chars else 1
 
 
 def log_ticks(vmin, vmax, max_ticks=7):
@@ -788,11 +793,22 @@ def r_bounds_clamped_fraction(results):
     return tuple(anteile)
 
 
+def _mit_kartenstil(func):
+    """Wie _mit_stil, nur mit den groesseren Schriften von MAP_STYLE - die
+    Kartenplots werden im Dokument nicht mehr verkleinert."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with plt.rc_context(MAP_STYLE):
+            return func(*args, **kwargs)
+    return wrapper
+
+
+@_mit_kartenstil
 def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens",
                            draw_best_point=True, save=True, show=False,
                            confirm_overwrite=None, fit_line=None,
                            with_amplitudes=False, forbidden_factor=None,
-                           best_point=None, fit_line_dashed_extrapolation=False):
+                           best_point=None, marks=None, valley=None):
     """Metrik-Karten: 2x2, mit with_amplitudes=True 3x2.
 
     with_amplitudes haengt r_x und r_y als dritte Zeile an und schreibt in
@@ -800,10 +816,8 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
     2x2-Fassung unveraendert daneben bestehen bleibt.
 
     fit_line: Ergebnis von fit_valley_line() - dann wird die Gerade in alle
-    Karten eingezeichnet, als durchgezogene Linie ueber den ganzen gescannten
-    Bereich. Mit fit_line_dashed_extrapolation=True wird der Teil ausserhalb
-    des Fit-Bereichs stattdessen gepunktet (siehe draw_fit_line_on_map)."""
-    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
+    Karten eingezeichnet (siehe draw_fit_line_on_map)."""
+    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
     width_vals = np.asarray(results['width_vals'], dtype=float)
     x_vals, x_label, reversed_ = win_axis_values(results, win_axis)
 
@@ -829,111 +843,113 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
     # aussen herum - das spart pro eingesparter Zeile rund einen halben Zoll,
     # der direkt in die Kartenhoehe geht (die Amplitudenkarten unten waren
     # sonst die kleinsten).
-    with dokument_stil(figsize[0]):
-        fig, axes = plt.subplots(n_rows, 2, figsize=figsize,
-                                 sharex="all", sharey="all",
-                                 constrained_layout=True)
-        for ax, panel in zip(axes.flat, panels):
-            Z = np.asarray(results[panel['key']], dtype=float) * panel['scale']
-            maske = panel.get('mask')
-            if maske is not None:
-                # Geklemmte Punkte aus der Farbskala nehmen; sie kommen gleich
-                # als eigene graue Ebene darueber.
-                Z = np.where(maske, np.nan, Z)
-            Z_plot = Z[:, ::-1] if reversed_ else Z
-            norm = panel.get('norm')
-            # pcolormesh nimmt norm ODER vmin/vmax, nie beides.
-            grenzen = (dict(norm=norm) if norm is not None
-                       else dict(vmin=panel.get('vmin'), vmax=panel.get('vmax')))
-            im = ax.pcolormesh(x_vals, width_vals * 1e-6, Z_plot, shading="auto",
-                               cmap=panel['cmap'], **grenzen)
-            ticks = log_ticks(norm.vmin, norm.vmax) if norm is not None else None
-            cbar = fig.colorbar(im, ax=ax, label=panel['cbar'],
-                                **({} if ticks is None else dict(ticks=ticks)))
-            if ticks is not None:
-                cbar.ax.yaxis.set_major_formatter(FormatStrFormatter("%g"))
-                cbar.ax.minorticks_off()
-            if maske is not None and maske.any():
-                M = np.where(maske, 1.0, np.nan)
-                M_plot = M[:, ::-1] if reversed_ else M
-                # NaN zeichnet matplotlib durchsichtig - uebrig bleibt genau
-                # der geklemmte Bereich in Grau, ungueltige Punkte bleiben weiss.
-                ax.pcolormesh(x_vals, width_vals * 1e-6, M_plot, shading="auto",
-                              cmap=ListedColormap([R_CLAMP_COLOR]), vmin=0.0, vmax=1.0)
-            ax.set_title(panel['title'])
-            if forbidden_factor is not None:
-                draw_forbidden_region(ax, results, win_axis, forbidden_factor)
-            if fit_line is not None:
-                draw_fit_line_on_map(ax, results, fit_line, win_axis,
-                                 dashed_extrapolation=fit_line_dashed_extrapolation)
-            if draw_best_point:
-                # Gezeichnet wird der Stern in jeder Karte, den Legendeneintrag
-                # holt sich aber nur die erste - sonst steht "Working point"
-                # sechsmal in der gemeinsamen Legende.
-                draw_best_point_marker(ax, results, win_axis, legend=False,
-                                       label=(ax is axes.flat[0]), best=best_point)
-        # Uebrig bleibt damit hoechstens die Ausgleichsgerade - ein Eintrag,
-        # einmal unter der ganzen Figur statt vier Kaesten mitten in den Karten.
-        for ax in axes[-1, :]:
-            ax.set_xlabel(x_label)
-        for ax in axes[:, 0]:
-            ax.set_ylabel(WIDTH_LABEL)
+    fig, axes = plt.subplots(n_rows, 2, figsize=figsize,
+                             sharex="all", sharey="all",
+                             constrained_layout=True)
+    for ax, panel in zip(axes.flat, panels):
+        Z = np.asarray(results[panel['key']], dtype=float) * panel['scale']
+        maske = panel.get('mask')
+        if maske is not None:
+            # Geklemmte Punkte aus der Farbskala nehmen; sie kommen gleich
+            # als eigene graue Ebene darueber.
+            Z = np.where(maske, np.nan, Z)
+        Z_plot = Z[:, ::-1] if reversed_ else Z
+        norm = panel.get('norm')
+        # pcolormesh nimmt norm ODER vmin/vmax, nie beides.
+        grenzen = (dict(norm=norm) if norm is not None
+                   else dict(vmin=panel.get('vmin'), vmax=panel.get('vmax')))
+        im = ax.pcolormesh(x_vals, width_vals * 1e-6, Z_plot, shading="auto",
+                           cmap=panel['cmap'], **grenzen)
+        ticks = log_ticks(norm.vmin, norm.vmax) if norm is not None else None
+        cbar = fig.colorbar(im, ax=ax, label=panel['cbar'],
+                            **({} if ticks is None else dict(ticks=ticks)))
+        if ticks is not None:
+            cbar.ax.yaxis.set_major_formatter(FormatStrFormatter("%g"))
+            cbar.ax.minorticks_off()
+        if maske is not None and maske.any():
+            M = np.where(maske, 1.0, np.nan)
+            M_plot = M[:, ::-1] if reversed_ else M
+            # NaN zeichnet matplotlib durchsichtig - uebrig bleibt genau
+            # der geklemmte Bereich in Grau, ungueltige Punkte bleiben weiss.
+            ax.pcolormesh(x_vals, width_vals * 1e-6, M_plot, shading="auto",
+                          cmap=ListedColormap([R_CLAMP_COLOR]), vmin=0.0, vmax=1.0)
+        ax.set_title(panel['title'])
+        if forbidden_factor is not None:
+            draw_forbidden_region(ax, results, win_axis, forbidden_factor)
+        if fit_line is not None:
+            draw_valley_marks_on_map(ax, valley, fit_line, win_axis, marks)
+            draw_fit_line_on_map(ax, results, fit_line, win_axis, marks)
+        if draw_best_point:
+            # Gezeichnet wird der Stern in jeder Karte, den Legendeneintrag
+            # holt sich aber nur die erste - sonst steht "Working point"
+            # sechsmal in der gemeinsamen Legende.
+            draw_best_point_marker(ax, results, win_axis, legend=False,
+                                   label=(ax is axes.flat[0]), best=best_point)
+    # Uebrig bleibt damit hoechstens die Ausgleichsgerade - ein Eintrag,
+    # einmal unter der ganzen Figur statt vier Kaesten mitten in den Karten.
+    for ax in axes[-1, :]:
+        ax.set_xlabel(x_label)
+    for ax in axes[:, 0]:
+        ax.set_ylabel(WIDTH_LABEL)
 
-        handles, labels = axes.flat[0].get_legend_handles_labels()
-        if any(p.get('clamped') for p in panels):
-            # Das Grau erklaert sich nicht von selbst - ein Eintrag in der
-            # ohnehin vorhandenen gemeinsamen Legende, kein zweiter Kasten.
-            handles.append(Patch(facecolor=R_CLAMP_COLOR, edgecolor="none"))
-            labels.append(R_CLAMP_LABEL)
-        if handles:
-            fig.legend(handles, labels, loc="outside lower center",
-                       ncol=min(3, len(handles)), framealpha=0.9)
-        dateiname = (f"{prefix}_metric_comparison_amp.pdf" if with_amplitudes
-                     else f"{prefix}_metric_comparison.pdf")
-        return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite)
+    handles, labels = axes.flat[0].get_legend_handles_labels()
+    if any(p.get('clamped') for p in panels):
+        # Das Grau erklaert sich nicht von selbst - ein Eintrag in der
+        # ohnehin vorhandenen gemeinsamen Legende, kein zweiter Kasten.
+        handles.append(Patch(facecolor=R_CLAMP_COLOR, edgecolor="none"))
+        labels.append(R_CLAMP_LABEL)
+    if handles:
+        fig.legend(handles, labels, loc="outside lower center",
+                   ncol=legend_ncol(labels), framealpha=0.9)
+    dateiname = (f"{prefix}_metric_comparison_amp.pdf" if with_amplitudes
+                 else f"{prefix}_metric_comparison.pdf")
+    return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite)
 
 
+@_mit_stil
 def plot_region(results, prefix, out_dir=None, win_axis="before_lens",
                 draw_best_point=True, save=True, show=False, confirm_overwrite=None,
-                forbidden_factor=None, best_point=None):
-    """Score-Heatmap, auf Wunsch mit dem besten Punkt."""
-    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
+                forbidden_factor=None, best_point=None,
+                fit_line=None, marks=None, valley=None):
+    """Score-Heatmap, auf Wunsch mit dem besten Punkt und der Geraden."""
+    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
     width_vals = np.asarray(results['width_vals'], dtype=float)
     x_vals, x_label, reversed_ = win_axis_values(results, win_axis)
     Z = score_grid(results)
     if Z is None:
         raise ValueError("Der Datensatz enthaelt kein Score-Gitter.")
-    # In Prozent, wie U und eta und wie J im Querschnitt. "roh" bezieht sich
-    # auf die fehlende gitterweite Normierung, nicht auf die Einheit.
+    # J wird wie alle Prozentgroessen dieses Ordners mal 100 gezeigt.
     Z = np.asarray(Z, dtype=float) * 100.0
     Z_plot = Z[:, ::-1] if reversed_ else Z
 
     kind = dataset_kind(results)
-    score_label = ("Consistency score $J$ (%)" if kind == "hard_check"
-                   else r"Penalty objective $J$ (%)")
+    score_label = ("Consistency score $J$ [%] (lower is better)" if kind == "hard_check"
+                   else r"Penalty objective $J$ [%] (lower is better)")
     title = "Consistency region" if kind == "hard_check" else "Penalty region"
 
-    with dokument_stil(REGION_FIGSIZE[0]):
-        fig, ax = plt.subplots(figsize=REGION_FIGSIZE, constrained_layout=True)
-        im = ax.pcolormesh(x_vals, width_vals * 1e-6, Z_plot, shading="auto", cmap="magma_r")
-        fig.colorbar(im, ax=ax, label=score_label)
-        ax.set_xlabel(x_label)
-        ax.set_ylabel(WIDTH_LABEL)
+    fig, ax = plt.subplots(figsize=(8.0, 6.0), constrained_layout=True)
+    im = ax.pcolormesh(x_vals, width_vals * 1e-6, Z_plot, shading="auto", cmap="magma_r")
+    fig.colorbar(im, ax=ax, label=score_label)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(WIDTH_LABEL)
 
-        region = results.get('region') or {}
-        pct = results.get('combo_percentile')
-        if pct is not None and region.get('n_points_region') is not None:
-            title += (f"\nbest {pct:.0f}% of all grid points: "
-                      f"{region['n_points_region']}/{region['n_points_total']}")
-        ax.set_title(title)
+    region = results.get('region') or {}
+    pct = results.get('combo_percentile')
+    if pct is not None and region.get('n_points_region') is not None:
+        title += (f"\nbest {pct:.0f}% of all grid points: "
+                  f"{region['n_points_region']}/{region['n_points_total']}")
+    ax.set_title(title)
 
-        if forbidden_factor is not None:
-            draw_forbidden_region(ax, results, win_axis, forbidden_factor)
-        if draw_best_point:
-            draw_best_point_marker(ax, results, win_axis, best=best_point)
-        elif forbidden_factor is not None:
-            ax.legend(loc="best", framealpha=0.85)
-        return _finish(fig, out_dir, f"{prefix}_region.pdf", save, show, confirm_overwrite)
+    if forbidden_factor is not None:
+        draw_forbidden_region(ax, results, win_axis, forbidden_factor)
+    if fit_line is not None:
+        draw_valley_marks_on_map(ax, valley, fit_line, win_axis, marks)
+        draw_fit_line_on_map(ax, results, fit_line, win_axis, marks)
+    if draw_best_point:
+        draw_best_point_marker(ax, results, win_axis, best=best_point)
+    elif forbidden_factor is not None or fit_line is not None:
+        ax.legend(loc="best", framealpha=0.85)
+    return _finish(fig, out_dir, f"{prefix}_region.pdf", save, show, confirm_overwrite)
 
 
 def plot_amplitudes(results, prefix, out_dir=None, save=True, show=False,
@@ -941,7 +957,7 @@ def plot_amplitudes(results, prefix, out_dir=None, save=True, show=False,
     """Die 6-Panel-Uebersicht und die Schnitte des vorhandenen
     AmplitudeScanPlotter (unveraendertes Modul aus Weighted_Optimization,
     hier nur in Fit_Plots umgeleitet)."""
-    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
+    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
     plotter = AmplitudeScanPlotter(results, out_dir=out_dir, confirm_overwrite=confirm_overwrite)
     overview = plotter.plot_scan2d_combined(show=show, save=save)
     cuts = plotter.plot_dependence_cuts(show=show, save=save)
@@ -955,11 +971,12 @@ AGREEMENT_COLORS = ["#d9d9d9", "#4c78a8", "#f58518", "#54a24b"]
 AGREEMENT_LABELS = ["neither good", "only weighted good", "only hard good", "both good"]
 
 
+@_mit_stil
 def plot_agreement_map(results, prefix, out_dir=None, win_axis="before_lens",
                        save=True, show=False, confirm_overwrite=None,
                        forbidden_factor=None):
     """Karte der vier Kategorien: wo sind gewichtet und hart einig?"""
-    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
+    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
     c = results.get('consistency') or {}
     agreement = np.asarray(c.get('agreement_map'), dtype=float)
     width_vals = np.asarray(results['width_vals'], dtype=float)
@@ -969,29 +986,29 @@ def plot_agreement_map(results, prefix, out_dir=None, win_axis="before_lens",
     cmap = matplotlib.colors.ListedColormap(AGREEMENT_COLORS)
     norm = matplotlib.colors.BoundaryNorm([-0.5, 0.5, 1.5, 2.5, 3.5], cmap.N)
 
-    with dokument_stil(AGREEMENT_FIGSIZE[0]):
-        fig, ax = plt.subplots(figsize=AGREEMENT_FIGSIZE, constrained_layout=True)
-        im = ax.pcolormesh(x_vals, width_vals * 1e-6, Z, shading="auto", cmap=cmap, norm=norm)
-        cbar = fig.colorbar(im, ax=ax, ticks=[0, 1, 2, 3])
-        cbar.ax.set_yticklabels(AGREEMENT_LABELS)
-        ax.set_xlabel(x_label)
-        ax.set_ylabel(WIDTH_LABEL)
-        pct = c.get('good_percentile')
-        frac = c.get('fraction_weighted_good_also_hard_good')
-        title = f"Agreement map (best {pct:.0f}% per objective)" if pct is not None else "Agreement map"
-        if frac is not None:
-            title += f"\n{frac * 100:.1f}% of weighted-good points are hard-good too"
-        ax.set_title(title)
-        if forbidden_factor is not None:
-            draw_forbidden_region(ax, results, win_axis, forbidden_factor)
-            ax.legend(loc="best", framealpha=0.85)
-        return _finish(fig, out_dir, f"{prefix}_agreement.pdf", save, show, confirm_overwrite)
+    fig, ax = plt.subplots(figsize=(8.6, 6.0), constrained_layout=True)
+    im = ax.pcolormesh(x_vals, width_vals * 1e-6, Z, shading="auto", cmap=cmap, norm=norm)
+    cbar = fig.colorbar(im, ax=ax, ticks=[0, 1, 2, 3])
+    cbar.ax.set_yticklabels(AGREEMENT_LABELS)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(WIDTH_LABEL)
+    pct = c.get('good_percentile')
+    frac = c.get('fraction_weighted_good_also_hard_good')
+    title = f"Agreement map (best {pct:.0f}% per objective)" if pct is not None else "Agreement map"
+    if frac is not None:
+        title += f"\n{frac * 100:.1f}% of weighted-good points are hard-good too"
+    ax.set_title(title)
+    if forbidden_factor is not None:
+        draw_forbidden_region(ax, results, win_axis, forbidden_factor)
+        ax.legend(loc="best", framealpha=0.85)
+    return _finish(fig, out_dir, f"{prefix}_agreement.pdf", save, show, confirm_overwrite)
 
 
+@_mit_stil
 def plot_score_scatter(results, prefix, out_dir=None, save=True, show=False,
                        confirm_overwrite=None):
     """Streudiagramm: gewichteter Score vs. nachgerechneter harter Score."""
-    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
+    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
     c = results.get('consistency') or {}
     sw = np.asarray(c.get('score_weighted'), dtype=float).ravel()
     sh = np.asarray(c.get('score_hard'), dtype=float).ravel()
@@ -1001,48 +1018,42 @@ def plot_score_scatter(results, prefix, out_dir=None, save=True, show=False,
 
     # Figur bewusst etwas groesser und mit einzeiligem Titel: ein
     # zweizeiliger Titel ueberlappte hier mit dem gedrehten y-Achsenlabel.
-    with dokument_stil(SCATTER_FIGSIZE[0]):
-        fig, ax = plt.subplots(figsize=SCATTER_FIGSIZE, constrained_layout=True)
-        both = ok & good_w & good_h
-        only_w = ok & good_w & ~good_h
-        rest = ok & ~good_w
-        ax.scatter(sw[rest] * 100, sh[rest] * 100, s=SA(18), c="#bbbbbb", label="rest")
-        ax.scatter(sw[only_w] * 100, sh[only_w] * 100, s=SA(26), c="#f58518",
-                   label="weighted good, hard not")
-        ax.scatter(sw[both] * 100, sh[both] * 100, s=SA(32), c="#54a24b",
-                   label="good under both")
-        ax.set_xlabel("Weighted score (%)")
-        ax.set_ylabel("Recomputed hard score (%)")
-        ax.set_title("Weighted vs. recomputed hard score")
+    fig, ax = plt.subplots(figsize=(7.6, 7.0), constrained_layout=True)
+    both = ok & good_w & good_h
+    only_w = ok & good_w & ~good_h
+    rest = ok & ~good_w
+    ax.scatter(sw[rest] * 100, sh[rest] * 100, s=18, c="#bbbbbb", label="rest")
+    ax.scatter(sw[only_w] * 100, sh[only_w] * 100, s=26, c="#f58518", label="weighted good, hard not")
+    ax.scatter(sw[both] * 100, sh[both] * 100, s=32, c="#54a24b", label="good under both")
+    ax.set_xlabel("Weighted score [%]")
+    ax.set_ylabel("Recomputed hard score [%]")
+    ax.set_title("Weighted vs. recomputed hard score")
 
-        # Die interessanten (guten) Punkte draengen sich sonst alle in der
-        # linken unteren Ecke, weil die schlechten Punkte um Groessenordnungen
-        # hoehere Scores haben. Bei grosser Spannweite daher log-log.
-        def _needs_log(values):
-            pos = values[values > 0]
-            return pos.size > 2 and (pos.max() / pos.min()) > 20.0
+    # Die interessanten (guten) Punkte draengen sich sonst alle in der
+    # linken unteren Ecke, weil die schlechten Punkte um Groessenordnungen
+    # hoehere Scores haben. Bei grosser Spannweite daher log-log.
+    def _needs_log(values):
+        pos = values[values > 0]
+        return pos.size > 2 and (pos.max() / pos.min()) > 20.0
 
-        if _needs_log(sw[ok]) and _needs_log(sh[ok]):
-            ax.set_xscale('log')
-            ax.set_yscale('log')
-            ax.set_xlabel("Weighted score (%, log)")
-            ax.set_ylabel("Recomputed hard score (%, log)")
+    if _needs_log(sw[ok]) and _needs_log(sh[ok]):
+        ax.set_xscale('log')
+        ax.set_yscale('log')
+        ax.set_xlabel("Weighted score [%] (log)")
+        ax.set_ylabel("Recomputed hard score [%] (log)")
 
-        lines = []
-        if c.get('pearson_score') is not None:
-            lines.append(f"Pearson $r$ (score) = {c['pearson_score']:.4f}")
-        if c.get('fraction_weighted_good_also_hard_good') is not None:
-            lines.append(f"weighted-good also hard-good: "
-                         f"{c['fraction_weighted_good_also_hard_good'] * 100:.1f}% "
-                         f"({c.get('n_both_good')}/{c.get('n_weighted_good')})")
-        if lines:
-            # Schriftgroesse kommt aus dokument_stil(); ein fester Wert waere
-            # hier genau der Fehler, den der Massstab beheben soll.
-            ax.text(0.03, 0.97, "\n".join(lines), transform=ax.transAxes,
-                    va="top", ha="left",
-                    bbox=dict(boxstyle="round", facecolor="white", alpha=0.85))
-        ax.legend(loc="lower right", framealpha=0.85)
-        return _finish(fig, out_dir, f"{prefix}_score_scatter.pdf", save, show, confirm_overwrite)
+    lines = []
+    if c.get('pearson_score') is not None:
+        lines.append(f"Pearson $r$ (score) = {c['pearson_score']:.4f}")
+    if c.get('fraction_weighted_good_also_hard_good') is not None:
+        lines.append(f"weighted-good also hard-good: "
+                     f"{c['fraction_weighted_good_also_hard_good'] * 100:.1f}% "
+                     f"({c.get('n_both_good')}/{c.get('n_weighted_good')})")
+    if lines:
+        ax.text(0.03, 0.97, "\n".join(lines), transform=ax.transAxes, va="top", ha="left",
+                fontsize=9, bbox=dict(boxstyle="round", facecolor="white", alpha=0.85))
+    ax.legend(loc="lower right", framealpha=0.85)
+    return _finish(fig, out_dir, f"{prefix}_score_scatter.pdf", save, show, confirm_overwrite)
 
 
 # ======================================================================
@@ -1071,6 +1082,7 @@ def _r_at_best(results):
 # dieser Reihenfolge stehen sie auch im Bericht zum selbst gewaehlten Punkt.
 POINT_VALUE_KEYS = ["uniformity_hard", "uniformity_weighted",
                     "crosstalk_hard", "crosstalk_weighted",
+                    "uniformity_kombi", "crosstalk_kombi",
                     "r_x", "r_y", "penalty_raw"]
 
 
@@ -1134,9 +1146,11 @@ POINT_VALUE_LABELS = {
     "uniformity_weighted": "Uniformity gewichtet U_w",
     "crosstalk_hard": "Crosstalk hart eta_h",
     "crosstalk_weighted": "Crosstalk gewichtet eta_w",
+    "uniformity_kombi": "Uniformity kombiniert U_c",
+    "crosstalk_kombi": "Crosstalk kombiniert eta_c",
     "r_x": "Amplituden-Verhaeltnis r_x",
     "r_y": "Amplituden-Verhaeltnis r_y",
-    "penalty_raw": "J (Score, roh)",
+    "penalty_raw": "J (Score)",
 }
 
 
@@ -1337,27 +1351,6 @@ def _scan_parameter_lines(results):
             lines.append(
                 f"- airy_scale_factor = {float(faktor):.4f} "
                 f"(`first_zero_radius = Faktor * waist`)")
-    # Kohaerenz: mit oder ohne den statischen Interferenzanteil der
-    # frequenzentarteten Spots gerechnet? Fehlt der Schluessel, stammt der
-    # Datensatz aus der Zeit vor der Option und wurde inkohaerent gerechnet.
-    koh = results.get('coherent')
-    paare = results.get('n_degenerate_pairs')
-    zusatz = "" if paare is None else f", {int(paare)} entartete(s) Paar(e)"
-    if koh is None:
-        lines.append(
-            "- **Kohaerenz: nicht im Datensatz gespeichert** - der Scan lief vor "
-            "dieser Option und hat die statische Interferenz frequenzentarteter "
-            "Spots NICHT mitgerechnet. Mit neueren, kohaerent gerechneten "
-            "Datensaetzen ist er deshalb nicht direkt vergleichbar.")
-    elif koh:
-        lines.append(
-            f"- Kohaerenz: statische Interferenz mitgerechnet, Phasendifferenz 0 "
-            f"(voll konstruktiv, unguenstigster Fall){zusatz}")
-    else:
-        lines.append(
-            f"- Kohaerenz: AUS - reine Intensitaetssumme, statische Interferenz "
-            f"nicht enthalten{zusatz}")
-
     sigma = results.get('sigma_atom')
     if sigma is not None:
         lines.append(
@@ -1378,10 +1371,7 @@ def _region_lines(results, heading, intro):
     lines += [
         intro.format(pct=results.get('combo_percentile', float('nan')),
                      n_region=region['n_points_region'], n_total=region['n_points_total'],
-                     # In Prozent, wie J im Plot und in der Punkt-Tabelle;
-                     # der rohe Wert steht daneben.
-                     threshold=(f"{thr * 100:.3f}% (roh {thr:.5f})"
-                                if thr is not None else "n/a")),
+                     threshold=(f"{thr:.4f}" if thr is not None else "n/a")),
         "",
         f"- win_input (vor der Linse): {region['win_input_min'] * 1e3:.4f} .. "
         f"{region['win_input_max'] * 1e3:.4f} mm",
@@ -1407,12 +1397,9 @@ def _best_point_lines(results, heading):
         f"Crosstalk_hart = {best['crosstalk_hart'] * 100:.3f}%",
         f"- Uniformity_weighted = {best['uniformity_weighted'] * 100:.3f}%, "
         f"Crosstalk_weighted = {best['crosstalk_weighted'] * 100:.3f}%",
-        f"- Uniformity_kombi = {best['uniformity_kombi']:.4f}, "
-        f"Crosstalk_kombi = {best['crosstalk_kombi']:.4f} (rohe Einheiten)",
-        # J in Prozent, wie im Plot und wie U und eta - der rohe Wert steht
-        # daneben, weil der Optimierer ihn so ausgibt.
-        f"- J (Score) = {best['combined_score'] * 100:.3f}% "
-        f"(roh {best['combined_score']:.5f})",
+        f"- Uniformity_kombi U_c = {best['uniformity_kombi'] * 100:.3f}%, "
+        f"Crosstalk_kombi eta_c = {best['crosstalk_kombi'] * 100:.3f}%",
+        f"- J (Score) = {best['combined_score'] * 100:.4f}%",
         "",
     ]
     if best.get('at_edge'):
@@ -1617,9 +1604,8 @@ def make_all(results, win_axis="before_lens", draw_best_point=True,
              valley_guide_halfwidth=GUIDE_HALFWIDTH_DEFAULT,
              valley_waist_range=None, valley_width_range=None,
              valley_traces=None, valley_fit_line=False, valley_path_mode="valley",
-             valley_map_show_path=False,
-             fit_line_on_maps=False, fit_line_dashed_extrapolation=False,
-             amplitude_maps=False,
+             valley_max_axes=MAX_CUT_AXES_DEFAULT, map_marks=None,
+             fit_line_on_maps=False, amplitude_maps=False,
              forbidden_factor=None, forbidden_excluded=False,
              forbidden_draw=True, best_point_follow=None, best_point_value=None):
     """Erzeugt alle zum Datensatz passenden Plots und den Bericht.
@@ -1627,14 +1613,13 @@ def make_all(results, win_axis="before_lens", draw_best_point=True,
     Gibt ein dict mit den Pfaden zurueck. Wird sowohl von run_plots.py als
     auch am Ende der beiden Scan-Skripte aufgerufen.
     """
-    plots_dir = paths.fit_plots_dir() if plots_dir is None else plots_dir
+    plots_dir = paths.FIT_PLOTS_DIR if plots_dir is None else plots_dir
     results_dir = paths.FIT_RESULTS_DIR if results_dir is None else results_dir
     confirm_overwrite = None if ask_before_save else (lambda existing_path: True)
 
     prefix = output_prefix(results)
     kind = dataset_kind(results)
-    out = dict(prefix=prefix, kind=kind, plots={}, report=None,
-               plots_dir=plots_dir, results_dir=results_dir)
+    out = dict(prefix=prefix, kind=kind, plots={}, report=None)
 
     # Die Gerade fuer die Metrik-Karten: dieselbe wie im Talschnitt, also
     # ueber der µm-Achse und der eingestellten Fuehrungsgroesse - egal,
@@ -1651,6 +1636,17 @@ def make_all(results, win_axis="before_lens", draw_best_point=True,
               f"{_follow_label(valley_follow)} bleiben zu wenige brauchbare "
               "Talpunkte uebrig.")
     out['map_fit_line'] = karten_fit
+
+    marken = MAP_MARKS_DEFAULT if map_marks is None else map_marks
+    # Der Talpfad wird nur geholt, wenn ihn auch jemand sehen will - er
+    # kostet einen zweiten Durchlauf durch das Gitter.
+    karten_valley = None
+    if karten_fit is not None and any(marken.get(k) for k in ("path", "used", "unused")):
+        karten_valley = extract_valley(
+            results, axis=VALLEY_FIT_AXIS, follow=valley_follow,
+            select=valley_select, guide_follow=valley_guide_follow,
+            guide_halfwidth=valley_guide_halfwidth,
+            waist_range=valley_waist_range, width_range=valley_width_range)
 
     # forbidden_factor steuert BEIDES: das Einzeichnen und den Abschnitt im
     # Bericht. Wer die Punkte ausschliesst, ohne die Grenze zu zeichnen,
@@ -1690,76 +1686,91 @@ def make_all(results, win_axis="before_lens", draw_best_point=True,
         stern = best_point_by(results, None)
         out['best_point'] = stern
 
-    # Kein gemeinsamer rc_context mehr: jede Zeichenfunktion oeffnet ihr
-    # eigenes dokument_stil(), weil der Massstab an ihrer Figurbreite
-    # haengt. legend_fontsize wird als DOKUMENT-Groesse durchgereicht.
-    out['plots']['metric_comparison'] = plot_metric_comparison(
-        results, prefix, out_dir=plots_dir, win_axis=win_axis,
-        draw_best_point=draw_best_point, save=save, show=show,
-        confirm_overwrite=confirm_overwrite, fit_line=karten_fit,
-        fit_line_dashed_extrapolation=fit_line_dashed_extrapolation,
-        forbidden_factor=zeichnen, best_point=stern)
-    if amplitude_maps:
-        if amplitude_panels(results) is None:
-            # Kein Abbruch: die uebrigen Plots des Laufs sollen nicht an
-            # einer fehlenden Zusatzkarte scheitern.
-            print("Hinweis: keine 6-Karten-Uebersicht - der Datensatz "
-                  "fuehrt keine Amplituden (r_x_grid/r_y_grid) mit.")
-        else:
-            out['plots']['metric_comparison_amp'] = plot_metric_comparison(
-                results, prefix, out_dir=plots_dir, win_axis=win_axis,
-                draw_best_point=draw_best_point, save=save, show=show,
-                confirm_overwrite=confirm_overwrite, fit_line=karten_fit,
-                fit_line_dashed_extrapolation=fit_line_dashed_extrapolation,
-                with_amplitudes=True, forbidden_factor=zeichnen,
-                best_point=stern)
-            geklemmt = r_bounds_clamped_fraction(results)
-            if geklemmt is not None and max(geklemmt) > 0:
-                lo, hi = results['r_bounds']
-                print(f"Hinweis zu den Amplituden-Karten: r_bounds = "
-                      f"({lo:g}, {hi:g}); auf der Schranke liegen "
-                      f"{geklemmt[0] * 100:.1f}% der r_x- und "
-                      f"{geklemmt[1] * 100:.1f}% der r_y-Werte. Diese "
-                      "Punkte sind keine freien Optima - im Bild sind "
-                      "sie ein Plateau.")
-    out['plots']['region'] = plot_region(
-        results, prefix, out_dir=plots_dir, win_axis=win_axis,
-        draw_best_point=draw_best_point, save=save, show=show,
-        confirm_overwrite=confirm_overwrite, forbidden_factor=zeichnen,
-        best_point=stern)
-    if kind == "hard_check" and results.get('consistency'):
-        out['plots']['agreement'] = plot_agreement_map(
+    with plt.rc_context({**LATEX_STYLE, "legend.fontsize": legend_fontsize}):
+        out['plots']['metric_comparison'] = plot_metric_comparison(
             results, prefix, out_dir=plots_dir, win_axis=win_axis,
-            save=save, show=show, confirm_overwrite=confirm_overwrite,
-            forbidden_factor=zeichnen)
-        out['plots']['score_scatter'] = plot_score_scatter(
-            results, prefix, out_dir=plots_dir, save=save, show=show,
-            confirm_overwrite=confirm_overwrite)
-    if valley_cut:
-        # Im Geradenmodus IST die Gerade der Schnitt - sie wird dann
-        # immer bestimmt, unabhaengig vom fit_line-Schalter.
-        braucht_fit = ((valley_fit_line or valley_path_mode == "line")
-                       and valley_fit_supported(valley_axis))
-        out['plots']['valley_cut'] = plot_valley_cut(
-            results, prefix, axis=valley_axis, follow=valley_follow,
-            traces=valley_traces, out_dir=plots_dir, save=save, show=show,
-            confirm_overwrite=confirm_overwrite, legend_fontsize=legend_fontsize,
-            fit_line=valley_fit_line and valley_fit_supported(valley_axis),
-            path_mode=valley_path_mode, forbidden_factor=zeichnen,
-            select=valley_select, guide_follow=valley_guide_follow,
-            guide_halfwidth=valley_guide_halfwidth,
-            waist_range=valley_waist_range, width_range=valley_width_range,
-            map_show_path=valley_map_show_path)
-        if braucht_fit:
-            out['valley_line'] = fit_valley_line(
-                results, axis=valley_axis, follow=valley_follow,
+            draw_best_point=draw_best_point, save=save, show=show,
+            confirm_overwrite=confirm_overwrite, fit_line=karten_fit,
+            forbidden_factor=zeichnen, best_point=stern,
+            marks=marken, valley=karten_valley)
+        if amplitude_maps:
+            if amplitude_panels(results) is None:
+                # Kein Abbruch: die uebrigen Plots des Laufs sollen nicht an
+                # einer fehlenden Zusatzkarte scheitern.
+                print("Hinweis: keine 6-Karten-Uebersicht - der Datensatz "
+                      "fuehrt keine Amplituden (r_x_grid/r_y_grid) mit.")
+            else:
+                out['plots']['metric_comparison_amp'] = plot_metric_comparison(
+                    results, prefix, out_dir=plots_dir, win_axis=win_axis,
+                    draw_best_point=draw_best_point, save=save, show=show,
+                    confirm_overwrite=confirm_overwrite, fit_line=karten_fit,
+                    with_amplitudes=True, forbidden_factor=zeichnen,
+                    best_point=stern, marks=marken, valley=karten_valley)
+                geklemmt = r_bounds_clamped_fraction(results)
+                if geklemmt is not None and max(geklemmt) > 0:
+                    lo, hi = results['r_bounds']
+                    print(f"Hinweis zu den Amplituden-Karten: r_bounds = "
+                          f"({lo:g}, {hi:g}); auf der Schranke liegen "
+                          f"{geklemmt[0] * 100:.1f}% der r_x- und "
+                          f"{geklemmt[1] * 100:.1f}% der r_y-Werte. Diese "
+                          "Punkte sind keine freien Optima - im Bild sind "
+                          "sie ein Plateau.")
+        out['plots']['region'] = plot_region(
+            results, prefix, out_dir=plots_dir, win_axis=win_axis,
+            draw_best_point=draw_best_point, save=save, show=show,
+            confirm_overwrite=confirm_overwrite, forbidden_factor=zeichnen,
+            best_point=stern, fit_line=karten_fit, marks=marken,
+            valley=karten_valley)
+        if kind == "hard_check" and results.get('consistency'):
+            out['plots']['agreement'] = plot_agreement_map(
+                results, prefix, out_dir=plots_dir, win_axis=win_axis,
+                save=save, show=show, confirm_overwrite=confirm_overwrite,
+                forbidden_factor=zeichnen)
+            out['plots']['score_scatter'] = plot_score_scatter(
+                results, prefix, out_dir=plots_dir, save=save, show=show,
+                confirm_overwrite=confirm_overwrite)
+        if valley_cut:
+            # Im Geradenmodus IST die Gerade der Schnitt - sie wird dann
+            # immer bestimmt, unabhaengig vom fit_line-Schalter.
+            braucht_fit = ((valley_fit_line or valley_path_mode == "line")
+                           and valley_fit_supported(valley_axis))
+            out['plots']['valley_cut'] = plot_valley_cut(
+                results, prefix, axis=valley_axis, follow=valley_follow,
+                traces=valley_traces, out_dir=plots_dir, save=save, show=show,
+                confirm_overwrite=confirm_overwrite, legend_fontsize=legend_fontsize,
+                fit_line=valley_fit_line and valley_fit_supported(valley_axis),
+                path_mode=valley_path_mode, forbidden_factor=zeichnen,
                 select=valley_select, guide_follow=valley_guide_follow,
                 guide_halfwidth=valley_guide_halfwidth,
-                waist_range=valley_waist_range, width_range=valley_width_range)
-    if plot_amplitudes_overview:
-        out['plots']['amplitudes'] = plot_amplitudes(
-            results, prefix, out_dir=plots_dir, save=save, show=show,
-            confirm_overwrite=confirm_overwrite)
+                waist_range=valley_waist_range, width_range=valley_width_range,
+                max_axes=valley_max_axes, marks=map_marks,
+                draw_best_point=draw_best_point, best_point=stern)
+            if braucht_fit:
+                out['valley_line'] = fit_valley_line(
+                    results, axis=valley_axis, follow=valley_follow,
+                    select=valley_select, guide_follow=valley_guide_follow,
+                    guide_halfwidth=valley_guide_halfwidth,
+                    waist_range=valley_waist_range, width_range=valley_width_range)
+            if valley_path_mode == "line":
+                # Zweite Datei: dieselbe Gerade, aber alle sechs Groessen der
+                # Uebersicht einzeln. Der Schnitt daneben zeigt nur noch
+                # J, U_c und eta_c.
+                panels = plot_line_panels(
+                    results, prefix, axis=valley_axis, follow=valley_follow,
+                    out_dir=plots_dir, save=save, show=show,
+                    confirm_overwrite=confirm_overwrite,
+                    legend_fontsize=legend_fontsize, select=valley_select,
+                    guide_follow=valley_guide_follow,
+                    guide_halfwidth=valley_guide_halfwidth,
+                    waist_range=valley_waist_range, width_range=valley_width_range,
+                    draw_best_point=draw_best_point, best_point=stern,
+                    marks=marken)
+                if panels is not None:
+                    out['plots']['line_panels'] = panels
+        if plot_amplitudes_overview:
+            out['plots']['amplitudes'] = plot_amplitudes(
+                results, prefix, out_dir=plots_dir, save=save, show=show,
+                confirm_overwrite=confirm_overwrite)
 
     if save:
         report_path = results_dir / f"{prefix}_Report.md"
@@ -1846,20 +1857,30 @@ TRACE_SPECS = {
     # J hat das Schwarz, das vorher der (inzwischen entfallene) normierte
     # Score hatte - damit bleibt der auf Farbabstand geprueffte 7er-Satz
     # (siehe oben) unveraendert.
-    # J in PROZENT, wie U und eta. J = alpha*U + (1-alpha)*C (+ Penalty) ist
-    # eine Kombination genau dieser relativen Groessen, hat also dieselbe
-    # Einheit - und nur so kann es ueberhaupt mit ihnen auf eine gemeinsame
-    # y-Achse kommen, wenn es in derselben Groessenordnung liegt (die
-    # Buendelung in group_traces_by_axis trennt zuerst nach Einheit).
-    # Hard_Optimization und Weighted_Optimization halten es seit jeher so.
+    # J ist alpha*U_c + (1-alpha)*eta_c, also eine Linearkombination zweier
+    # Bruchteile - in % ausgedrueckt steht es auf derselben Achse wie die
+    # beiden. Bis 2026-09-07 wurde es hier roh gezeigt (0.058 statt 5.8 %);
+    # damit brauchte es zwangslaeufig eine eigene y-Achse.
     "penalty_raw": (r"$J$", "%", "#000000", True),   # der einzige Score
     "r_x": (r"$r_x$", "", "#785EF0", False),
     "r_y": (r"$r_y$", "", "#CC3311", False),
+    # Die beiden Haelften von J. Sie stehen zwischen hart und gewichtet, und
+    # genau ihre Kombination minimiert der Scan - im Schnitt entlang der
+    # Geraden sind sie deshalb aussagekraeftiger als die vier Einzelgroessen.
+    "uniformity_kombi": (r"$U_c$", "%", "#117733", True),
+    "crosstalk_kombi": (r"$\eta_c$", "%", "#AA4499", True),
 }
 
 # Reihenfolge der y-Achsen im Querschnitt (nur die angehakten erscheinen)
 TRACE_ORDER = ["uniformity_weighted", "crosstalk_weighted", "uniformity_hard",
-               "crosstalk_hard", "penalty_raw", "r_x", "r_y"]
+               "crosstalk_hard", "uniformity_kombi", "crosstalk_kombi",
+               "penalty_raw", "r_x", "r_y"]
+
+# Der schlanke Schnitt im Geradenmodus: die Zielgroesse und ihre beiden
+# Haelften, mehr nicht. U_c und eta_c sind beide in %, teilen sich also eine
+# Achse - macht zwei y-Achsen statt vier.
+LINE_CUT_TRACES = ["penalty_raw", "uniformity_kombi", "crosstalk_kombi"]
+
 
 VALLEY_AXIS_CHOICES = [
     ("waist_um", "Waist nach der Linse (µm)"),
@@ -1870,6 +1891,13 @@ VALLEY_AXIS_CHOICES = [
 # Schnittachse -> Waist-Konvention der x-Achse/Heatmap
 _VALLEY_AXIS_TO_WIN_AXIS = {"waist_um": "after_lens", "waist_mm": "before_lens",
                             "width": "after_lens"}
+_WIN_AXIS_TO_VALLEY_AXIS = {"after_lens": "waist_um", "before_lens": "waist_mm"}
+
+
+def short_axis_label(axis):
+    """Kurze x-Beschriftung fuer Plots mit zwei Panels nebeneinander."""
+    return {"waist_um": WAIST_UM_LABEL_SHORT,
+            "waist_mm": WIN_INPUT_LABEL_SHORT}.get(axis, WIDTH_LABEL)
 
 
 def _grid_for(results, key, alpha=None):
@@ -1901,6 +1929,17 @@ def _grid_for(results, key, alpha=None):
             np.asarray(U_h, float), np.asarray(C_h, float),
             np.asarray(U_w, float), np.asarray(C_w, float),
             alpha, combo_lambda), dtype=float)
+    if key in ("uniformity_kombi", "crosstalk_kombi"):
+        # Dieselbe Penalty-Kombination, die combine.combine_grids benutzt -
+        # aus den gespeicherten ROHEN Gittern nachgerechnet, damit auch
+        # aeltere Datensaetze sie hergeben.
+        paar = ((U_h, U_w) if key == "uniformity_kombi" else (C_h, C_w))
+        if paar[0] is None or paar[1] is None:
+            return None
+        combo_lambda = float(results.get("combo_lambda", 0.75))
+        return np.asarray(penalty_pair(np.asarray(paar[0], float),
+                                       np.asarray(paar[1], float),
+                                       combo_lambda), dtype=float)
     if key == "score_hard":
         if U_h is None or C_h is None:
             return None
@@ -2103,8 +2142,7 @@ def extract_valley(results, axis="waist_um", follow="penalty_raw",
         cols = gueltig
         rows = np.argmin(safe[:, gueltig], axis=0)
         x = waist_um[cols] if axis == "waist_um" else win_input_vals[cols] * 1e3
-        x_label = ("Waist at focus $\\omega'$ ($\\mu$m, after lenses)" if axis == "waist_um"
-                   else "Input waist $\\omega_{\\mathrm{in}}$ (mm, before lenses)")
+        x_label = WAIST_UM_LABEL if axis == "waist_um" else WIN_INPUT_LABEL
 
     if select == "guided":
         # Die Leitgerade ist immer width = a*waist + b ueber der µm-Achse
@@ -2199,7 +2237,7 @@ def extract_valley(results, axis="waist_um", follow="penalty_raw",
 # Legendeneintrag derselben Groesse im Querschnitt (TRACE_SPECS, nur
 # Symbole) ohne Nachdenken zusammenpassen.
 FOLLOW_PLOT_LABELS = {
-    "penalty_raw": r"Penalty objective $J$ (raw)",
+    "penalty_raw": r"Penalty objective $J$ [%]",
     "uniformity_weighted": r"Uniformity $U_w$ (atom-weighted)",
     "crosstalk_weighted": r"Crosstalk $\eta_w$ (atom-weighted)",
     "uniformity_hard": r"Uniformity $U_h$ (hard mask)",
@@ -2209,46 +2247,9 @@ FOLLOW_PLOT_LABELS = {
 }
 
 
-# Fuer die Colorbar des Talschnitts noch einmal kuerzer: dort steht die
-# Beschriftung HOCHKANT neben einer schmalen Farbleiste, und seit die Schrift
-# am Dokument haengt (dokument_stil) ist der ausgeschriebene Name laenger als
-# die Leiste hoch ist - er lief in das rechte Panel hinein. Das Symbol
-# genuegt: was J, U und eta bedeuten, steht im Bericht und in den Titeln der
-# Metrik-Karten.
-FOLLOW_CBAR_LABELS = {
-    "penalty_raw": r"$J$",
-    "uniformity_weighted": r"$U_w$",
-    "crosstalk_weighted": r"$\eta_w$",
-    "uniformity_hard": r"$U_h$",
-    "crosstalk_hard": r"$\eta_h$",
-    "score_weighted": r"$J_w$",
-    "score_hard": r"$J_h$",
-}
-
-
 def follow_plot_label(follow):
     """Englische Kurzbezeichnung fuer Plot-Titel und Colorbar."""
     return FOLLOW_PLOT_LABELS.get(follow, follow)
-
-
-def follow_cbar_label(follow):
-    """Ganz kurze Fassung fuer die hochkant stehende Colorbar-Beschriftung."""
-    return FOLLOW_CBAR_LABELS.get(follow, follow_plot_label(follow))
-
-
-# Alle Fuehrungsgroessen ausser r_x/r_y sind relative Groessen und werden in
-# Prozent gezeigt - die Metriken selbst, J, und die beiden alpha-Kombinationen
-# score_hard/score_weighted (die stehen nicht in TRACE_SPECS, weil sie nur als
-# Fuehrungsgroesse waehlbar sind, nicht als Kurve).
-_PROZENT_FOLLOW_EXTRA = ("score_hard", "score_weighted")
-
-
-def follow_ist_prozent(follow):
-    """Wird diese Groesse in Prozent gezeigt? Entscheidet ueber den Faktor 100
-    der Heatmap UND ueber das (%) an der Colorbar."""
-    if follow in _PROZENT_FOLLOW_EXTRA:
-        return True
-    return bool(TRACE_SPECS.get(follow, (None, None, None, False))[3])
 
 
 def _follow_label(follow):
@@ -2287,7 +2288,6 @@ AXIS_NOISE_SNR = 5.0
 # der Achsenhoehe einnimmt.
 AXIS_NOISE_TARGET = 0.25
 AXIS_GROUP_ALWAYS_TOGETHER = ("r_x", "r_y")
-MULTI_TRACE_AXIS_COLOR = "#333333"
 
 
 def _wertebereich(werte):
@@ -2339,7 +2339,42 @@ def _passt_dazu(bereiche, kandidaten, values, max_ratio=AXIS_GROUP_MAX_RATIO,
     return True
 
 
-def group_traces_by_axis(keys, values, max_ratio=AXIS_GROUP_MAX_RATIO):
+def _limit_axis_count(gruppen, max_axes):
+    """Notfalls Gruppen zusammenlegen, bis nur noch `max_axes` uebrig sind.
+
+    Zusammengelegt wird von hinten, und immer zuerst zwei Gruppen MIT
+    DERSELBEN Einheit - eine gemeinsame Achse fuer zwei Prozentgroessen ist
+    nur eine Frage der Skalierung, eine fuer % und dimensionslos waere eine
+    Falschaussage. Erst wenn keine zwei gleichen Einheiten mehr uebrig sind,
+    werden auch verschiedene zusammengelegt; dann traegt die Achse die
+    Einheit der ersten Gruppe, was der Aufrufer so gewollt hat.
+    """
+    if not max_axes or max_axes < 1 or len(gruppen) <= max_axes:
+        return gruppen
+    gruppen = [list(g) for g in gruppen]
+    while len(gruppen) > max_axes:
+        einheiten = [TRACE_SPECS[g[0]][1] for g in gruppen]
+        paar = None
+        for i in range(len(gruppen) - 1, 0, -1):
+            for j in range(i - 1, -1, -1):
+                if einheiten[i] == einheiten[j]:
+                    paar = (j, i)
+                    break
+            if paar:
+                break
+        if paar is None:
+            paar = (len(gruppen) - 2, len(gruppen) - 1)
+        j, i = paar
+        gruppen[j] = gruppen[j] + gruppen.pop(i)
+    rang = {k: i for i, k in enumerate(TRACE_ORDER)}
+    for g in gruppen:
+        g.sort(key=lambda k: rang.get(k, 99))
+    gruppen.sort(key=lambda g: rang.get(g[0], 99))
+    return gruppen
+
+
+def group_traces_by_axis(keys, values, max_ratio=AXIS_GROUP_MAX_RATIO,
+                         max_axes=None):
     """Kurven auf moeglichst wenige y-Achsen verteilen.
 
     Zuerst nach Einheit trennen (Prozent, dimensionslos), dann
@@ -2385,7 +2420,7 @@ def group_traces_by_axis(keys, values, max_ratio=AXIS_GROUP_MAX_RATIO):
     for g in gruppen:
         g.sort(key=lambda k: rang.get(k, 99))
     gruppen.sort(key=lambda g: rang.get(g[0], 99))
-    return gruppen
+    return _limit_axis_count(gruppen, max_axes)
 
 
 def _entzerre_achse(ax, werte_liste, ziel=AXIS_NOISE_TARGET):
@@ -2409,28 +2444,13 @@ def _entzerre_achse(ax, werte_liste, ziel=AXIS_NOISE_TARGET):
     ax.set_ylim(mitte - soll / 2, mitte + soll / 2)
 
 
-# Eine helle Kurvenfarbe ist als LINIE gut zu sehen, als Achsenbeschriftung
-# auf weissem Grund aber zu blass (das Amber von eta_h etwa). Ticks und
-# Achsenlabel werden deshalb abgedunkelt, wenn die Farbe zu hell ist - die
-# Linie selbst behaelt ihre Farbe, sonst gehoerten Kurve und Achse optisch
-# nicht mehr zusammen.
-AXIS_LABEL_MAX_LUMA = 0.45
-
-
-def _achsenfarbe(color):
-    r, g, b = matplotlib.colors.to_rgb(color)
-    luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
-    if luma <= AXIS_LABEL_MAX_LUMA:
-        return color
-    f = AXIS_LABEL_MAX_LUMA / luma
-    return (r * f, g * f, b * f)
-
-
 def _axis_label_for_group(gruppe):
+    """Symbole der Gruppe plus Einheit in eckigen Klammern - dimensionslose
+    Groessen (J, r_x, r_y) bekommen gar keine Klammer."""
     labels = [TRACE_SPECS[k][0] for k in gruppe]
     einheit = TRACE_SPECS[gruppe[0]][1]
     text = ", ".join(labels)
-    return f"{text} ({einheit})" if einheit else text
+    return f"{text} [{einheit}]" if einheit else text
 
 
 def _break_at(werte, unbenutzt):
@@ -2461,7 +2481,9 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
                     forbidden_factor=None, select="global",
                     guide_follow=GUIDE_FOLLOW_DEFAULT,
                     guide_halfwidth=GUIDE_HALFWIDTH_DEFAULT,
-                    waist_range=None, width_range=None, map_show_path=False):
+                    waist_range=None, width_range=None,
+                    max_axes=MAX_CUT_AXES_DEFAULT, marks=None,
+                    draw_best_point=True, best_point=None):
     """Querschnitt: links die Heatmap der Fuehrungsgroesse mit dem Pfad,
     rechts der Schnitt entlang dieses Pfads.
 
@@ -2477,31 +2499,32 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
     "line" = Schnitt entlang genau dieser Geraden, ueber den ganzen
     gescannten Bereich (also auch extrapoliert) - siehe extract_line_cut().
 
-    map_show_path: was in der KARTE (linkes Panel) ausser der Heatmap zu
-    sehen ist. Standardmaessig nur der verbotene Bereich und die
-    Ausgleichsgerade - die einzelnen Pfadpunkte (benutzt, ausgelassen,
-    extrapoliert) werden dann WEDER gezeichnet NOCH benannt; ihre Zahlen
-    stehen im Bericht. Mit map_show_path=True kommen sie samt Legende zurueck.
-
-    Ausnahme: gibt es gar keine Gerade, bliebe die Karte sonst leer - dann
-    wird der Talpfad auch ohne Haken gezeichnet.
-
     Beschriftungen sind durchgehend englisch und mathtext-basiert, damit
     die PDFs unveraendert in einen LaTeX-Satz passen.
     """
-    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
+    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
+    marks = MAP_MARKS_DEFAULT if marks is None else marks
     valley = extract_path(results, axis=axis, follow=follow, path_mode=path_mode,
                           select=select, guide_follow=guide_follow,
                           guide_halfwidth=guide_halfwidth,
                           waist_range=waist_range, width_range=width_range)
 
     verfuegbar = available_trace_keys(results)
-    gewaehlt = list(verfuegbar) if traces is None else [k for k in TRACE_ORDER
-                                                       if k in traces and k in verfuegbar]
     follow_als_kurve = {"score_hard": "uniformity_hard",
                         "score_weighted": "uniformity_weighted"}.get(follow, follow)
-    if follow_als_kurve in verfuegbar and follow_als_kurve not in gewaehlt:
-        gewaehlt.insert(0, follow_als_kurve)
+    if path_mode == "line":
+        # Im Geradenmodus steht die Kurvenauswahl fest: die Zielgroesse J und
+        # ihre beiden Haelften U_c und eta_c. Sieben Kurven auf vier Achsen
+        # waren neben der Karte nicht mehr zu lesen, und die vier
+        # Einzelgroessen stehen ohnehin im Panel-Plot daneben
+        # (plot_line_panels). Die Haken im Dialog wirken deshalb nur noch im
+        # Talpfad-Modus.
+        gewaehlt = [k for k in LINE_CUT_TRACES if k in verfuegbar]
+    else:
+        gewaehlt = list(verfuegbar) if traces is None else [k for k in TRACE_ORDER
+                                                           if k in traces and k in verfuegbar]
+        if follow_als_kurve in verfuegbar and follow_als_kurve not in gewaehlt:
+            gewaehlt.insert(0, follow_als_kurve)
     if not gewaehlt:
         raise ValueError("Keine einzige darstellbare Kurve ausgewaehlt.")
 
@@ -2509,10 +2532,13 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
     x_heat, x_heat_label, reversed_ = win_axis_values(results, win_axis)
     width_vals = np.asarray(results["width_vals"], dtype=float)
     target = _grid_for(results, follow)
-    # Dieselbe Einheit wie die Kurven rechts: liegt die Fuehrungsgroesse in
-    # Prozent vor, wird auch die Karte in Prozent gezeigt.
-    skala = 100.0 if follow_ist_prozent(follow) else 1.0
-    Z = (target[:, ::-1] if reversed_ else target) * skala
+    # Dieselbe Skalierung wie die Kurve daneben: eine Prozentgroesse gehoert
+    # auch in der Karte in Prozent. Vorher zeigte die Colorbar 0.01, wo die
+    # Kurve daneben 1.0 % zeigte - dieselbe Groesse in zwei Einheiten.
+    ist_prozent = follow in TRACE_SPECS and TRACE_SPECS[follow][3]
+    if ist_prozent:
+        target = np.asarray(target, dtype=float) * 100.0
+    Z = target[:, ::-1] if reversed_ else target
 
     # Die Buendelung (und damit die Achsenskalierung) richtet sich nur nach
     # den BENUTZTEN Punkten. Sonst zieht ein einzelner Ausreisser am Rand des
@@ -2523,48 +2549,22 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
     unbenutzt = (np.zeros(valley["n_points"], dtype=bool) if path_mode == "line"
                  else _unused_mask(valley, fit_fuer_maske))
     werte_benutzt = {k: _break_at(v, unbenutzt) for k, v in valley["values"].items()}
-    gruppen = group_traces_by_axis(gewaehlt, werte_benutzt)
-    extra = max(0, len(gruppen) - 1)
+    gruppen = group_traces_by_axis(gewaehlt, werte_benutzt, max_axes=max_axes)
 
-    # Feste Figurgroesse - und zwar unabhaengig von der Zahl der y-Achsen.
-    #
-    # Das war frueher anders (11.4 + 0.85 je zusaetzlicher Achse), und mit
-    # fester Schriftgroesse ergab das auch Sinn: die breitere Figur wurde im
-    # Dokument staerker verkleinert, die Schrift wurde also kleiner und die
-    # Achsen passten. Genau dieses Kleinerwerden ist der Fehler, den
-    # dokument_stil() behebt - seither skaliert die Schrift mit der Breite
-    # mit, und Breiter-Machen aendert am Bild IM DOKUMENT nichts mehr
-    # (alles waechst gleichmaessig, die Datei wird nur groesser).
-    #
-    # Was im Dokument ankommt, haengt damit allein an dieser Geometrie:
-    # 6.3 x 2.87 Zoll bei Textbreite. Der Platz fuer zusaetzliche y-Achsen
-    # muss darin stecken - er kostet Panel-Breite, und das ist ehrlich so:
-    # fuenf y-Achsen nebeneinander sind fuenf y-Achsen nebeneinander.
-    breite, hoehe = VALLEY_FIGSIZE
-    with dokument_stil(breite, legend_fontsize=legend_fontsize,
-                       dichte=ZWEI_PANEL_DICHTE):
+    with plt.rc_context(MAP_STYLE):
         fig, (ax_map, ax_cut) = plt.subplots(
-            1, 2, figsize=(breite, hoehe), constrained_layout=True,
-            gridspec_kw={"width_ratios": [1.0, 1.35]})
+            1, 2, figsize=CUT_FIGSIZE, constrained_layout=True,
+            gridspec_kw={"width_ratios": list(CUT_WIDTH_RATIOS)})
 
         # ---------------- links: Karte mit Pfad ----------------
-        # Knappe Karte (Default): nur der verbotene Bereich und die Gerade.
-        # Die einzelnen Pfadpunkte werden dann gar nicht erst gezeichnet -
-        # nicht bloss aus der Legende genommen. Ihre Zahlen stehen im Bericht.
-        #
-        # Ohne Gerade waere die Karte sonst leer; dann wird der Pfad auch ohne
-        # Haken gezeichnet, sonst zeigte das linke Panel nur die Heatmap.
-        zeige_pfad = bool(map_show_path) or (
-            fit_fuer_maske is None and path_mode != "line")
-
         im = ax_map.pcolormesh(x_heat, width_vals * 1e-6, Z, shading="auto", cmap="magma_r")
-        fig.colorbar(im, ax=ax_map,
-                     label=follow_cbar_label(follow) + (" (%)" if skala == 100.0 else ""))
-        ax_map.set_xlabel(kurzes_achsenlabel(x_heat_label))
-        # Die Karte ist das schmalere der beiden Panels; die automatische
-        # Teilung setzt dort mehr Striche, als Zahlen nebeneinander passen
-        # (sie kennt die Textbreite nicht) - sie klebten aneinander.
-        ax_map.xaxis.set_major_locator(MaxNLocator(nbins=4, steps=[1, 2, 5, 10]))
+        # Die Einheit gehoert an die Colorbar, sobald die Karte skaliert ist -
+        # sonst stehen dort Prozentzahlen ohne Prozentzeichen.
+        karte_label = follow_plot_label(follow)
+        if ist_prozent and "[%]" not in karte_label:
+            karte_label += " [%]"
+        fig.colorbar(im, ax=ax_map, label=karte_label)
+        ax_map.set_xlabel(short_axis_label(_WIN_AXIS_TO_VALLEY_AXIS[win_axis]))
         ax_map.set_ylabel(WIDTH_LABEL)
         if forbidden_factor is not None:
             draw_forbidden_region(ax_map, results, win_axis, forbidden_factor)
@@ -2575,75 +2575,71 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
         if path_mode == "line":
             fit = valley["fit"]
             ax_map.set_title("Linear fit to the minimum path")
-            if zeige_pfad:
-                # Der echte Talpfad bleibt blass im Bild - nur so ist zu sehen,
-                # wie weit die Gerade von den tatsaechlichen Minima abweicht.
+            if any(marks.get(k) for k in ("path", "used", "unused")):
+                # Der Talpfad, auf den sich die Gerade stuetzt - dieselben
+                # drei Schalter wie in jeder anderen Karte.
                 tal = extract_valley(results, axis=axis, follow=follow, select=select,
                                      guide_follow=guide_follow,
                                      guide_halfwidth=guide_halfwidth,
                                      waist_range=waist_range, width_range=width_range)
-                tal_unbenutzt = _unused_mask(tal, fit)
-                ax_map.plot(_break_at(tal["x_heat"], tal_unbenutzt),
-                            _break_at(tal["y_heat"], tal_unbenutzt),
-                            linewidth=S(0.9), color="#8a8a8a", marker="o",
-                            markersize=S(2.8), label="minimum path (reference)")
-                if tal_unbenutzt.any():
-                    ax_map.plot(np.asarray(tal["x_heat"])[tal_unbenutzt],
-                                np.asarray(tal["y_heat"])[tal_unbenutzt],
-                                label=f"not used ({int(tal_unbenutzt.sum())})",
-                                **SD(UNUSED_STYLE))
-            # Im Geradenmodus IST dieser Pfad die Gerade. Ohne die Pfadpunkte
-            # wird er als glatte Strecke gezeichnet und heisst schlicht so -
-            # sonst stuende zweimal dasselbe in der Legende.
-            ax_map.plot(x_pfad, y_pfad, color=VALLEY_FIT_STYLE["color"],
-                        linewidth=S(2.0), marker=("o" if zeige_pfad else None),
-                        markersize=S(3.2),
-                        markeredgecolor="white", markeredgewidth=S(0.4),
-                        label=(f"cut along the fitted line "
-                               f"({valley['n_points']}/{valley['n_total']} pts)"
-                               if zeige_pfad else FIT_LINE_LABEL))
+                draw_valley_marks_on_map(ax_map, tal, fit, win_axis, marks)
             extrap = np.asarray(valley["extrapolated"], dtype=bool)
-            if zeige_pfad and extrap.any():
-                ax_map.plot(x_pfad[extrap], y_pfad[extrap],
-                            label=f"extrapolated ({int(extrap.sum())})",
-                            **SD(EXTRAPOLATED_MARKER))
+            if marks.get("extension"):
+                if marks.get("dashed") and extrap.any():
+                    # Zweiteilig nur auf Nachfrage: erst der gefittete Teil
+                    # durchgezogen, dann die Verlaengerung gepunktet.
+                    ax_map.plot(_break_at(x_pfad, extrap), _break_at(y_pfad, extrap),
+                                color=VALLEY_FIT_STYLE["color"], linewidth=2.0,
+                                label=FIT_LINE_LABEL)
+                    ax_map.plot(x_pfad[extrap], y_pfad[extrap],
+                                color=VALLEY_FIT_STYLE["color"], linewidth=1.4,
+                                linestyle=":", label="_nolegend_")
+                else:
+                    ax_map.plot(x_pfad, y_pfad, color=VALLEY_FIT_STYLE["color"],
+                                linewidth=2.0, label=FIT_LINE_LABEL)
+                if extrap.any() and (marks.get("used") or marks.get("unused")):
+                    # Die einzelnen extrapolierten Stuetzstellen gehoeren zur
+                    # Herleitung, nicht ins fertige Bild.
+                    ax_map.plot(x_pfad[extrap], y_pfad[extrap],
+                                label=f"extrapolated ({int(extrap.sum())})",
+                                **EXTRAPOLATED_MARKER)
+            else:
+                # Ohne Verlaengerung endet die Linie dort, wo der Fit endet.
+                ax_map.plot(_break_at(x_pfad, extrap), _break_at(y_pfad, extrap),
+                            color=VALLEY_FIT_STYLE["color"], linewidth=2.0,
+                            label=FIT_LINE_LABEL)
         else:
             ax_map.set_title("Minimum path")
             fit = fit_fuer_maske
-            if zeige_pfad:
-                ax_map.plot(_break_at(x_pfad, unbenutzt), _break_at(y_pfad, unbenutzt),
-                            linewidth=S(1.2), color="red", marker="o",
-                            markersize=S(3.4), markeredgecolor="white",
-                            markeredgewidth=S(0.5),
-                            label=f"minimum path ({int((~unbenutzt).sum())}/"
-                                  f"{valley['n_total']} pts)")
-                if unbenutzt.any():
-                    ax_map.plot(x_pfad[unbenutzt], y_pfad[unbenutzt],
-                                label=f"not used ({int(unbenutzt.sum())})",
-                                **SD(UNUSED_STYLE))
+            # Im Talpfad-Modus IST der Pfad der Schnitt - er wird immer
+            # gezeichnet, der path-Schalter kann ihn nicht wegnehmen.
+            ax_map.plot(_break_at(x_pfad, unbenutzt), _break_at(y_pfad, unbenutzt),
+                        linewidth=1.2, color="red", marker="o", markersize=3.4,
+                        markeredgecolor="white", markeredgewidth=0.5,
+                        label="minimum path")
+            if marks.get("unused") and unbenutzt.any():
+                ax_map.plot(x_pfad[unbenutzt], y_pfad[unbenutzt],
+                            label=f"not used ({int(unbenutzt.sum())})", **UNUSED_STYLE)
             if fit is not None:
                 draw_valley_line(ax_map, fit)
-        # Schriftgroessen stehen im dokument_stil()-Kontext (dort wurde
-        # legend_fontsize mitskaliert) - hier nicht noch einmal setzen.
-        #
-        # Ohne einen einzigen Eintrag gar keinen leeren Kasten zeichnen.
-        if ax_map.get_legend_handles_labels()[0]:
-            # Die Kartenlegende liegt bewusst IM Bild, ueber der Heatmap. Sie
-            # darf deshalb nicht in die Layout-Rechnung eingehen:
-            # constrained_layout zaehlt Achsenlegenden seit matplotlib 3.6 mit
-            # und schrumpfte die Karte, sobald die (mitskalierte) Legende
-            # breiter wurde als die Spalte - bei fuenf Kurven blieb von der
-            # Karte nur noch ein Streifen uebrig.
-            kartenlegende = ax_map.legend(loc="lower right", framealpha=0.9)
-            kartenlegende.set_in_layout(False)
+                if marks.get("extension"):
+                    _, _, x_out, y_out = line_points_for_axis(results, fit, win_axis)
+                    if np.any(np.isfinite(x_out)):
+                        gestrichelt = bool(marks.get("dashed"))
+                        ax_map.plot(x_out, y_out, color=VALLEY_FIT_STYLE["color"],
+                                    linewidth=1.4 if gestrichelt else 2.2,
+                                    linestyle=":" if gestrichelt else "--",
+                                    label="_nolegend_")
+        if draw_best_point:
+            draw_best_point_marker(ax_map, results, win_axis, legend=False,
+                                   label=True, best=best_point)
 
         # ---------------- rechts: Querschnitt, eine y-Achse je Gruppe ----------------
         linien = []
         for position, gruppe in enumerate(gruppen):
             ax = ax_cut if position == 0 else ax_cut.twinx()
             if position > 1:
-                ax.spines["right"].set_position(
-                    ("outward", S(ZUSATZ_ACHSE_PT) * (position - 1)))
+                ax.spines["right"].set_position(("outward", 52 * (position - 1)))
                 ax.set_frame_on(True)
                 ax.patch.set_visible(False)
                 for spine in ax.spines.values():
@@ -2655,40 +2651,148 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
                 # Nicht benutzte Punkte tauchen hier gar nicht auf: die Linie
                 # reisst dort ab. Welche das sind, zeigt die Karte links.
                 linie, = ax.plot(valley["x"], werte_benutzt[key],
-                                 color=color, marker=marker, markersize=S(2.8),
-                                 linewidth=S(1.5), label=label)
+                                 color=color, marker=marker, markersize=2.8,
+                                 linewidth=1.5, label=label)
                 linien.append(linie)
             _entzerre_achse(ax, [werte_benutzt[k] for k in gruppe])
-            achsen_label = _axis_label_for_group(gruppe)
-            achsen_farbe = _achsenfarbe(TRACE_SPECS[gruppe[0]][2] if len(gruppe) == 1
-                                        else MULTI_TRACE_AXIS_COLOR)
-            ax.set_ylabel(achsen_label, color=achsen_farbe)
-            ax.tick_params(axis="y", colors=achsen_farbe)
-            if position > 0:
-                ax.spines["right"].set_color(achsen_farbe)
+            # Achsen bleiben schwarz. Sie in der Kurvenfarbe einzufaerben
+            # ordnete zwar Achse und Kurve zu, gab dem Bild aber vier
+            # verschiedenfarbige Achsenbeschriftungen - in einem Schriftsatz
+            # unruhig, und die Zuordnung leistet die Legende ohnehin.
+            ax.set_ylabel(_axis_label_for_group(gruppe))
 
-        ax_cut.set_xlabel(valley["x_label"])
-        # Ueberschrift des rechten Panels. Im Geradenmodus ist der Schnitt
-        # entlang der Fit-Geraden gelegt, im Talmodus entlang des Minimums -
-        # beides heisst "Cross-section along ...", damit die beiden Fassungen
-        # nebeneinander als dasselbe Bild erkennbar bleiben.
-        titel = ("Cross-section along fit" if path_mode == "line"
-                 else "Cross-section along minimum path")
+        # Ohne Legendeneintrag: den traegt der Stern in der Karte links,
+        # und beide zusammen stehen in EINER Legende unter der Figur.
+        if draw_best_point:
+            draw_working_point_line(ax_cut, best_point, axis, label=False)
+        ax_cut.set_xlabel(short_axis_label(axis))
+        titel = ("Values along the fitted line" if path_mode == "line"
+                 else "Values along the minimum path")
         ax_cut.set_title(titel)
         ax_cut.grid(True, alpha=0.25)
-        ax_cut.legend(linien, [ln.get_label() for ln in linien],
-                      loc="upper center",
-                      # Der Abstand nach unten muss Teilstrich-Zahlen UND
-                      # Achsenbeschriftung ueberspringen; beide wachsen mit dem
-                      # Massstab, ein fester Bruchteil der Achsenhoehe schob die
-                      # Legende sonst mitten in die x-Beschriftung.
-                      bbox_to_anchor=(0.5, -(S(0.09) + 0.04)),
-                      ncol=min(4, len(linien)), framealpha=0.9)
+        # Zwei Legenden, je eine unter ihrem Panel: die Karte und der
+        # Querschnitt zeigen verschiedene Dinge, und in einem gemeinsamen
+        # Kasten muss der Leser erst sortieren, was wohin gehoert. Die Karte
+        # ist nur rund 2.7 Zoll breit - deshalb dort einspaltig.
+        karten_handles, karten_labels = ax_map.get_legend_handles_labels()
+        if karten_handles:
+            ax_map.legend(karten_handles, karten_labels, loc="upper center",
+                          bbox_to_anchor=(0.5, -0.16), ncol=1, framealpha=0.9,
+                          fontsize=legend_fontsize)
+        if linien:
+            ax_cut.legend(linien, [ln.get_label() for ln in linien],
+                          loc="upper center", bbox_to_anchor=(0.5, -0.16),
+                          ncol=legend_ncol([ln.get_label() for ln in linien]),
+                          framealpha=0.9,
+                          fontsize=legend_fontsize)
 
         achse_tag = {"waist_um": "waist_um", "waist_mm": "waist_mm", "width": "width"}[axis]
         pfad_tag = "line" if path_mode == "line" else "valley"
         dateiname = f"{prefix}_{pfad_tag}_{follow}_over_{achse_tag}.pdf"
         return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite)
+
+
+# ======================================================================
+# Sechs Schnitte statt sechs Karten
+# ======================================================================
+# Dieselbe Anordnung wie die Metrik-Uebersicht (plot_metric_comparison mit
+# with_amplitudes=True), nur steht in jedem Feld der SCHNITT entlang der
+# Geraden statt der Karte. r_x liegt hier wie dort unten links.
+#
+# Warum ueberhaupt: im Schnittplot daneben stehen nur noch J, U_c und eta_c.
+# Die vier Einzelgroessen und die beiden Amplituden waeren dort die fuenfte
+# bis neunte Kurve auf der vierten y-Achse gewesen - unlesbar. Als eigene
+# Felder mit je einer Achse sind sie es nicht.
+# Der Titel sagt, WAS in dem Feld steht ("Uniformity, hard mask"); an der
+# Achse steht nur noch das Symbol. Der ausgeschriebene Name gehoert nicht
+# zweimal in dasselbe Feld, und kurze Achsenbeschriftungen lassen den sechs
+# Feldern mehr Platz.
+LINE_PANELS = [
+    dict(key="uniformity_hard", title="Uniformity (hard mask)",
+         ylabel=r"$U_h$ [%]"),
+    dict(key="uniformity_weighted", title=r"Uniformity$_w$ (atom-weighted)",
+         ylabel=r"$U_w$ [%]"),
+    dict(key="crosstalk_hard", title="Crosstalk (hard mask)",
+         ylabel=r"$\eta_h$ [%]"),
+    dict(key="crosstalk_weighted", title=r"Crosstalk$_w$ (atom-weighted)",
+         ylabel=r"$\eta_w$ [%]"),
+    dict(key="r_x", title=r"Amplitude ratio $r_x$", ylabel=r"$r_x$"),
+    dict(key="r_y", title=r"Amplitude ratio $r_y$", ylabel=r"$r_y$"),
+]
+
+
+@_mit_kartenstil
+def plot_line_panels(results, prefix, axis="waist_um", follow="penalty_raw",
+                     out_dir=None, save=True, show=False, confirm_overwrite=None,
+                     legend_fontsize=9, select="global",
+                     guide_follow=GUIDE_FOLLOW_DEFAULT,
+                     guide_halfwidth=GUIDE_HALFWIDTH_DEFAULT,
+                     waist_range=None, width_range=None, path=None,
+                     draw_best_point=True, best_point=None, marks=None):
+    """Die sechs Groessen der Uebersicht, jede als Schnitt entlang der Geraden.
+
+    `path`: fertiges Ergebnis von extract_line_cut() - sonst wird es selbst
+    geholt. Der Aufrufer reicht es durch, damit Gerade und Schnitt in beiden
+    Dateien garantiert dieselben sind.
+
+    Gibt None zurueck, wenn der Datensatz keine der sechs Groessen hergibt.
+    """
+    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
+    if path is None:
+        path = extract_line_cut(results, axis=axis, follow=follow, select=select,
+                                guide_follow=guide_follow,
+                                guide_halfwidth=guide_halfwidth,
+                                waist_range=waist_range, width_range=width_range)
+    verfuegbar = available_trace_keys(results)
+    panels = [p for p in LINE_PANELS if p["key"] in verfuegbar]
+    if not panels:
+        return None
+
+    marks = MAP_MARKS_DEFAULT if marks is None else marks
+    # Die einzelnen extrapolierten Stuetzstellen gehoeren zur Herleitung, wie
+    # in der Karte auch - im fertigen Bild stoeren sie die glatte Linie nur.
+    zeige_extrap = bool(marks.get("used") or marks.get("unused"))
+    x = np.asarray(path["x"], dtype=float)
+    extrap = (np.asarray(path["extrapolated"], dtype=bool) if zeige_extrap
+              else np.zeros(len(x), dtype=bool))
+
+    n_rows = (len(panels) + 1) // 2
+    figsize = PAGE_FIGSIZE if n_rows >= 3 else HALF_PAGE_FIGSIZE
+    fig, axes = plt.subplots(n_rows, 2, figsize=figsize, sharex="all",
+                             constrained_layout=True)
+    axes = np.atleast_2d(axes)
+    for ax, panel in zip(axes.flat, panels):
+        y = np.asarray(path["values"][panel["key"]], dtype=float)
+        farbe = TRACE_SPECS[panel["key"]][2]
+        ax.plot(x, y, color=farbe, linewidth=1.6)
+        if extrap.any():
+            # Dort trifft die Gerade keine gerechneten Talpunkte mehr - die
+            # Werte sind zwar echte Gitterwerte, die STELLE aber ist
+            # extrapoliert. Offene Kreise, wie in der Karte.
+            ax.plot(x[extrap], y[extrap], **EXTRAPOLATED_MARKER)
+        if draw_best_point:
+            # In jedem Feld dieselbe Stelle - so liest man die sechs Werte am
+            # Arbeitspunkt in einem Blick ab.
+            draw_working_point_line(ax, best_point, axis, label=(ax is axes.flat[0]))
+        ax.set_ylabel(panel["ylabel"])
+        ax.set_title(panel["title"])
+        ax.grid(True, alpha=0.25)
+    for ax in axes.flat[len(panels):]:
+        ax.set_visible(False)
+    for ax in axes[-1, :]:
+        ax.set_xlabel(path["x_label"])
+
+    handles, labels = axes.flat[0].get_legend_handles_labels()
+    if extrap.any():
+        handles.append(plt.Line2D([], [], **EXTRAPOLATED_MARKER))
+        labels.append(f"extrapolated ({int(extrap.sum())})")
+    if handles:
+        fig.legend(handles, labels, loc="outside lower center",
+                   ncol=legend_ncol(labels), framealpha=0.9)
+
+    achse_tag = {"waist_um": "waist_um", "waist_mm": "waist_mm", "width": "width"}[axis]
+    dateiname = f"{prefix}_line_panels_over_{achse_tag}.pdf"
+    return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite)
 
 
 # ======================================================================
@@ -2835,8 +2939,46 @@ def _valley_waist(valley, win_axis):
     tatsaechlich gerade."""
     if win_axis == "before_lens":
         return (np.asarray(valley["waist_mm"], dtype=float), "mm",
-                r"$\omega_{\mathrm{in}}$", "win_input")
-    return (np.asarray(valley["waist_um"], dtype=float), "µm", r"$\omega'$", "waist")
+                WIN_INPUT_SYMBOL, "win_input")
+    return (np.asarray(valley["waist_um"], dtype=float), "µm", WAIST_UM_SYMBOL, "waist")
+
+
+def _fit_uncertainty(t, u, ss_res):
+    """Standardfehler von Steigung und Achsenabschnitt einer Geraden.
+
+    Die uebliche Formel der linearen Regression:
+
+        s^2    = SS_res / (n - 2)              (Reststreuung)
+        S_tt   = sum (t - mean(t))^2
+        sig_a  = sqrt(s^2 / S_tt)
+        sig_b  = sig_a * sqrt(sum t^2 / n)
+
+    Sie beschreibt, wie stark a und b schwanken wuerden, wenn man den Scan
+    mit gleichartigem Rauschen wiederholte. Sie sagt NICHT, wie gut die
+    Gerade das Problem beschreibt - dafuer steht R^2 daneben, und beide
+    zusammen sind erst aussagekraeftig: ein kleiner Fehler bei kleinem R^2
+    heisst nur, dass viele Punkte gleich schlecht passen.
+
+    Wichtig fuer diesen Ordner: die Talpunkte sind ERGEBNISSE einer
+    Optimierung auf einem Gitter, keine unabhaengigen Messungen. Die Zahl ist
+    deshalb eine untere Schranke - die Gitterschrittweite und die Wahl der
+    Fuehrungsgroesse verschieben die Gerade um mehr, als hier herauskommt
+    (gemessen: 0.196 gegen 0.283 je nach Talpunkt-Auswahl auf demselben
+    Datensatz, bei sigma_a in der Groessenordnung 0.004).
+
+    nan, wenn weniger als drei Punkte da sind - mit zwei Punkten geht eine
+    Gerade exakt durch, und ein Fehler laesst sich nicht schaetzen.
+    """
+    n = int(len(t))
+    if n < 3:
+        return float("nan"), float("nan")
+    S_tt = float(np.sum((t - np.mean(t)) ** 2))
+    if S_tt <= 0:
+        return float("nan"), float("nan")
+    s2 = float(ss_res) / (n - 2)
+    sigma_a = float(np.sqrt(s2 / S_tt))
+    sigma_b = float(sigma_a * np.sqrt(float(np.sum(np.asarray(t, float) ** 2)) / n))
+    return sigma_a, sigma_b
 
 
 def _fit_line_through_valley(valley, win_axis):
@@ -2881,6 +3023,7 @@ def _fit_line_through_valley(valley, win_axis):
         a, b = np.polyfit(t[keep], u[keep], 1)
         ss_res = float(np.sum((u[keep] - (a * t[keep] + b)) ** 2))
         r2 = 1.0 - ss_res / ss_tot
+        sigma_a, sigma_b = _fit_uncertainty(t[keep], u[keep], ss_res)
     else:
         # Entartet: alle verbliebenen Punkte haben denselben u-Wert. Dann
         # ist die Gerade waagerecht, und ein R² gibt es nicht (die Varianz,
@@ -2888,6 +3031,7 @@ def _fit_line_through_valley(valley, win_axis):
         # Steigung in der Groessenordnung 1e-15 - Rundungsrauschen, das im
         # Bericht wie ein Ergebnis aussaehe.
         a, b, r2 = 0.0, float(np.mean(u[keep])), float("nan")
+        sigma_a = sigma_b = float("nan")
 
     raus = (~keep) & (~rand)                          # in Stufe 2/3 verworfen
     # Beide Masken beziehen sich auf die Punkte des Talpfads in dessen
@@ -2903,6 +3047,7 @@ def _fit_line_through_valley(valley, win_axis):
 
     return dict(
         a=float(a), b=float(b), r2=float(r2),
+        sigma_a=float(sigma_a), sigma_b=float(sigma_b),
         t_tex=t_tex, t_plain=t_plain, t_unit=t_unit,
         u_tex=u_tex, u_plain=u_plain, u_unit=u_unit,
         t_min=float(t_ends[0]), t_max=float(t_ends[1]),
@@ -3018,6 +3163,18 @@ def fit_valley_line(results, axis="waist_um", follow="penalty_raw",
     return _fit_line_through_valley(valley, _VALLEY_AXIS_TO_WIN_AXIS[axis])
 
 
+def _mit_fehler(wert, sigma, stellen=6):
+    """'0.28316 +- 0.00440' - oder nur den Wert, wenn es keinen Fehler gibt.
+
+    Der Fehler bekommt zwei signifikante Stellen; mehr suggeriert eine
+    Genauigkeit, die eine Fehlerschaetzung aus wenigen Punkten nicht hat.
+    """
+    if sigma is None or not np.isfinite(sigma) or sigma <= 0:
+        return f"{wert:.{stellen}g}"
+    nk = max(0, int(-np.floor(np.log10(sigma))) + 1)
+    return f"{wert:.{nk}f} +- {sigma:.{nk}f}"
+
+
 def _r2_text(r2):
     return "n/a" if not np.isfinite(r2) else f"{r2:.4f}"
 
@@ -3030,6 +3187,19 @@ def valley_line_formula(fit, latex=False):
     zeichen = "-" if fit["b"] < 0 else "+"
     return (f"{u}/{fit['u_unit']} = {fit['a']:.5g} · {t}/{fit['t_unit']} "
             f"{zeichen} {abs(fit['b']):.5g}")
+
+
+def valley_line_formula_with_error(fit):
+    """Wie valley_line_formula, aber mit den Standardfehlern - fuer den
+    Bericht, wo Platz dafuer ist."""
+    zeichen = "-" if fit["b"] < 0 else "+"
+    a_txt = _mit_fehler(fit["a"], fit.get("sigma_a"), stellen=5)
+    b_txt = _mit_fehler(abs(fit["b"]), fit.get("sigma_b"), stellen=5)
+    if " +- " in a_txt or " +- " in b_txt:
+        a_txt = f"({a_txt})" if " +- " in a_txt else a_txt
+        b_txt = f"({b_txt})" if " +- " in b_txt else b_txt
+    return (f"{fit['u_plain']}/{fit['u_unit']} = {a_txt} · "
+            f"{fit['t_plain']}/{fit['t_unit']} {zeichen} {b_txt}")
 
 
 def _valley_selection_lines(fit):
@@ -3100,11 +3270,13 @@ def _valley_line_report_lines(fit, axis_label, path_mode="valley"):
         f"aufgetragen ueber {axis_label}:",
         "",
         "```",
-        valley_line_formula(fit),
+        valley_line_formula_with_error(fit),
         "```",
         "",
-        f"- Steigung a = {fit['a']:.6g} {fit['u_unit']}/{fit['t_unit']}",
-        f"- Achsenabschnitt b = {fit['b']:.6g} {fit['u_unit']}",
+        f"- Steigung a = {_mit_fehler(fit['a'], fit.get('sigma_a'))} "
+        f"{fit['u_unit']}/{fit['t_unit']}",
+        f"- Achsenabschnitt b = {_mit_fehler(fit['b'], fit.get('sigma_b'))} "
+        f"{fit['u_unit']}",
         f"- R² = {_r2_text(fit['r2'])}"
         + ("  (die verbliebenen Punkte liegen alle auf demselben Wert - "
            "eine Varianz, die eine Gerade erklaeren koennte, gibt es hier nicht)"
@@ -3116,6 +3288,22 @@ def _valley_line_report_lines(fit, axis_label, path_mode="valley"):
         f"Rand-Kink",
         "",
     ]
+    if np.isfinite(fit.get('sigma_a', float('nan'))):
+        lines += [
+            "Die angegebenen Fehler sind die Standardfehler der linearen "
+            "Regression (`s² = SS_res/(n-2)`, daraus `sigma_a = sqrt(s²/S_tt)`). "
+            "Sie sagen, wie stark a und b schwanken wuerden, wenn man den Scan "
+            "mit gleichartigem Rauschen wiederholte - NICHT, wie gut eine Gerade "
+            "das Problem beschreibt; dafuer steht R² daneben.",
+            "",
+            "**Sie sind eine untere Schranke.** Die Talpunkte sind Ergebnisse "
+            "einer Optimierung auf einem Gitter, keine unabhaengigen Messungen. "
+            "Gitterschrittweite und die Wahl der Fuehrungsgroesse verschieben die "
+            "Gerade um deutlich mehr: am 41x41-Datensatz liegen 0.196 (globales "
+            "Minimum) und 0.283 (gefuehrt) auseinander, bei einem Standardfehler "
+            "von rund 0.004.",
+            "",
+        ]
     lines += _valley_selection_lines(fit)
     lines += [
         "",
@@ -3169,37 +3357,105 @@ def line_points_for_axis(results, fit, win_axis, n=240):
             np.where(~innen & sichtbar, x, np.nan), np.where(~innen & sichtbar, width, np.nan))
 
 
-def draw_fit_line_on_map(ax, results, fit, win_axis, dashed_extrapolation=False):
-    """Die Fit-Gerade in eine beliebige (Waist, width)-Karte zeichnen, ueber
-    den ganzen gescannten Bereich (auf den gescannten width-Bereich
+WORKING_POINT_LINE_STYLE = dict(color="red", linewidth=1.2, linestyle="--",
+                                alpha=0.8)
+
+
+def draw_working_point_line(ax, best, axis, label=True):
+    """Der Arbeitspunkt in einem KURVENplot: eine senkrechte Linie an seiner
+    Stelle auf der Schnittachse.
+
+    In einer Karte ist der Punkt ein Punkt; in einem Schnitt ueber den Waist
+    (oder ueber width) ist von ihm nur die eine Koordinate uebrig - also eine
+    Linie. Der Wert der Kurven dort ist genau das, was der Bericht in seiner
+    Wertetabelle auflistet.
+
+    `label=False`, wenn im selben Bild schon eine Karte steht, deren Stern
+    die Koordinaten traegt - zweimal dieselbe Zeile macht die Legende nur
+    breiter.
+
+    Gibt zurueck, ob gezeichnet wurde.
+    """
+    if not best or best.get('width') is None:
+        return False
+    if axis == "width":
+        x = best['width'] * 1e-6
+    elif axis == "waist_um":
+        x = best.get('waist_um')
+    else:
+        x = best.get('win_input')
+        x = None if x is None else x * 1e3
+    if x is None or not np.isfinite(x):
+        return False
+    ax.axvline(x, label=(working_point_label(best, best.get('at_edge'))
+                         if label else "_nolegend_"),
+               **WORKING_POINT_LINE_STYLE)
+    return True
+
+
+def draw_valley_marks_on_map(ax, valley, fit, win_axis, marks=None):
+    """Talpfad und Talpunkte in eine (Waist, width)-Karte zeichnen.
+
+    `valley`: Ergebnis von extract_valley() - IMMER der Talpfad, auch wenn
+    die Karte zu einem Schnitt entlang der Geraden gehoert; gezeigt werden
+    soll ja gerade das, worauf die Gerade sich stuetzt.
+    `fit`: Ergebnis von _fit_line_through_valley(); None = es gibt keine
+    Aufteilung in benutzt/ausgelassen, dann zaehlen alle Punkte als benutzt.
+
+    Zeichnet nichts, wenn keiner der drei Schalter path/used/unused gesetzt
+    ist - der Regelfall.
+    """
+    marks = MAP_MARKS_DEFAULT if marks is None else marks
+    if valley is None or not any(marks.get(k) for k in ("path", "used", "unused")):
+        return
+    x = np.asarray(valley["x_heat"], dtype=float)
+    y = np.asarray(valley["y_heat"], dtype=float)
+    if win_axis == "before_lens":
+        x = np.asarray(valley["waist_mm"], dtype=float)
+    unbenutzt = _unused_mask(valley, fit)
+
+    if marks.get("path"):
+        # Die Linie bricht an den ausgelassenen Stellen ab, statt quer
+        # darueber hinwegzuziehen - sonst behauptet sie einen Verlauf, den
+        # der Fit gar nicht benutzt.
+        ax.plot(_break_at(x, unbenutzt), _break_at(y, unbenutzt),
+                label="minimum path", **VALLEY_PATH_STYLE)
+    if marks.get("used") and (~unbenutzt).any():
+        ax.plot(x[~unbenutzt], y[~unbenutzt], label="points used in fit",
+                **USED_POINT_STYLE)
+    if marks.get("unused") and unbenutzt.any():
+        ax.plot(x[unbenutzt], y[unbenutzt],
+                label=f"not used ({int(unbenutzt.sum())})", **UNUSED_STYLE)
+
+
+def draw_fit_line_on_map(ax, results, fit, win_axis, marks=None):
+    """Die Fit-Gerade in eine beliebige (Waist, width)-Karte zeichnen -
+    ueber den ganzen gescannten Bereich, durchgezogen im gefitteten Teil,
+    gepunktet in der Extrapolation (auf den gescannten width-Bereich
     beschnitten, siehe line_points_for_axis).
 
-    Standardmaessig eine EINZIGE durchgezogene Linie - eine Gerade ist eine
-    Gerade, und der Bereich, aus dem sie bestimmt wurde, steht im Bericht.
+    Der extrapolierte Teil bekommt bewusst KEINEN eigenen
+    Legendeneintrag ("_nolegend_"): die Legende der vier Karten soll genau
+    einen Eintrag haben. Der Unterschied zwischen Fit und Verlaengerung
+    bleibt trotzdem sichtbar - er steckt im Linienformat statt in einem
+    zweiten Kasten. Wie weit gefittet wurde, steht im Bericht.
 
-    dashed_extrapolation=True zeichnet sie wie frueher zweiteilig:
-    durchgezogen im gefitteten Teil, gepunktet ausserhalb. Der gepunktete Teil
-    bekommt bewusst KEINEN eigenen Legendeneintrag - die Legende der Karten
-    soll genau einen Eintrag haben; der Unterschied steckt im Linienformat.
-    Auch die Fitparameter stehen nicht in der Legende, sie sind im Bericht
-    nachzulesen."""
+    Auch die Fitparameter stehen nicht in der Legende: Steigung,
+    Achsenabschnitt, R2 und der gefittete Bereich sind im Bericht
+    nachzulesen und wuerden den Kasten nur aufblaehen."""
     if fit is None:
         return
+    marks = MAP_MARKS_DEFAULT if marks is None else marks
     x_in, y_in, x_out, y_out = line_points_for_axis(results, fit, win_axis)
-    if not dashed_extrapolation:
-        # Beide Teile wieder zu einem Zug zusammensetzen: sie sind
-        # komplementaer (line_points_for_axis setzt jeweils NaN, wo der andere
-        # Teil liegt) und bereits nach x sortiert.
-        x_all = np.where(np.isfinite(x_in), x_in, x_out)
-        y_all = np.where(np.isfinite(y_in), y_in, y_out)
-        ax.plot(x_all, y_all, color=VALLEY_FIT_STYLE["color"], linewidth=S(2.0),
-                linestyle="-", label=FIT_LINE_LABEL)
-        return
-    ax.plot(x_in, y_in, color=VALLEY_FIT_STYLE["color"], linewidth=S(2.0),
+    ax.plot(x_in, y_in, color=VALLEY_FIT_STYLE["color"], linewidth=2.0,
             linestyle="-", label=FIT_LINE_LABEL)
-    if np.any(np.isfinite(x_out)):
-        ax.plot(x_out, y_out, color=VALLEY_FIT_STYLE["color"], linewidth=S(1.4),
-                linestyle=":", label="_nolegend_")
+    if marks.get("extension") and np.any(np.isfinite(x_out)):
+        # Ohne den dashed-Schalter sieht die Verlaengerung aus wie der Rest
+        # der Geraden - sie IST dieselbe Gerade.
+        gestrichelt = bool(marks.get("dashed"))
+        ax.plot(x_out, y_out, color=VALLEY_FIT_STYLE["color"],
+                linewidth=1.4 if gestrichelt else 2.0,
+                linestyle=":" if gestrichelt else "-", label="_nolegend_")
 
 
 def draw_valley_line(ax, fit, legend_fontsize=None):
@@ -3208,7 +3464,7 @@ def draw_valley_line(ax, fit, legend_fontsize=None):
     gemeinsame \"not used\"-Markierung."""
     if fit is None:
         return
-    ax.plot(fit["x_line"], fit["y_line"], label=FIT_LINE_LABEL, **SD(VALLEY_FIT_STYLE))
+    ax.plot(fit["x_line"], fit["y_line"], label=FIT_LINE_LABEL, **VALLEY_FIT_STYLE)
 
 
 # ======================================================================
@@ -3370,8 +3626,7 @@ def extract_line_cut(results, axis="waist_um", follow="penalty_raw", fit=None,
         waist_um_out = waist_arr if win_axis == "after_lens" else np.full_like(waist_arr, np.nan)
         waist_mm_out = waist_arr if win_axis == "before_lens" else np.full_like(waist_arr, np.nan)
     else:
-        x_label = ("Waist at focus $\\omega'$ ($\\mu$m, after lenses)" if axis == "waist_um"
-                   else "Input waist $\\omega_{\\mathrm{in}}$ (mm, before lenses)")
+        x_label = WAIST_UM_LABEL if axis == "waist_um" else WIN_INPUT_LABEL
         waist_um_out = waist_arr if win_axis == "after_lens" else np.full_like(waist_arr, np.nan)
         waist_mm_out = waist_arr if win_axis == "before_lens" else np.full_like(waist_arr, np.nan)
 

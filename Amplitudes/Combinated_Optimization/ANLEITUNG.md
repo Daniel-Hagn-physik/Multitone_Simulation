@@ -34,7 +34,6 @@ Root*.
 | zu einem vorhandenen **gewichteten** Scan den harten Fall nachrechnen | `run_hard_check.py` |
 | einen **vorhandenen Datensatz auswerten**, Plots und Bericht erzeugen | `run_plots.py` |
 | **einen einzelnen Parametersatz suchen**: ein paar Groessen vorgeben, den Rest optimieren lassen | `run_penalty_only.py` |
-| einen **einzelnen Strahl** ueber dem Waist durchrechnen (kein Tonarray) | `run_single_beam.py` |
 
 Die Dateien in `lib/` werden nur benutzt, nicht direkt ausgefuehrt.
 
@@ -42,18 +41,11 @@ Alles landet in vier Unterordnern, die bei Bedarf automatisch angelegt
 werden:
 
 ```
-Results/                 die Datensaetze (.pkl)
-Fit_Plots/2026-09-03/    die Plots (PDF, teils PNG) - tageweise
-Fit_Results/             die Berichte (Markdown) - flach, Datum im Namen
-Bilder/2026-09-03/       Nebenausgaben des Optimierers - tageweise
+Results/       die Datensaetze (.pkl)
+Fit_Plots/     die Plots (PDF, teils PNG)
+Fit_Results/   die Berichte (Markdown)
+Bilder/        Nebenausgaben des Optimierers
 ```
-
-Die Plots landen also in einem Ordner je Tag, der automatisch entsteht: nach
-ein paar Laeufen war im flachen Ordner nicht mehr zu sehen, was zusammen
-gehoert. Datensaetze und Berichte bleiben flach - die `.pkl` ist der
-Datensatz und nicht das Ergebnis eines Tages, und Berichte will man
-nebeneinander lesen. Beide tragen das Datum im Dateinamen. Vorhandene Dateien
-werden nicht verschoben; die Umstellung gilt ab dem naechsten Lauf.
 
 ---
 
@@ -198,22 +190,10 @@ Wer immer denselben Datensatz auswertet, kann ihn oben im Skript bei
   Optimierung dort, also `run_penalty_only.py`.
 - **Gerade auch in den Metrik-Vergleich einzeichnen**: siehe Abschnitt
   *Talschnitt*; die dort gefittete Gerade wird zusaetzlich in die vier
-  Metrik-Karten gelegt, als EINE durchgezogene Linie ueber den ganzen
-  gescannten Bereich. Aus welchem Bereich sie bestimmt wurde, steht im
-  Bericht. Die Legende der Figur hat genau einen Eintrag ("Linear model
-  fit"); der Stern bekommt keinen.
-- **... ausserhalb des Fit-Bereichs gepunktet statt durchgezogen**: nur wer
-  den Unterschied im Bild sehen will, setzt diesen Haken - dann wird die
-  Gerade zweiteilig gezeichnet, durchgezogen im gefitteten Bereich und
-  gepunktet in der Verlaengerung. Der gepunktete Teil bekommt keinen eigenen
-  Legendeneintrag.
-- **Talpfad und ausgelassene/extrapolierte Punkte in die Karte zeichnen**
-  (Gruppe *Talschnitt*): ohne Haken zeigt die Karte im linken Panel des
-  Querschnitts nur den verbotenen Bereich und die Ausgleichsgerade. Die
-  einzelnen Pfadpunkte werden dann gar nicht erst gezeichnet, also auch nicht
-  in der Legende gefuehrt; ihre Anzahl steht im Bericht. Ausnahme: kommt gar
-  keine Gerade zustande, waere die Karte sonst leer - dann wird der Talpfad
-  auch ohne Haken gezeichnet.
+  Metrik-Karten gelegt - durchgezogen im gefitteten Bereich, gepunktet in
+  der Extrapolation. Die Legende der Figur hat dabei genau einen Eintrag
+  ("Linear model fit"); der extrapolierte Teil und der Stern bekommen
+  keinen.
 - **Metrik-Vergleich zusaetzlich mit Amplituden (6 Karten, eigene PDF)**:
   schreibt neben `..._metric_comparison.pdf` eine zweite Datei
   `..._metric_comparison_amp.pdf` mit denselben vier Metrik-Karten plus `r_x`
@@ -227,13 +207,69 @@ Wer immer denselben Datensatz auswertet, kann ihn oben im Skript bei
 - **Plots zusaetzlich interaktiv anzeigen**: oeffnet jedes Bild in einem
   Fenster. Praktisch zum Hineinzoomen, laestig bei vielen Plots.
 
-**Welche Kurven im Schnitt stehen.** Voreingestellt sind alle ausser dem
-NORMIERTEN Score: im Querschnitt steht `J` (Penalty ROH), also die Groesse,
-die der Scan an jedem Gitterpunkt tatsaechlich minimiert hat. Der normierte
-Score `S` bleibt anhakbar - er ist praktisch zum Sortieren, aber nichts, was
-man physikalisch deuten kann, weil die Normierung jede Rohgroesse gitterweit
-auf 0..1 zieht. `J` traegt eine Einheit und wird deshalb NICHT in Prozent
-gezeigt, sondern roh (Werte um 0.04 statt 4 %) - genau wie im Bericht.
+**Im Geradenmodus ist die Kurvenauswahl fest.** Neben der Karte stehen dort
+nur noch drei Kurven auf zwei y-Achsen: die Zielgroesse `J` und ihre beiden
+Haelften `U_c` und `eta_c` (beide in %, deshalb eine gemeinsame Achse). Alles
+andere steht in einer zweiten Datei `..._line_panels_...pdf`: die sechs
+Groessen der Uebersicht, jede in einem eigenen Feld mit eigener Achse, in
+derselben Anordnung wie die Metrik-Karten - `r_x` unten links, `r_y` unten
+rechts. Sie fuellt eine A4-Seite und entsteht automatisch. An den y-Achsen
+steht dort nur das Symbol (U_h, U_w, eta_h, eta_w, r_x, r_y); was die Groesse
+ist, sagt der Titel ueber dem Feld.
+
+Die Waist-Achse heisst in allen Plots "Waist in the atomic plane omega [um]" -
+ohne Strich an omega. Der Strich sollte frueher "nach der Linse" bedeuten,
+liest sich im Dokument aber wie eine Ableitung.
+
+Einheiten stehen ueberall in ECKIGEN Klammern: Width [MHz], omega [um],
+U_h [%]. Runde Klammern bleiben Erklaerungen wie (hard mask) oder
+(atom-weighted); dimensionslose Groessen (J, r_x, r_y) bekommen keine.
+
+Die Haken darunter sind im Geradenmodus deshalb grau. Sie wirken nur im
+Talpfad-Modus:
+
+**Welche Kurven im Schnitt stehen.** Im Querschnitt steht als Score `J`, die
+Groesse, die der Scan an jedem Gitterpunkt tatsaechlich minimiert hat.
+
+`J` wird in PROZENT gezeigt (5.8 % statt 0.058). Es ist die Kombination
+`alpha*U_c + (1-alpha)*eta_c` zweier Bruchteile, also selbst einer - und in
+Prozent steht es auf derselben Achse wie U_c und eta_c. Karten, Colorbars und
+Bericht rechnen genauso, damit nirgends zwei J-Skalen nebeneinander stehen.
+
+**Maximale y-Achsen im Schnitt** (Vorgabe 2): Obergrenze fuer die Zahl der
+y-Achsen. Reicht die eigene Buendelung nicht, werden Gruppen zusammengelegt -
+zuerst solche mit gleicher Einheit. Fuer J, U_c und eta_c greift das gar
+nicht mehr, die stehen ohnehin auf einer Achse.
+
+Der markierte Punkt erscheint in ALLEN Plots: als Stern in jeder Karte, als
+senkrechte Linie im Querschnitt und in allen sechs Feldern des Panel-Plots.
+Die Legende nennt einfach beide Koordinaten (`omega = 1.262 um, width =
+0.370 MHz`), auch wenn du nur eine vorgegeben hast - die andere kommt aus der
+Geraden. Extrapolierte Stuetzstellen werden dabei nicht extra markiert, es sei
+denn, du schaltest die Talpunkte ein. Im Bericht stehen darunter alle neun Groessen an diesem
+Punkt: U_h, U_w, eta_h, eta_w, U_c, eta_c, r_x, r_y und J, einmal bilinear
+interpoliert und einmal am naechstgelegenen gerechneten Gitterpunkt.
+
+**Was ausser der Geraden in die 2D-Karten gezeichnet wird** - vier Haken, die
+fuer ALLE Karten gelten (Metrik-Vergleich, Score-Karte, Karte im Schnittplot):
+
+- *Gerade ueber den gefitteten Bereich hinaus verlaengern* - Vorgabe AN. Der
+  verlaengerte Teil sieht aus wie der Rest der Geraden. Ohne Haken endet die
+  Linie, wo der Fit endet.
+- *den verlaengerten Teil gestrichelt zeichnen* - Vorgabe AUS. Setzt ihn
+  optisch ab ("hier wurde nicht gefittet"), teilt die Gerade dafuer aber in
+  zwei Stuecke. Ohne die Verlaengerung ohne Wirkung, der Haken ist dann grau.
+- *Talpfad als Linie* - Vorgabe AUS. Der Weg der echten Minima; die Linie
+  bricht an den ausgelassenen Stellen ab. Im Talpfad-Modus grau, weil der
+  Pfad dort der Schnitt ist und immer gezeichnet wird.
+- *benutzte Talpunkte markieren* - Vorgabe AUS. Gefuellt, in der Farbe der
+  Geraden.
+- *ausgelassene Talpunkte markieren* - Vorgabe AUS. Offene dunkle Kreise mit
+  ihrer Zahl in der Legende.
+
+Voreingestellt ist also nur die Verlaengerung - das Bild fuers Dokument. Die
+drei anderen zeigen, worauf die Gerade sich stuetzt, und sind beim Pruefen
+gedacht.
 
 **Talpunkt-Auswahl** - der wichtigste Schalter der Gruppe:
 
@@ -490,202 +526,6 @@ nicht ernst nehmen.
 
 ---
 
-## 5c. `run_single_beam.py` - ein einzelner Strahl
-
-Fuer den Fall, dass es gar nicht um ein Tonarray geht, sondern um EINEN
-Strahl. Vorgegeben wird nur ein Waistbereich; heraus kommen Uniformity und
-Crosstalk ueber dem Waist - hart im Kreis, atom-gewichtet, und beides
-zusammen nach der Penalty-Formel.
-
-**width und r_x/r_y gibt es hier nicht.** Beides ist bei einem Ton nicht
-definiert: ein einzelner Punkt spannt kein Quadrat auf (und genau dieses
-Quadrat ist sonst die harte Uniformity-Region), und ein
-Aussen/Innen-Verhaeltnis braucht mindestens zwei Toene je Achse. Wer im
-Dialog danach sucht: es ist nicht vergessen worden.
-
-### Die Gruppen im Dialog
-
-**Waistbereich.** Oben wird umgestellt, in welcher Groesse der Bereich
-angegeben wird:
-
-- *Waist in der ATOMEBENE (µm)* - direkt der Waist am Atom, linear
-  abgetastet.
-- *Waist VOR DER ERSTEN LINSE (mm)* - linear in `win_input` abgetastet.
-  Die zugehoerigen Waists liegen dann NICHT aequidistant, weil
-  `waist ~ 1/win_input`. Genau so scannen auch die Multitone-Skripte.
-
-Beim Umschalten werden sinnvolle Startwerte gesetzt - der alte Wert waere
-in der anderen Einheit meist unbrauchbar.
-
-**Strahlprofil.** Airy oder Gauss, und bei Airy die Frage, was die Zahl
-"waist" bedeuten soll (`airy_scale_factor`). Voreingestellt ist der
-physikalisch saubere Wert 1.4830 (1/e^2-Radius der Hauptkeule = waist), wie
-in den anderen neuen Dialogen. Wer mit den vorhandenen Datensaetzen
-vergleichen will, stellt auf 1.19 - die tragen diesen Faktor. Ein anderer
-Faktor bekommt ein Kuerzel im Dateinamen (`_k1.483`), damit sich die beiden
-nie gegenseitig ueberschreiben.
-
-**Optik und Fallengitter.** f1, f2, fLO und die Wellenlaenge brauchen nur
-die Umrechnung `win_input <-> waist`; `pitch` legt fest, wo die
-Nachbar-Sites liegen. Voreingestellt ist f1 = 75 mm - der Wert, mit dem die
-vorhandenen Datensaetze gerechnet wurden. Steht im Aufbau eine andere
-Brennweite, hier aendern; der Waist in µm ist davon unberuehrt, nur seine
-Umrechnung in mm vor der Linse aendert sich.
-
-*Nachbar-Sites (Crosstalk)*: wieviele Nachbarn ueberhaupt eingehen.
-**8 Sites** ist der Kranz direkt um die Site herum - die 3x3-Umgebung ohne
-die Mitte, also genau das, was der Multitone-Optimierer rechnet. 24 Sites
-nimmt den naechsten Kranz dazu (5x5 ohne Mitte); das bringt bei Airy rund
-20 % mehr Crosstalk. Fuer die Vergleichbarkeit mit den Multitone-Scans bei
-8 lassen.
-
-**Harte Region.** Zwei Einstellungen:
-
-*Kreisradius* - der RADIUS, nicht der Durchmesser, Default 1 µm. Die
-Uniformity nimmt immer diesen Kreis. Ist der Radius nicht kleiner als der
-halbe Pitch, fragt der Dialog nach: die Region reicht dann bis zur
-Nachbar-Site.
-
-*Crosstalk-Region* - ueber welcher Flaeche `eta_h` gerechnet wird:
-
-- **derselbe Kreis** (Default): U_h und eta_h sagen etwas ueber dieselbe
-  Flaeche aus.
-- **Pitch-Quadrat** (Seitenlaenge = pitch): die Region, die die
-  Multitone-Skripte fuer den Crosstalk benutzen. Dann ist eta_h direkt mit
-  jenen Scans vergleichbar - bezieht sich aber auf eine ANDERE Flaeche als
-  die Uniformity daneben. Bericht und Plot-Titel nennen dann beide
-  Regionen, und der Dateiname bekommt `_pitchbox`, damit sich die zwei
-  Faelle nie ueberschreiben.
-- **beide gleichzeitig**: ein Lauf, zwei Crosstalk-Kurven (`eta_h^circ` und
-  `eta_h^box`) neben derselben Uniformity - die haengt nicht an der
-  Crosstalk-Region und wird nur einmal gerechnet. Die beiden Kurven stehen
-  immer auf DERSELBEN y-Achse, sonst saehen sie gleich gross aus.
-
-*davon in eta_c / J* - nur bei "beide" zu entscheiden: die
-Penalty-Kombination braucht eine Definition von eta_h. Die hier gewaehlte
-Region geht in eta_c und J ein, die andere steht zum Vergleich daneben. Der
-Bericht schreibt beides dazu, der Dateiname bekommt `_beide` bzw.
-`_beide-pitchbox`.
-
-Die Zellenzahl (401 je Achse, Mittelpunktsregel) ist gegen 3201
-nachgerechnet und stimmt fuer beide Regionen auf sechs Stellen.
-
-**Atom.** Temperatur und Fallenfrequenz ergeben `sigma_atom`, wie ueberall
-sonst in diesem Projekt. Der Atom-Versatz verschiebt Atom UND Sub-Gitter -
-er wirkt nur auf die GEWICHTETEN Groessen. Der harte Kreis bleibt auf der
-Site: er ist eine geometrisch vorgegebene Region, keine Aussage darueber,
-wo das Atom gerade sitzt.
-
-**Penalty.** `alpha` und `combo_lambda` wie im Scan.
-
-**Plots.** Drei Einstellungen entscheiden ueber das Aussehen:
-
-- *hart und atom-gewichtet in GETRENNTE Plots* (Default an): zwei Figuren
-  statt einer. Ohne Haken stehen alle vier Kurven zusammen, hart
-  durchgezogen und gewichtet gestrichelt. **Uniformity und Crosstalk
-  bleiben in jedem Fall zusammen** - getrennt gezeichnet taugen sie zum
-  Vergleich nicht.
-- *eigener Plot fuer die Penalty-Kombination*: `U_c`, `eta_c` und `J`.
-- *Legende*: steht im Bild, Vorgabe oben links. Bei den oberen Positionen
-  wird oben etwas Luft gemacht, damit sie nicht auf den Kurven liegt.
-- Die Kurven sind durchgezogen und werden ueber die Farbe unterschieden.
-  Gestrichelt wird nur, wo zwei von ihnen im Bild uebereinander liegen
-  (typisch U_c und J) - sonst saehe man dort nur noch eine. Die senkrechte
-  Linie des Arbeitspunkts ist immer gestrichelt.
-- *Schrift/Linien-Faktor*: skaliert Schrift, Linien, Marker und Teilstriche
-  gemeinsam. 1.00 waere der Massstab der Multitone-Karten (auf volle
-  Textbreite ausgelegt); fuer eine Kurvenfigur, die im Text kleiner gesetzt
-  wird, ist 1.45 die Vorgabe.
-- *Ueberschrift zeichnen*: aus. In LaTeX steht die Bildunterschrift
-  darunter, und was der Titel sagen wuerde, steht im Bericht und im Dateinamen.
-- *y-Achsen*: "automatisch" teilt eine Achse, solange die Wertebereiche
-  innerhalb einer Groessenordnung liegen und jede Kurve dort noch etwas zu
-  sehen gibt - sonst kommt eine zweite Achse rechts dazu, in der Farbe
-  ihrer Kurve. Alternativen: immer eine Achse, eine logarithmische Achse
-  (bei den typischen Werten die uebersichtlichste Fassung, weil U_h und
-  eta_w gut zwei Groessenordnungen auseinanderliegen), oder je Kurve eine
-  eigene.
-
-**Arbeitspunkt einzeichnen.** Markiert einen Waist in ALLEN Figuren:
-senkrechte Linie und ein Stern auf jeder Kurve. Der Waist kommt entweder
-aus dem Feld daneben oder aus dem Minimum von J, eta_c oder U_h - im
-Minimum-Fall die Stuetzstelle selbst, nicht interpoliert (zwischen den
-Stuetzstellen liegt kein gerechneter Wert; wer es genauer braucht, faehrt
-den Bereich enger ab). Der Bericht bekommt dazu einen Abschnitt mit den
-Werten aller Groessen an dieser Stelle, linear zwischen den benachbarten
-Stuetzstellen interpoliert.
-
-**Atomposition durchfahren (bei festem Waist).** Ein zweiter Lauf, der
-nicht den Strahl veraendert, sondern das Atom aus der Mitte herausfaehrt -
-von 0 bis zum Waist (oder bis zu einem eigenen Wert), in senkrechter
-und/oder diagonaler Richtung. Berechnet werden alle Groessen; es gibt
-eigene Figuren, einen eigenen Bericht und einen eigenen Datensatz
-(`SingleBeamOffset_...`).
-
-Eine waagerechte Richtung fehlt mit Absicht - das Profil ist
-rotationssymmetrisch, waagerecht ist dasselbe wie senkrecht. Diagonal ist
-es nicht, weil die Nachbar-Sites auf einem Quadratgitter liegen und
-diagonal sqrt(2) mal weiter weg sind. Deshalb unterscheiden sich die beiden
-Richtungen nur im Crosstalk, nicht in der Uniformity.
-
-*harte Region folgt dem Atom* (Default an): der Kreis sitzt an der
-jeweiligen Atomposition. Aus: er bleibt auf der Site, dann sind U_h und
-eta_h ueber dem Versatz konstant.
-
-In den Figuren steht die Richtung im Linienstil (senkrecht durchgezogen,
-diagonal gestrichelt), die Groesse in der Farbe. Oben laeuft der Versatz in
-Einheiten des Waists mit.
-
-**Speichern.** Bericht (`Fit_Results/`) und Datensatz (`Results/`) sind
-angehakt; der Dateiname der `.pkl` entsteht sonst automatisch aus Profil,
-Punktzahl und Kreisradius.
-
-### Was herauskommt
-
-```
-Fit_Plots/<Datum>/SingleBeam_..._hard.pdf       (bzw. _metrics.pdf)
-Fit_Plots/<Datum>/SingleBeam_..._weighted.pdf
-Fit_Plots/<Datum>/SingleBeam_..._penalty.pdf
-Fit_Results/SingleBeam_..._Report.md
-Results/single_beam_....pkl
-```
-
-Jede Figur ist auf `\includegraphics[width=\textwidth]` gerechnet und traegt
-oben eine zweite x-Achse mit dem Eingangswaist in mm.
-
-Das Fenster am Ende nennt fuer jede Groesse ihr Minimum und den Waist dazu.
-Steht dahinter "am Rand des Bereichs", ist das vermutlich kein Optimum,
-sondern nur die Grenze - dann den Bereich weiter aufmachen.
-
-### Was man in den Kurven sieht
-
-`eta_w` schwingt ueber dem Waist, statt monoton zu laufen. Das ist kein
-numerischer Dreck, sondern die Airy-Ringstruktur: mit dem Waist wandern die
-Ringe ueber die Nachbar-Site, und der Beitrag dort geht entsprechend auf
-und ab (dieselbe Sache, die
-`Weighted_Optimization/plot_neighbour_airy_rings.py` zeichnet). `eta_h`
-mittelt ueber den ganzen Kreis und ist dadurch deutlich glatter.
-
-**Diese Schwingung erklaert auch die Dellen in eta_c.** Solange eine der
-beiden Groessen durchgehend groesser ist - hier fast immer eta_h > eta_w -,
-loest sich der Betrag in der Penalty-Formel auf:
-
-```
-eta_c = (0.5 + lambda)*eta_h - (lambda - 0.5)*eta_w
-    = 1.25*eta_h - 0.25*eta_w        (bei lambda = 0.75)
-```
-
-Die KLEINERE der beiden Groessen geht also mit NEGATIVEM Vorzeichen ein.
-Jedes Ringmaximum von eta_w drueckt eta_c damit nach unten - die Delle sitzt
-genau dort, wo eta_w am groessten ist. Das ist kein Rechenfehler, sondern
-die Aussage "hier stimmen hartes und gewichtetes Kriterium am besten
-ueberein", und genau das soll der Penalty-Term belohnen. Bei lambda = 0.5
-waere eta_c exakt max(eta_h, eta_w), darunter laege es zwischen Mittelwert
-und Maximum. Fuer U_c gilt dasselbe. Der Bericht schreibt diese Umformung
-mit dem tatsaechlich eingestellten lambda mit aus.
-
----
-
 ## 6. Was am Ende herauskommt
 
 Nach "Auswertung erzeugen" meldet ein Fenster, wohin geschrieben wurde. In
@@ -699,7 +539,8 @@ Nach "Auswertung erzeugen" meldet ein Fenster, wohin geschrieben wurde. In
 | `..._agreement.pdf` | nur Hard-Check: wo hart und gewichtet einig sind |
 | `..._score_scatter.pdf` | nur Hard-Check: gewichtet gegen hart, je Gitterpunkt |
 | `..._valley_...pdf` | Querschnitt entlang des Minimums |
-| `..._line_...pdf` | Querschnitt entlang der Geraden |
+| `..._line_...pdf` | Querschnitt entlang der Geraden (J, U_c, eta_c) |
+| `..._line_panels_...pdf` | die sechs Groessen der Uebersicht einzeln, entlang der Geraden |
 
 Der Dateiname beginnt mit `PenaltyRegion_` oder `HardCheck_`, dann Tonanzahl,
 Gitterpunkte, Strahlprofil und Datum. Der Bericht mit allen Zahlen -
