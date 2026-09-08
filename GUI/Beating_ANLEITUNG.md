@@ -647,3 +647,383 @@ inkohärenten Summe `Σ_s a_s |u_s|²` übereinstimmt — also mit genau dem, wa
 `Multitone_Lens_GUI.py` rechnet. Ohne entartete Spots stimmt es auf ~1e-6
 genau. Weicht es ab, steht der Betrag dort und kommt von der statischen
 Interferenz, nicht von der Numerik.
+
+## Ein-Linsen-Aufbau (Labor, Messbild)
+
+Der Aufbau für das Messbild hat kein Teleskop und kein fLO — hinter dem AOD
+steht **eine** Linse. Checkbox **Use one lens** in *Beam / optics* schaltet
+darauf um; `f1`/`f2` werden dann ignoriert, stattdessen zählt `f (single
+lens)`. Es ändern sich genau zwei Formeln:
+
+| | Teleskop-Aufbau | eine Linse |
+|---|---|---|
+| Ortsablage | `r = (f1·fLO/f2)·tan θ` | `r = f·tan θ` |
+| Waist | `w₀ = (f1/f2)·λ·fLO/(π w_in)` | `w₀ = λ·f/(π w_in)` |
+
+Der AOD bleibt unangetastet: `θ(f) = θ_max·(f−offset)/f_band` mit θ_max =
+43 mrad und f_band = 36 MHz, also v_ac = λ·f_band/θ_max = 665.6 m/s.
+
+### Die eine Zahl, auf die es ankommt
+
+Aus beiden Formeln folgt der Tonabstand, der genau einen Spotabstand von einem
+Waist erzeugt:
+
+```
+df(pitch/waist = 1) = w₀ / (dr/df) = v_ac / (π·w_in)
+```
+
+**Die Brennweite kürzt sich heraus.** Sie legt nur fest, wie groß das Bild
+insgesamt wird, nicht, wie viele Töne man braucht. Für w_in = 1.75 mm sind es
+121.06 kHz — bei f = 45 mm gehört dazu w₀ = 6.51 µm und pitch = 6.51 µm.
+
+### Ziel-Beating-Periode
+
+`|E|²` enthält nur Differenzen der Tonfrequenzen, die Grundperiode ist
+`T₀ = 1/f₀` mit `f₀ = ggT` aller Differenzfrequenzen. Bei gleicher width auf
+beiden Achsen ist
+
+```
+f₀ = width / kgV(N_x−1, N_y−1)     ⇔     width = kgV(N_x−1, N_y−1) / T
+```
+
+Damit steht die width fest, sobald das Gitter steht — der Knopf **Design for a
+target beating period …** sucht die Gitter ab und listet die Sätze, die die
+geforderte Periode *exakt* treffen, sortiert nach Abweichung von einem
+Ziel-`pitch/waist`. Doppelklick oder *Markierten Satz übernehmen* setzt N_x,
+N_y, width_x, width_y, Brennweite, Eingangswaist und Belichtungszeit im
+Haupt-GUI und rechnet neu; Bilder pro Periode, Periodenzahl und
+Gitterauflösung werden dabei auf etwas Bezahlbares gesetzt.
+
+Die Suche hat einen unangenehmen Zug, den man kennen sollte: bei **gleicher**
+width zwingt eine lange Periode entweder zu dichten Spots oder zu vielen
+Tönen. Für T = 100 µs (f₀ = 10 kHz) und pitch/waist ≈ 1 braucht es
+`kgV/(N−1) ≈ 12`, also teilerfremde `N−1` um 12 herum — **13×14 Töne bei
+width = 1.56 MHz**. Wer weniger Töne will, hat zwei Wege:
+
+* **dichter setzen** — `pitch/waist` kleiner als 1 ist kein Fehler. Die Spots
+  überlappen dann stärker, das Zeitmittel wird *glatter*, nur das Feld kleiner.
+  Das Ziel-`pitch/waist` im Dialog ist genau dafür da.
+* **ungleiche widths zulassen** (Checkbox im Dialog). `df_x = 120 kHz` und
+  `df_y = 130 kHz` haben ebenfalls ggT 10 kHz, brauchen aber nur **3×4 Töne**
+  (width_x = 0.24 MHz, width_y = 0.39 MHz) — und heben die Frequenzentartung
+  nebenbei auf. Der Spotabstand in y ist dann 7 % größer als in x.
+
+### Belichtungszeit der Kamera
+
+Das Feld **Camera exposure** in *Time axis* rechnet mit, was eine Kamera mit
+endlicher Belichtung sieht. Eine Belichtung `t_exp` ist ein Boxcar in der Zeit;
+auf dem Fourierkoeffizienten der Beat-Ordnung `d` wirkt sie als
+
+```
+D_d → D_d · sinc(d·f₀·t_exp),        sinc(z) = sin(πz)/(πz)
+```
+
+Bei t_exp = 20 µs und f₀ = 10 kHz bleibt die Grundschwingung mit 94 % fast voll
+stehen, während 120/130 kHz auf 8 % gedämpft werden — die Kamera sieht gerade
+das langsame Beating und mittelt das schnelle weg. Im 13×14-Satz sinkt die
+Modulationstiefe im Plateau dadurch von 100 % auf 24 %, σ_t/⟨I⟩ von 86 % auf
+13 %. Das Zeitmittel bleibt unberührt (sinc(0) = 1).
+
+Die Belichtung wirkt auf **alle Bilder und die σ_t-Karte**, nicht auf die
+Puls- und Rabi-Analyse: das Atom integriert nicht.
+
+### Rechenzeit bei vielen Tönen
+
+`time_stats_exact()` läuft nicht mehr über alle Spotpaare (O(S²)), sondern
+komprimiert die Spots auf ihre **Beat-Ordnungen** und wertet I(t) mit einer FFT
+an 2K+1 Stützstellen exakt aus. 182 Spots auf einem 140²-Gitter mit 625 Bildern
+brauchen damit rund 3 s statt Minuten. Die alte Fassung steht als
+`time_stats_exact_pairs()` daneben und stimmt auf 1e-15 damit überein.
+
+Puls- und Spektrumanalyse laufen weiter über alle Paare und werden ab 64 Spots
+übersprungen; die Checkbox *pulse / spectrum also at many spots* erzwingt sie.
+
+### Kamera-Bildserie
+
+Knopf **Camera frame series …** in *Actions*. Das Fenster zeigt, was eine Kamera
+aufnimmt, wenn man den Trigger-Delay in Schritten über eine Grundperiode
+durchfährt: obere Reihe die Rohbilder, untere Reihe die **Abweichung vom
+Zeitmittel** — das ist die Größe, die man im Labor auswertet, weil der
+Untergrund herausfällt und die Schwebung als Vorzeichenmuster dasteht.
+
+Einstellbar sind Belichtung, Schrittweite des Trigger-Delays (getrennt, weil
+jedes Bild ein eigener Schuss ist und man auch überlappend abtasten kann) und
+die Bildzahl. Voreinstellung: lückenlos über genau eine Periode.
+
+Das Fenster ist **nicht modal** und bleibt offen. Der Ablauf zum Ausprobieren
+von Phasen ist: Phasen im Haupt-GUI setzen → *Recompute* → im Serienfenster
+*Neu zeichnen*. Die Kennzahlzeile darunter nennt den Hub pro Pixel im Plateau
+(Median und p90) und ob das Gesamtlicht im Plateau mitschwankt oder ob es eine
+reine Umverteilung ist — Letzteres ist der bessere Fall, weil es dann nicht mit
+einer Laserleistungsdrift verwechselt werden kann.
+
+Für 13×14 bei 20 µs Belichtung:
+
+| Tonphasen | Hub/Pixel Median | p90 | Plateau-Gesamtlicht | Crest RF x/y |
+|---|---|---|---|---|
+| alle 0 | 16 % | 36 % | schwankt 15 % | 5.10 / 5.29 |
+| **Schroeder** | **52 %** | 68 % | 0.9 % | **1.88 / 2.00** |
+| zufällig | 65 % | 102 % | 3 % | 2.6 / 2.6 |
+
+Schroeder-Phasen sind hier in jeder Hinsicht die richtige Wahl: dreimal so viel
+Kontrast wie bei Phasen 0, ein um den Faktor 2.7 kleinerer Crest-Faktor der RF,
+und eine reine Umverteilung ohne Helligkeitsänderung.
+
+### Crest-Faktor: Formel und eine korrigierte Mittelung
+
+`schroeder_phases(N)` setzt die klassische Schroeder-Vorschrift für gleiche
+Amplituden,
+
+```
+phi_n = -pi * n(n-1)/N ,        n = 0 ... N-1
+```
+
+ein quadratischer Phasenverlauf, also ein linearer Frequenz-Chirp über die
+Töne. Die Momentanleistung verteilt sich damit gleichmäßig über die
+Hüllkurvenperiode statt in einen Puls zu rephasieren. Sie folgt aus Schroeders
+allgemeiner Formel für eine Leistungsverteilung p_l (Σp_l = 1),
+`phi_n = -2π Σ_{l<n} (n-l)·p_l`, mit p_l = 1/N.
+
+`crest_factor()` rechnet ohne Träger: mit `s(t) = Re[e^{2πi f_c t}·A(t)]` ist
+Spitze/Effektivwert `= √2·max|A| / rms|A|`. **Das Mittelungsfenster ist eine
+Periode der Hüllkurve, 1/f_env mit f_env = ggT der Tonabstände — nicht
+1/span.** Eine frühere Fassung nahm 1/span; bei 13 Tönen mit 130 kHz Abstand
+ist die Spanne das Zwölffache des Abstands, das Fenster liegt dann komplett
+innerhalb der Rephasierungsspitze und der Effektivwert kommt viel zu groß
+heraus: 2.19 statt der korrekten 5.10 = √(2N) bei Phasen 0. Der Fehler wächst
+mit der Tonzahl, also genau dort, wo die Zahl gebraucht wird. Probe: Phasen 0
+muss exakt √(2N) geben. Die RF-Amplituden (r_x, r_y) gehen jetzt mit ein.
+
+Die Bilder werden nicht aus dem Würfel gemittelt, sondern exakt gerechnet
+(`camera_frames_exact()`): I(t) ist ein trigonometrisches Polynom in
+`exp(2πi f₀t)`, die Belichtung ab t₀ wirkt darauf als
+
+```
+I_cam(t₀) = Σ_d C_d · sinc(d·f₀·t_exp) · exp(2πi·d·f₀·(t₀ + t_exp/2))
+```
+
+für **beliebige** t₀ und t_exp — kein Zeitraster, keine Rundung, kein Aliasing.
+Probe: `t_exp = T₀` muss exakt das Zeitmittel geben, die untere Reihe wird dann
+null.
+
+## Pulsflaeche und Trigger-Jitter
+
+Knopf **Pulse area / trigger jitter …** in *Actions*. Ein Rechteckpuls der Länge
+T_p wird auf das Zeitfenster höchster Intensität getriggert, seine akkumulierte
+Rabi-Fläche
+
+```
+θ(r, t₀) = ∫_{t₀}^{t₀+T_p} Ω(r,t) dt
+```
+
+berechnet und über den Trigger-Fehler durchgefahren. Der große Plot unten ist
+genau das: Fläche über dem Delay, 0 = perfekt getriggert, ±Grenze frei
+einstellbar (Vorgabe ±1 µs, 401 Punkte).
+
+### Der Punkt, den man leicht übersieht
+
+Ein Puls ist derselbe Boxcar in der Zeit wie eine Kamerabelichtung, nur
+tausendmal kürzer. Auf die Beat-Ordnung d wirkt er als `sinc(d·f₀·T_p)`. Bei
+T_p = 1 µs und f₀ = 10 kHz bleibt die Grundschwingung bei 0.9999 und 120 kHz
+noch bei 0.976 — der Puls **mittelt die Schwebung nicht weg, er tastet sie ab**.
+Deshalb hängt die Fläche empfindlich vom Trigger ab, und zwar auf der Zeitskala
+der *schnellen* Beats (einige µs), nicht auf der der Grundperiode.
+
+### Normierung
+
+```
+Ω(r,t) = 2π·f_rabi · g(r,t)/⟨g⟩ ,     g = I  bzw.  √I
+```
+
+⟨g⟩ ist das Mittel über **Zeit und Bereich** — f_rabi ist also die
+Rabi-Frequenz, die man auf dem zeitgemittelten Profil messen würde. Ein Puls auf
+dieser Referenz hat exakt θ = 2π·f_rabi·T_p; bei 1 MHz und 1 µs also 2π. Der
+π-Puls wäre 0.5 µs lang, dafür gibt es den Knopf.
+
+### Trigger
+
+Der automatische Trigger sucht das Maximum der mittleren Fläche über eine ganze
+Grundperiode (mit parabolischer Nachziehung). Dort ist dθ/d(Delay) = 0, der
+Jitter geht also nur in **zweiter** Ordnung ein — der eigentliche Grund, auf ein
+Maximum und nicht auf eine Flanke zu triggern. Der Trigger lässt sich auch von
+Hand setzen und ins Haupt-GUI übernehmen.
+
+### Was für 13×14 mit Schroeder-Phasen herauskommt
+
+Bei Ω/2π = 1 MHz, T_p = 1 µs, Auswertebereich Plateau:
+
+| | |
+|---|---|
+| optimaler Trigger | t₀ = 2.89 µs im Zyklus |
+| θ(0) | 2.30 π (Referenz 2.00 π, also +15 %) |
+| Spanne über die Periode | 1.87 … 2.30 π |
+| Abweichung bei ±1 µs | −9.7 % |
+| Toleranz für 1 % Flächenfehler | ±290 ns |
+| σ_θ/⟨θ⟩ im Plateau | **74 %** (Zeitmittel: 11 %) |
+
+Die letzte Zeile ist die eigentliche Nachricht: ein 1-µs-Puls sieht praktisch
+eine Momentaufnahme, und die ist räumlich siebenmal so ungleichmäßig wie das
+Zeitmittel. Mit längeren Pulsen läuft das zurück — T_p = 5 µs gibt 44 %,
+T_p = 20 µs gibt 23 %, und die Trigger-Toleranz wird gleichzeitig unkritisch
+(±1 µs kostet dann nur noch 0.5 % Fläche).
+
+### Rechnung
+
+Für Ω ∼ I geschlossen und exakt über dieselben Fourierkoeffizienten wie die
+Kamerabilder: die mittlere Fläche für beliebig viele Delays ist ein
+Matrix-Vektor-Produkt (`beat_coeffs_mean()` + `pulse_area_curve()`), gegen die
+alte paarweise `PulseArea` auf 1e-16 geprüft. Für Ω ∼ √I gibt es keine
+geschlossene Form; dort wird ⟨√I⟩ auf einem feinen Zeitraster per FFT
+ausgewertet und das Integral als laufende Summe gebildet (`sqrt_mean_series()`,
+`sqrt_area_curve()`), Übereinstimmung mit der numerischen Referenz auf 1e-3.
+
+Gespeichert werden PDF, eine Parameterdatei und `_scan.txt` mit der Kurve als
+Zahlenkolonnen (Delay, θ/π, Abweichung in %).
+
+### Anregung, nicht Fläche
+
+Die Fläche θ ist linear in Ω, die Anregung ist es nicht. Weil sin² nichtlinear
+ist, gilt ⟨sin²(θ/2)⟩ ≠ sin²(⟨θ⟩/2), und bei 74–77 % räumlicher Streuung liegen
+die beiden weit auseinander. Das Fenster mittelt deshalb die **Anregung über die
+Orte**, nicht die Fläche: für 13×14 bei T_p = 0.5 µs (dem nominellen π-Puls)
+kommt ⟨sin²(θ/2)⟩ = 0.48 heraus statt der 0.94, die man aus der mittleren Fläche
+naiv ablesen würde. Beide Zahlen stehen in der Infozeile nebeneinander.
+
+Der differentielle Lichtshift η aus dem Haupt-GUI geht mit ein:
+`P = 1/(1+η²)·sin²(√(1+η²)·θ/2)`. Bei η = 0.442 (Δ = −8 GHz) sinkt die Anregung
+weiter von 0.48 auf 0.41. η ist orts- und zeitunabhängig, weil Ω und δ_LS
+denselben Faktor I tragen — der Lichtshift deckelt den Kontrast, fügt aber keine
+zusätzliche räumliche Struktur hinzu.
+
+## Leistung und Intensität
+
+Knopf **Power / intensity …** in *Actions*. Die Simulation kennt I nur bis auf
+eine Konstante; eine physikalische Vorgabe legt sie fest, und der Dialog rechnet
+in beide Richtungen — Rabi-Frequenz → Leistung oder Leistung → Rabi-Frequenz.
+
+Die Kette:
+
+1. **Atomphysik** aus `kern/rb85_raman.py`: adiabatische Elimination der
+   5P-Zustände mit voller, vorzeichenrichtiger Summe über D1 *und* D2 samt
+   Hyperfeinstruktur. Ergebnis `Ω = C_rabi·I`, `δ_LS = C_shift·I`,
+   `Γ = C_scatter·I`, alle linear in I. Für Δ = −8 GHz, σ⁺/σ⁺ kopropagierend,
+   β = 0.5, m_F = 0: **C_rabi = 71.98 rad/s pro W/m²**, η = −0.442.
+2. **Bezug**: Ω/2π gilt für das *Zeitmittel* der Intensität im gewählten Bereich
+   — dieselbe Konvention wie im Pulsfenster.
+3. **Fläche**: `P = I_ref·A_eff` mit `A_eff = ∫I dA / ⟨I⟩_Bereich`. Das
+   Flächenintegral kommt **analytisch** aus der Summe der Einzelspots
+   (`profile_total_power()`), nicht aus dem Rechengitter — beim Airy-Profil
+   fehlen dort 0.55 % der Leistung in den abgeschnittenen Ringen.
+4. **Aufteilung**: Spot (n,m) ∝ a_x(n)²·a_y(m)²; RF-Ton n der x-Achse ∝
+   a_x(n)²/Σa_x², weil er alle Spots seiner Spalte speist.
+
+Für den Ein-Linsen-Satz 13×14 bei Ω/2π = 1 MHz:
+
+| | |
+|---|---|
+| Referenzintensität | 8.73 W/cm² |
+| A_eff | 9469 µm² |
+| Leistung im Profil | **0.83 mW** |
+| pro Spot | 4.5 µW (hellster 6.2) |
+| pro RF-Ton x / y | 64 µW / 59 µW (stärkster y-Ton 80 µW) |
+| Streuung pro 1-µs-Puls | 0.81 % |
+
+Zum Vergleich der Standard-Arbeitspunkt 3×4 mit 1.1 µm Waist: A_eff = 15 µm²,
+also 1.3 µW — der Faktor 600 ist reine Fläche.
+
+**Nicht enthalten**: Beugungseffizienz des AOD, Transmission der Optik,
+Intermodulation. Angegeben ist die Leistung *im Profil*, also nach dem AOD.
+
+Fehlt `arc` (das `rb85_raman` braucht), bleibt der Dialog benutzbar: C_rabi wird
+dann als Eingabefeld freigeschaltet, voreingestellt auf 71.985.
+
+### Atomgewichtet — die einzige Auswertung, die eine Atom-Größe liefert
+
+Voreingestellter Bereich im Pulsfenster. Statt über eine Fläche zu mitteln, auf
+der gar kein einzelnes Atom sitzt, wird mit der thermischen
+Aufenthaltswahrscheinlichkeit gewichtet — dieselbe Konstruktion wie die
+gewichtete Uniformity in `Weighted_Multitone_Lens_GUI.py`:
+
+```
+σ² = ħ/(2mω) · coth(ħω / 2k_BT) ,    W(r) = exp(−|r−r_atom|²/2σ²)
+```
+
+T und ν_r sind Eingabefelder (Vorgabe 17 µK und 60.4 kHz aus der Messung, Rb-85
+→ σ = 108 nm). Ausgewertet wird auf einem eigenen feinen Gitter von ±4σ um den
+Atomort; das globale Rechengitter ist mit 0.6 µm pro Zelle für ein Atom von
+0.1 µm hoffnungslos zu grob.
+
+**Das ändert die Aussage vollständig.** Für 13×14, Ω/2π = 1 MHz, T_p = 1 µs:
+
+| Bereich | θ(0) | σ_θ/⟨θ⟩ | Abweichung bei ±1 µs | 1 %-Toleranz |
+|---|---|---|---|---|
+| **Atom (108 nm)** | **6.35 π** | **0.5 %** | **44 %** | **±125 ns** |
+| Kreis r = 1 µm | 6.22 π | 4.2 % | 42 % | — |
+| Plateau (90 µm) | 2.30 π | 74 % | 9.7 % | ±290 ns |
+| Spotzentren | 2.36 π | 71 % | 12 % | — |
+
+Zwei Dinge stehen hier auf dem Kopf:
+
+* **Die Gleichmäßigkeit ist kein Problem.** Über 108 nm variiert die
+  Momentanintensität um 0.5 %, das Zeitmittel um unter 0.005 %. Die 74 % des
+  Plateaus sind eine Kamera-Größe — sie beschreiben, wie unterschiedlich zwei
+  *weit auseinanderliegende* Punkte des Feldes bestrahlt werden, nicht was ein
+  Atom erlebt.
+* **Der Trigger ist viel kritischer als das Plateau-Mittel vermuten lässt.**
+  Ein Punkt sieht die volle Schwebung; im Plateau-Mittel löschen sich die
+  Beiträge teilweise aus. ±1 µs kosten 44 % statt 9.7 % der Fläche, und für 1 %
+  Genauigkeit bleiben ±125 ns statt ±290 ns.
+
+Weil die Streuung im Atom-Gewicht so klein ist, fallen dort auch ⟨sin²(θ/2)⟩ und
+sin²(⟨θ⟩/2) zusammen (0.270 gegen 0.269) — der Unterschied, der im Plateau
+Faktor zwei ausmacht, ist eine Eigenschaft der Mittelungsfläche, nicht der
+Physik am Atom.
+
+Die Karte oben in der Mitte zeigt im atomgewichteten Fall den lokalen Ausschnitt
+in Nanometern mit den 1σ- und 2σ-Ringen des Atoms.
+
+## Startwerte
+
+Das GUI öffnet jetzt mit dem aktuellen Arbeitspunkt: **3×4 Töne, f1 = 75 mm,
+f2 = 750 mm, width = 0.37 MHz, Waist 1.05 µm, r_x = 0.97, r_y = 1.16**, Airy,
+795 nm, 100 MHz Offset, Ω/2π = 1 MHz. Daraus folgt f₀ = 61.67 kHz und
+T₀ = 16.22 µs.
+
+## Leistungskette: was wo gebraucht wird
+
+Das Leistungsfenster rechnet die ganze Kette durch. Eingaben: Leistung vor dem
+AOD, Beugungseffizienz je AOD (der Spot wird **zweimal** gebeugt, x und y
+multiplizieren sich), Transmission der Optik. Der Bezugsbereich hat jetzt
+ebenfalls die atomgewichtete Option — sonst kalibriert man f_rabi auf eine
+Fläche und rechnet die Pulsfläche am Atom.
+
+Für den Arbeitspunkt bei Ω/2π = 1 MHz am Atom, Δ = −8 GHz:
+
+| | |
+|---|---|
+| Referenzintensität am Atom | 8.73 W/cm² |
+| A_eff | 14.4 µm² |
+| **Leistung im Profil** | **1.26 µW** |
+| pro Spot | 0.105 µW (hellster 0.125) |
+| pro RF-Ton x / y | 0.42 / 0.32 µW |
+| 300 mW × 0.7 × 0.7 × 0.8 | 117.6 mW verfügbar |
+| **Reserve** | **≈ 9·10⁴** |
+
+Die Leistung ist also um Größenordnungen kein Problem — nötig wäre eine
+Gesamteffizienz von 4·10⁻⁶. Das ist die eigentliche Nachricht: **der Aufbau ist
+nicht leistungs-, sondern streubegrenzt.** Bei Δ = −8 GHz streut ein 1-µs-Puls
+mit 0.81 %; weil Ω ∝ I/Δ und Γ ∝ I/Δ² geht, sinkt die Streuung bei fester
+Rabi-Frequenz mit der Verstimmung. Das Fenster rechnet dazu Δ mit denselben
+Koeffizienten wirklich durch (kein 1/Δ-Extrapolieren) und meldet, bis wohin die
+Leistung reicht — hier bis über die abgesuchten 3 THz hinaus, wo die Näherung
+selbst zu kippen beginnt, weil D2 nur 7.1 THz entfernt liegt und mit
+umgekehrtem Vorzeichen beiträgt.
+
+## Layout des Pulsfensters
+
+Rechts groß die **ortsaufgelöste** Karte θ(r) — das Einzige im Fenster, das
+keine Mittelung enthält. Links untereinander die drei Kurven, die alle
+Ortsmittel sind: Fläche über eine Grundperiode, Delay-Scan, räumliche Streuung.
+Der Delay-Plot trägt den Hinweis „intensitätsgewichtetes Ortsmittel" direkt
+unter der Achse; die Anregungskurve ist aus dem Streuungsplot heraus (die Zahl
+steht weiterhin in der Infozeile).

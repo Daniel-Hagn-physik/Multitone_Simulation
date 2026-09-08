@@ -154,6 +154,26 @@ except Exception:      # airy_scale.py normally sits next to this file
     airy_scale = None
     AIRY_SCALE_DEFAULT = 1.4830
 
+try:
+    import one_lens_design
+except Exception:      # one_lens_design.py sits next to this file
+    one_lens_design = None
+
+try:
+    import camera_series
+except Exception:      # camera_series.py sits next to this file
+    camera_series = None
+
+try:
+    import pulse_timing
+except Exception:      # pulse_timing.py sits next to this file
+    pulse_timing = None
+
+try:
+    import power_budget
+except Exception:      # power_budget.py sits next to this file
+    power_budget = None
+
 
 # ============================================================
 # Fixed optics constants (identical to the other GUIs)
@@ -211,21 +231,38 @@ def angle_from_frequency(f, offset, theta_max_, f_band_):
     return theta_max_ * (f - offset) / f_band_
 
 
-def radius_from_angle(theta, f1, f2, fLO_):
+def radius_from_angle(theta, f1, f2, fLO_, one_lens=False, f_single=None):
+    """Position in the focal plane for a deflection angle theta.
+
+    Two builds are supported and they differ ONLY here and in
+    conjugate_waist():
+
+      telescope build (default)   r = (f1 * fLO / f2) * tan(theta)
+      single lens                 r = f_lens * tan(theta)
+
+    The angle itself comes from the AOD in both cases and is untouched."""
+    if one_lens:
+        return float(f_single) * np.tan(theta)
     return (f1 * fLO_ / f2) * np.tan(theta)
 
 
-def conjugate_waist(w, f1, f2, lam):
-    """Input <-> output waist through the telescope f1->f2 plus fLO.
-        w_out = (f1/f2) * (lam * fLO) / (pi * w_in)
-    The relation is symmetric, the same function computes both
+def conjugate_waist(w, f1, f2, lam, one_lens=False, f_single=None):
+    """Input <-> output waist.
+
+    Telescope build: w_out = (f1/f2) * (lam * fLO) / (pi * w_in)
+    Single lens:     w_out = lam * f_lens / (pi * w_in)
+
+    Both relations are symmetric, the same function computes both
     directions."""
     if w <= 0:
         return float("nan")
+    if one_lens:
+        return float(f_single) * lam / np.pi / w
     return (f1 / f2) * (lam * fLO) / np.pi / w
 
 
-def compute_centers_and_freqs(N_x, N_y, width_x, width_y, f1, f2, offset):
+def compute_centers_and_freqs(N_x, N_y, width_x, width_y, f1, f2, offset,
+                              one_lens=False, f_single=None):
     """Spot centres AND the frequency of every spot.
 
     The spot ordering is identical to compute_centers() of the other
@@ -243,15 +280,19 @@ def compute_centers_and_freqs(N_x, N_y, width_x, width_y, f1, f2, offset):
     f_center_x = offset + width_x / 2.0
     f_center_y = offset + width_y / 2.0
     r_center_x = radius_from_angle(
-        angle_from_frequency(f_center_x, offset, theta_max, f_band), f1, f2, fLO)
+        angle_from_frequency(f_center_x, offset, theta_max, f_band), f1, f2, fLO,
+        one_lens, f_single)
     r_center_y = radius_from_angle(
-        angle_from_frequency(f_center_y, offset, theta_max, f_band), f1, f2, fLO)
+        angle_from_frequency(f_center_y, offset, theta_max, f_band), f1, f2, fLO,
+        one_lens, f_single)
 
     centers_x, centers_y, f_spots = [], [], []
     for fx in fx_freq:
-        rx = radius_from_angle(angle_from_frequency(fx, offset, theta_max, f_band), f1, f2, fLO)
+        rx = radius_from_angle(angle_from_frequency(fx, offset, theta_max, f_band),
+                               f1, f2, fLO, one_lens, f_single)
         for fy in fy_freq:
-            ry = radius_from_angle(angle_from_frequency(fy, offset, theta_max, f_band), f1, f2, fLO)
+            ry = radius_from_angle(angle_from_frequency(fy, offset, theta_max, f_band),
+                                   f1, f2, fLO, one_lens, f_single)
             centers_x.append(rx)
             centers_y.append(ry)
             # Both AODs shift the light frequency -> the spot carries the sum.
@@ -479,22 +520,47 @@ def spot_phases_from_tones(phase_x, phase_y, N_x, N_y):
     return np.repeat(phase_x, N_y) + np.tile(phase_y, N_x)
 
 
-def crest_factor(f_tones, phases, n_samples=20000, f_ref=None):
-    """Crest factor of the summed RF signal of one axis: peak amplitude
-    divided by the rms value. Decisive for how strongly the AOD is driven
-    for short times."""
+def crest_factor(f_tones, phases, n_samples=20000, f_ref=None, amps=None):
+    """Crest factor of the RF signal of one axis: peak amplitude / rms.
+    Decisive for how strongly the AOD and its amplifier are driven for
+    short times.
+
+    Computed WITHOUT the carrier. With
+
+        s(t) = Re[ e^{i 2 pi f_c t} A(t) ],
+        A(t) = sum_n a_n e^{i(2 pi (f_n - f_c) t + phi_n)} ,
+
+    the peak of s over the carrier is max|A| and its rms is rms|A|/sqrt(2),
+    hence crest = sqrt(2) * max|A| / rms|A|. That removes the need to
+    resolve 100 MHz in the sampling and makes the number exact.
+
+    THE AVERAGING WINDOW IS ONE PERIOD OF THE ENVELOPE, 1/f_env with f_env
+    the gcd of the tone spacings - NOT 1/span, which is what an earlier
+    version used. At 13 tones spaced 130 kHz the span is twelve times the
+    spacing; a window of 1/span sits entirely inside the rephasing peak,
+    so the rms comes out far too large and the crest far too small: 2.19
+    instead of the correct 5.10 = sqrt(2N) for all phases at zero. The
+    error grows with the number of tones, which is exactly where the
+    number matters."""
     f = np.asarray(f_tones, dtype=float)
     if f.size == 0:
         return float("nan")
+    a = np.ones(f.size) if amps is None else np.asarray(amps, dtype=float)
+    if f.size == 1:
+        return float(np.sqrt(2.0))
     if f_ref is None or f_ref <= 0:
-        span = np.ptp(f)
-        f_ref = span if span > 0 else 1.0
+        f_ref = fundamental_beat_frequency(f)
+        if f_ref <= 0:                     # incommensurable: take the closest pair
+            d = np.diff(np.sort(f))
+            d = d[d > 0]
+            f_ref = float(d.min()) if d.size else 1.0
     t = np.linspace(0.0, 1.0 / f_ref, n_samples, endpoint=False)
-    sig = np.zeros_like(t)
-    for fi, pi_ in zip(f, phases):
-        sig += np.cos(2 * np.pi * fi * t + pi_)
-    rms = np.sqrt(np.mean(sig ** 2))
-    return float(np.max(np.abs(sig)) / rms) if rms > 0 else float("nan")
+    ph = (2 * np.pi * (f - f.mean())[:, None] * t[None, :]
+          + np.asarray(phases, dtype=float)[:, None])
+    A = (a[:, None] * np.exp(1j * ph)).sum(axis=0)
+    mod = np.abs(A)
+    rms = np.sqrt(np.mean(mod ** 2))
+    return float(np.sqrt(2.0) * mod.max() / rms) if rms > 0 else float("nan")
 
 
 # ============================================================
@@ -540,11 +606,11 @@ def pair_lists(k):
     return {d: np.array(v) for d, v in out.items()}
 
 
-def time_stats_exact(F, k, phases):
-    """Time average and time variance of I(r,t), exact and without a time
-    loop.
+def time_stats_exact_pairs(F, k, phases):
+    """Reference implementation over all spot pairs - O(S^2) Python loop.
 
-    Returns (mean_map, var_map) in the shape of F[0]."""
+    Kept for verification; time_stats_exact() below gives the same numbers
+    via an FFT over the beat orders and is the one that is used."""
     S = F.shape[0]
     shape = F.shape[1:]
     G = F.reshape(S, -1)
@@ -570,6 +636,392 @@ def time_stats_exact(F, k, phases):
             Dim += wij.imag * gg
         var += 2.0 * (Dre * Dre + Dim * Dim)
     return mean.reshape(shape), var.reshape(shape)
+
+
+def order_amplitudes(F, k, phases):
+    """Complex amplitude per BEAT ORDER instead of per spot.
+
+    Spots that share the same order u = (f_s - f_min)/f_0 can never beat
+    against each other; only their sum matters. That sum
+
+        H_u(r) = sum_{k_s = u} A_s u_s(r) e^{i phi_s}
+
+    is all the time evolution depends on:  E(r,t) = sum_u H_u(r) z^u with
+    z = exp(2 pi i f_0 t). The number of orders never exceeds the number of
+    spots and the pair loop disappears - which is what makes grids of a
+    hundred and more tones usable at all."""
+    return _order_amplitudes_G(F.reshape(F.shape[0], -1), k, phases)
+
+
+def _order_amplitudes_G(G, k, phases):
+    """order_amplitudes() auf einer bereits flachen (S, P)-Matrix."""
+    S = G.shape[0]
+    k = np.asarray(k, dtype=int)
+    kk = k - k.min() if k.size else k
+    K = int(kk.max()) if kk.size else 0
+    e = np.exp(1j * np.asarray(phases, dtype=float))
+    H = np.zeros((K + 1, G.shape[1]), dtype=np.complex128)
+    for sidx in range(S):
+        H[kk[sidx]] += e[sidx] * G[sidx]
+    return H, K
+
+
+def time_stats_exact(F, k, phases, f0=0.0, t_exp=0.0, chunk=4000):
+    """Time average and time variance of I(r,t), exact and without a pair
+    loop.
+
+    I(t) is a trigonometric polynomial of degree K in exp(2 pi i f_0 t), so
+    n_t = 2K+1 equidistant samples reproduce it exactly - no aliasing, no
+    approximation. The samples come from one FFT over the order axis.
+
+    t_exp > 0 additionally applies a CAMERA EXPOSURE: a boxcar of length
+    t_exp in time multiplies the Fourier coefficient of order d by
+    sinc(d*f_0*t_exp). The mean is untouched (sinc(0) = 1), the variance
+    becomes the variance of what a camera with that exposure actually
+    records. The obtained Fourier coefficients are exact, so this costs one
+    further FFT and nothing else.
+
+    Returns (mean_map, var_map) in the shape of F[0]."""
+    shape = F.shape[1:]
+    H, K = order_amplitudes(F, k, phases)
+    P = H.shape[1]
+    if K == 0:
+        mean = np.abs(H[0]) ** 2
+        return mean.reshape(shape), np.zeros(P).reshape(shape)
+
+    n_t = 2 * K + 1
+    weight = None
+    if t_exp > 0 and f0 > 0:
+        d = np.fft.fftfreq(n_t, d=1.0 / n_t)          # 0,1,..,K,-K,..,-1
+        weight = np.abs(np.sinc(d * f0 * t_exp))
+        weight[0] = 1.0
+
+    mean = np.empty(P)
+    var = np.empty(P)
+    for lo in range(0, P, chunk):
+        hi = min(P, lo + chunk)
+        A = np.zeros((n_t, hi - lo), dtype=np.complex128)
+        A[:K + 1] = H[:, lo:hi]
+        I = np.abs(np.fft.fft(A, axis=0)) ** 2         # I(r, t_j), exact
+        mean[lo:hi] = I.mean(axis=0)
+        if weight is None:
+            var[lo:hi] = I.var(axis=0)
+        else:
+            D = np.fft.ifft(I, axis=0)                 # Fourier coeff. D_d
+            D *= weight[:, None]
+            var[lo:hi] = np.sum(np.abs(D[1:]) ** 2, axis=0)
+    return mean.reshape(shape), var.reshape(shape)
+
+
+def camera_frames_exact(F, k, phases, f0, t_exp, t0_list, chunk=4000):
+    """Bilder einer Kamera mit Belichtung t_exp, Start bei jedem t_0.
+
+    Exakt fuer BELIEBIGE t_0 und t_exp. I(t) ist ein trigonometrisches
+    Polynom in exp(2 pi i f_0 t),
+
+        I(r,t) = sum_d C_d(r) exp(2 pi i d f_0 t) ,
+
+    und die Belichtung ist ein Boxcar darauf:
+
+        I_cam(r,t_0) = sum_d C_d(r) sinc(d f_0 t_exp)
+                                    exp(2 pi i d f_0 (t_0 + t_exp/2)) .
+
+    Die C_d kommen aus einer FFT ueber die Beat-Ordnungen, nicht aus einer
+    Schleife ueber Spotpaare - dieselbe Maschinerie wie in
+    time_stats_exact(). Kein Zeitraster, also auch kein Aliasing und keine
+    Rundung der Belichtung auf ganze Frames.
+
+    Rueckgabe: Array (len(t0_list),) + F[0].shape, reell."""
+    shape = F.shape[1:]
+    t0_list = np.atleast_1d(np.asarray(t0_list, dtype=float))
+    H, K = order_amplitudes(F, k, phases)
+    P = H.shape[1]
+    out = np.empty((t0_list.size, P))
+    if K == 0 or f0 <= 0:
+        out[:] = np.abs(H[0]) ** 2
+        return out.reshape((t0_list.size,) + shape)
+
+    n_t = 2 * K + 1
+    d = np.fft.fftfreq(n_t, d=1.0 / n_t)                  # 0,1,..,K,-K,..,-1
+    # Boxcar mal Zeitverschiebung, ein Faktor pro Ordnung und Bild
+    W = (np.sinc(d * f0 * t_exp)[None, :]
+         * np.exp(2j * np.pi * d[None, :] * f0
+                  * (t0_list[:, None] + 0.5 * t_exp)))    # (n_frames, n_t)
+    for lo in range(0, P, chunk):
+        hi = min(P, lo + chunk)
+        A = np.zeros((n_t, hi - lo), dtype=np.complex128)
+        A[:K + 1] = H[:, lo:hi]
+        # ifft*n_t: E_j = sum_u H_u exp(+2 pi i u j / n_t), also t_j = j/(n_t f_0)
+        E = np.fft.ifft(A, axis=0) * n_t
+        I = np.abs(E) ** 2
+        C = np.fft.fft(I, axis=0) / n_t                   # I_j = sum_d C_d e^{+i..}
+        out[:, lo:hi] = np.real(W @ C)
+    return out.reshape((t0_list.size,) + shape)
+
+
+def single_spot_power(waist, use_airy, airy_factor):
+    """Integral von |u|^2 ueber die ganze Ebene fuer EINEN Spot mit
+    Amplitude 1 im Zentrum, analytisch.
+
+    Gauss  u = exp(-r^2/w^2):          int = pi*w^2/2
+    Airy   u = 2 J_1(k r)/(k r):       int = 4*pi/k^2,  k = 3.8317/(factor*w)
+
+    (die zweite folgt aus int_0^inf J_1(u)^2/u du = 1/2)
+
+    Analytisch, weil das Rechengitter der GUI die Auslaeufer abschneidet -
+    beim Airy-Profil fehlen dadurch mehrere Prozent der Leistung, und
+    ausgerechnet die Leistung ist die Groesse, die man nicht um Prozente
+    danebenhaben will."""
+    if not use_airy:
+        return np.pi * waist ** 2 / 2.0
+    k = 3.83170597 / (airy_factor * waist)
+    return 4.0 * np.pi / k ** 2
+
+
+def profile_total_power(amp_spots, waist, use_airy, airy_factor):
+    """Gesamte 'Leistung' des Profils in den Einheiten der Simulation.
+
+    Die Spots ueberlappen zwar, aber das Zeitmittel ist die INKOHAERENTE
+    Summe (die Kreuzterme laufen um und mitteln sich weg), und deren
+    Flaechenintegral ist die Summe der Einzelintegrale. Fuer frequenz-
+    entartete Paare gilt das streng genommen nicht - deren statischer
+    Kreuzterm traegt zum Integral bei; bei einem einzigen entarteten Paar
+    von 182 Spots ist das aber weit unter einem Promille."""
+    a = np.asarray(amp_spots, dtype=float)
+    return float(np.sum(a ** 2)) * single_spot_power(waist, use_airy, airy_factor)
+
+
+def _masked_columns(F, mask):
+    """(S, M)-Matrix der Spalten innerhalb der Maske."""
+    G = F.reshape(F.shape[0], -1)
+    if mask is None:
+        return G
+    idx = np.flatnonzero(np.asarray(mask).ravel())
+    return G[:, idx] if idx.size else G
+
+
+def _masked_weights(F, mask, weights):
+    """Gewichtsvektor passend zu _masked_columns(); ohne Angabe alles 1."""
+    n_all = int(np.prod(F.shape[1:]))
+    w = (np.ones(n_all) if weights is None
+         else np.asarray(weights, dtype=float).ravel())
+    if mask is None:
+        return w
+    idx = np.flatnonzero(np.asarray(mask).ravel())
+    return w[idx] if idx.size else w
+
+
+# ============================================================
+# Das Atom als Gewicht
+# ============================================================
+# Die harte Maske ("alle Pixel im Plateau") beantwortet eine Frage, die kein
+# Atom stellt. Ein Atom sitzt an EINEM Ort und ist dort um sigma_thermal
+# unscharf; was es sieht, ist die mit seiner Aufenthaltswahrscheinlichkeit
+# gewichtete Intensitaet. Genau so rechnet Weighted_Multitone_Lens_GUI die
+# gewichtete Uniformity, und dieselben zwei Funktionen werden hier benutzt.
+#
+# Der Unterschied ist gewaltig: die Streuung ueber das ganze Plateau ist eine
+# Kamera-Groesse, die Streuung ueber ein Atom-Gewicht von gut 100 nm eine
+# Atom-Groesse. Fuer das 13x14-Feld liegen zwischen beiden zwei
+# Groessenordnungen.
+
+RB85_MASS = 84.911789738 * 1.66053906660e-27      # kg
+HBAR = 1.054571817e-34
+KB = 1.380649e-23
+
+
+def sigma_thermal(nu_trap, T, mass=RB85_MASS):
+    """Thermische 1-sigma-Ortsbreite im harmonischen Fallenpotential,
+    inklusive Nullpunktsbewegung:
+
+        sigma^2 = hbar/(2 m omega) * coth( hbar omega / (2 kB T) )
+
+    Identisch zu sigma_thermal() in Weighted_Multitone_Lens_GUI.py."""
+    omega = 2.0 * np.pi * float(nu_trap)
+    if omega <= 0 or T <= 0:
+        return float("nan")
+    x = HBAR * omega / (2.0 * KB * T)
+    return float(np.sqrt(HBAR / (2.0 * mass * omega) / np.tanh(x)))
+
+
+def atom_local_stack(centers_x, centers_y, amp_spots, waist, use_airy,
+                     airy_factor, sigma, n_sigma=4.0, n_grid=81,
+                     center=None):
+    """Feines lokales Gitter um den Atomort plus Gewicht W(r).
+
+    Das globale Rechengitter hilft hier nicht: bei 90 um Feld und 140 Punkten
+    ist eine Zelle 0.64 um breit, das Atom aber nur 0.1 um. Also wird um den
+    Atomort ein eigenes Gitter von +-n_sigma*sigma aufgespannt.
+
+    Rueckgabe (xs, ys, Xs, Ys, F_local, W)."""
+    cx0, cy0 = (float(np.mean(centers_x)), float(np.mean(centers_y))) \
+        if center is None else (float(center[0]), float(center[1]))
+    half = n_sigma * sigma
+    xs = np.linspace(cx0 - half, cx0 + half, n_grid)
+    ys = np.linspace(cy0 - half, cy0 + half, n_grid)
+    Xs, Ys = np.meshgrid(xs, ys)
+    F = build_field_stack(Xs, Ys, centers_x, centers_y, amp_spots, waist,
+                          use_airy, airy_factor)
+    W = np.exp(-((Xs - cx0) ** 2 + (Ys - cy0) ** 2) / (2.0 * sigma ** 2))
+    return xs, ys, Xs, Ys, F, W
+
+
+# ============================================================
+# Pulsflaeche und Trigger-Jitter
+# ============================================================
+# Die akkumulierte Rabi-Flaeche eines Rechteckpulses der Laenge T_p ab t_0 ist
+#
+#     theta(r, t_0) = int_{t_0}^{t_0+T_p} Omega(r,t) dt .
+#
+# Fuer den Zwei-Photonen-Uebergang ist Omega ~ I, und I ist eine endliche
+# Fourierreihe in f_0. Dann ist die Pulsflaeche BIS AUF DEN FAKTOR T_p genau
+# das, was auch eine Kamera mit Belichtung T_p aufnimmt:
+#
+#     theta(r,t_0) = T_p * sum_d C_d(r) sinc(d f_0 T_p) e^{2 pi i d f_0 (t_0+T_p/2)}
+#
+# Ein Puls ist also ein Boxcar wie eine Belichtung - nur ein tausendmal
+# kuerzeres. Bei T_p = 1 us und f_0 = 10 kHz ueberleben die schnellen Ordnungen
+# fast ungedaempft (sinc(0.12) = 0.976 bei 120 kHz); der Puls mittelt die
+# Schwebung NICHT weg, er tastet sie ab. Deshalb haengt die Flaeche empfindlich
+# vom Trigger ab, und deshalb lohnt der Scan ueber den Delay.
+#
+# Fuer Omega ~ sqrt(I) gibt es keine geschlossene Form; dort wird |E| auf einem
+# feinen Zeitraster ausgewertet und das Integral als laufende Summe gebildet.
+
+
+def beat_coeffs_mean(F, k, phases, mask=None, weights=None, chunk=4000):
+    """Fourierkoeffizienten C_d der Intensitaet, raeumlich ueber die Maske
+    gemittelt.
+
+    Der raeumliche Mittelwert vertauscht mit allem Weiteren, deshalb reicht
+    dieser eine Vektor, um die mittlere Pulsflaeche fuer BELIEBIG viele
+    Trigger-Delays auszurechnen - ein Matrix-Vektor-Produkt statt einer
+    Rechnung pro Delay.
+
+    `weights` gewichtet das Ortsmittel - fuer die atomgewichtete Auswertung
+    die Aufenthaltswahrscheinlichkeit W(r) des Atoms. Ohne Gewicht wird
+    gleichmaessig ueber die Maske gemittelt.
+
+    Rueckgabe (c, d): c[j] = <C_{d[j]}>, Ordnungen d in FFT-Reihenfolge."""
+    G = _masked_columns(F, mask)
+    wts = _masked_weights(F, mask, weights)
+    H, K = _order_amplitudes_G(G, k, phases)
+    M = G.shape[1]
+    if K == 0:
+        return (np.array([np.average(np.abs(H[0]) ** 2, weights=wts)], dtype=complex),
+                np.zeros(1, int))
+    n_t = 2 * K + 1
+    d = np.rint(np.fft.fftfreq(n_t, d=1.0 / n_t)).astype(int)
+    c = np.zeros(n_t, dtype=np.complex128)
+    for lo in range(0, M, chunk):
+        hi = min(M, lo + chunk)
+        A = np.zeros((n_t, hi - lo), dtype=np.complex128)
+        A[:K + 1] = H[:, lo:hi]
+        E = np.fft.ifft(A, axis=0) * n_t
+        I = np.abs(E) ** 2
+        c += np.fft.fft(I * wts[None, lo:hi], axis=0).sum(axis=1) / n_t
+    return c / max(float(np.sum(wts)), 1e-300), d
+
+
+def pulse_area_curve(c, d, f0, t_p, t0_list):
+    """Mittlere Pulsflaeche (in Einheiten von Intensitaet mal Zeit) fuer jeden
+    Trigger-Zeitpunkt in t0_list. Exakt, aus den Koeffizienten von
+    beat_coeffs_mean()."""
+    t0_list = np.atleast_1d(np.asarray(t0_list, dtype=float))
+    if f0 <= 0 or d.size == 1:
+        return np.full(t0_list.size, float(np.real(c[0])) * t_p)
+    W = (np.sinc(d * f0 * t_p)[None, :]
+         * np.exp(2j * np.pi * d[None, :] * f0 * (t0_list[:, None] + 0.5 * t_p)))
+    return t_p * np.real(W @ c)
+
+
+def pulse_area_map(F, k, phases, f0, t_p, t0):
+    """theta(r) eines Pulses der Laenge t_p ab t0, Omega ~ I. Der Puls ist
+    derselbe Boxcar wie eine Belichtung, daher genuegt camera_frames_exact."""
+    return t_p * camera_frames_exact(F, k, phases, f0, t_p, [t0])[0]
+
+
+def sqrt_mean_series(F, k, phases, f0, mask=None, weights=None, oversample=6,
+                     chunk=2000):
+    """<sqrt(I)>_Maske auf einem feinen Zeitraster ueber eine Grundperiode.
+
+    Rueckgabe (w, dt): w[j] zur Zeit t_j = j*dt, zyklisch."""
+    G = _masked_columns(F, mask)
+    wts = _masked_weights(F, mask, weights)
+    H, K = _order_amplitudes_G(G, k, phases)
+    M = G.shape[1]
+    if K == 0 or f0 <= 0:
+        return np.array([float(np.average(np.abs(H[0]), weights=wts))]), 1.0
+    n_f = int(oversample * (2 * K + 1))
+    w = np.zeros(n_f)
+    for lo in range(0, M, chunk):
+        hi = min(M, lo + chunk)
+        A = np.zeros((n_f, hi - lo), dtype=np.complex64)
+        A[:K + 1] = H[:, lo:hi].astype(np.complex64)
+        E = np.fft.ifft(A, axis=0) * n_f
+        w += (np.abs(E) * wts[None, lo:hi]).sum(axis=1)
+    return w / max(float(np.sum(wts)), 1e-300), 1.0 / (f0 * n_f)
+
+
+def sqrt_area_curve(w, dt, t_p, t0_list):
+    """Integral von w ueber [t0, t0+t_p], zyklisch, mit linearer Interpolation
+    an den Raendern. Fuer Omega ~ sqrt(I)."""
+    n = w.size
+    T = n * dt
+    cum = np.concatenate(([0.0], np.cumsum(w) * dt))      # cum[j] = int_0^{t_j}
+    total = cum[-1]
+
+    def integral(t):
+        q, r = np.divmod(t, T)
+        x = r / dt
+        j = np.floor(x).astype(int)
+        frac = x - j
+        base = np.take(cum, j, mode="clip") + frac * np.take(w, j % n) * dt
+        return q * total + base
+
+    t0_list = np.atleast_1d(np.asarray(t0_list, dtype=float))
+    return integral(t0_list + t_p) - integral(t0_list)
+
+
+def sqrt_area_map(F, k, phases, f0, t_p, t0, n_sub=41):
+    """theta(r) fuer Omega ~ sqrt(I), numerisch ueber das Pulsfenster.
+
+    Direkt an den n_sub Stuetzstellen im Fenster ausgewertet - das ist
+    billiger als eine FFT ueber die ganze Periode, weil der Puls nur einen
+    winzigen Ausschnitt davon braucht."""
+    shape = F.shape[1:]
+    H, K = order_amplitudes(F, k, phases)
+    t = np.linspace(t0, t0 + t_p, n_sub)
+    u = np.arange(K + 1)
+    Bt = np.exp(2j * np.pi * f0 * np.outer(t, u))          # (n_sub, K+1)
+    acc = np.zeros(H.shape[1])
+    step = max(1, int(4e7 // max(n_sub, 1)))
+    for lo in range(0, H.shape[1], step):
+        hi = min(H.shape[1], lo + step)
+        E = Bt @ H[:, lo:hi]
+        acc[lo:hi] = np.trapezoid(np.abs(E), t, axis=0)
+    return acc.reshape(shape)
+
+
+def boxcar_in_time(cube, n_win):
+    """Cyclic running mean over n_win frames - the camera's exposure.
+
+    The time window of the cube covers whole fundamental periods, so the
+    average may wrap around; that is exactly what a camera does when the
+    exposure straddles the end of a period."""
+    n_win = int(n_win)
+    if n_win <= 1 or n_win >= cube.shape[0]:
+        return cube
+    n_t = cube.shape[0]
+    out = np.empty_like(cube)
+    acc = np.zeros(cube.shape[1:], dtype=np.float64)
+    for j in range(n_win):
+        acc += cube[j % n_t]
+    out[0] = (acc / n_win).astype(cube.dtype)
+    for i in range(1, n_t):
+        acc += cube[(i + n_win - 1) % n_t] - cube[(i - 1) % n_t]
+        out[i] = (acc / n_win).astype(cube.dtype)
+    return out
 
 
 class VariationObjective:
@@ -930,18 +1382,26 @@ class BeatingMultitoneWindow(QMainWindow):
             # Start values of the working point - the GUI always opens like this.
             "use_airy": True,
             "airy_factor": AIRY_SCALE_DEFAULT,
-            "win": 1.10e-6,        # m, waist AFTER the lenses
+            "win": 1.05e-6,        # m, waist AFTER the lenses
             "win_in": None,        # m, waist BEFORE the lenses
             "win_mode": "output",
-            "width_x": 0.45e6,     # Hz, frequency span of the x tones
-            "width_y": 0.45e6,     # Hz, frequency span of the y tones
+            "width_x": 0.37e6,     # Hz, frequency span of the x tones
+            "width_y": 0.37e6,     # Hz, frequency span of the y tones
             "link_width": True,    # width_y follows width_x
-            "r_x": 1.0,
-            "r_y": 1.2,
+            "r_x": 0.97,
+            "r_y": 1.16,
             "lambda_opt": 795e-9,  # m
             "offset": 100e6,       # Hz
-            "f1": 60e-3,
+            "f1": 75e-3,
             "f2": 750e-3,
+            # --- single lens build (lab setup for the camera image) ---
+            "one_lens": False,     # True: no telescope, no fLO, only f_single
+            "f_single": 45e-3,     # m, the one lens behind the AOD
+            "win_in_single": 1.75e-3,  # m, waist in front of that lens
+            "target_period": 100e-6,   # s, wanted beating period (design dialog)
+            "t_exp": 0.0,          # s, camera exposure; 0 = instantaneous
+            "n_max": 20,           # search limit of the design dialog
+            "heavy_analysis": False,   # force pulse/spectrum at many spots
             "grid_n": 200,
             "n_periods": 3,
             "frames_per_period": 60,
@@ -951,14 +1411,15 @@ class BeatingMultitoneWindow(QMainWindow):
             # phi_x(n) + phi_y(m). Free spot phases were a cross-check and
             # have been removed - they could not be driven anyway and did
             # not remove the modulation either.
-            "f_rabi": 0.2e6,             # Hz, Rabi frequency Omega/2pi
+            "f_rabi": 1.0e6,             # Hz, Rabi frequency Omega/2pi
             "pulse_t0": 0.0,             # s, start time of the pulse in the beat cycle
             "rabi_law": "I",             # 'I' (two-photon Raman) | 'sqrtI'
             "eta_ls": 0.0,               # differential light shift / Rabi frequency
             "auto_update": False,
         }
         self.state["win_in"] = conjugate_waist(
-            self.state["win"], self.state["f1"], self.state["f2"], self.state["lambda_opt"])
+            self.state["win"], self.state["f1"], self.state["f2"],
+            self.state["lambda_opt"], self.state["one_lens"], self.state["f_single"])
 
         self.cache = {}
         self._panel_cbar = None
@@ -1062,8 +1523,8 @@ class BeatingMultitoneWindow(QMainWindow):
     def _group_tones(self):
         g = QGroupBox("Tones")
         lay = QGridLayout(g)
-        self.sp_nx = self._ispin(self.state["N_x"], 1, 20)
-        self.sp_ny = self._ispin(self.state["N_y"], 1, 20)
+        self.sp_nx = self._ispin(self.state["N_x"], 1, 64)
+        self.sp_ny = self._ispin(self.state["N_y"], 1, 64)
         lay.addWidget(QLabel("N_x"), 0, 0); lay.addWidget(self.sp_nx, 0, 1)
         lay.addWidget(QLabel("N_y"), 1, 0); lay.addWidget(self.sp_ny, 1, 1)
         self.lbl_freqs = QLabel("-")
@@ -1111,7 +1572,28 @@ class BeatingMultitoneWindow(QMainWindow):
         self.sp_f1 = self._dspin(self.state["f1"] * 1e3, 1.0, 2000.0, 2, 5.0, "mm")
         self.sp_f2 = self._dspin(self.state["f2"] * 1e3, 1.0, 2000.0, 2, 5.0, "mm")
 
-        rows = [("Mode", self.cmb_winmode), ("waist", self.sp_win),
+        self.cb_one_lens = QCheckBox("Use one lens")
+        self.cb_one_lens.setChecked(self.state["one_lens"])
+        self.cb_one_lens.setToolTip(
+            "The lab setup for the camera image has no telescope and no fLO:\n"
+            "behind the AOD stands ONE lens. Then\n"
+            "    r(f) = f_lens * tan(theta(f))     w_0 = lam*f_lens/(pi*w_in)\n"
+            "instead of the (f1*fLO/f2) chain. The AOD itself is unchanged,\n"
+            "theta(f) = theta_max*(f-offset)/f_band stays as it is.\n\n"
+            "f1 and f2 are ignored while this is ticked.")
+        self.cb_one_lens.stateChanged.connect(self._on_one_lens_changed)
+        self.sp_fsingle = self._dspin(self.state["f_single"] * 1e3, 1.0, 2000.0, 3, 1.0, "mm")
+        self.btn_one_lens = QPushButton("Design for a target beating period ...")
+        self.btn_one_lens.setToolTip(
+            "Opens the design window: focal length, waist in front of the\n"
+            "lens, wanted beating period and camera exposure go in, tone\n"
+            "numbers and frequency widths that hit that period EXACTLY come\n"
+            "out.")
+        self.btn_one_lens.clicked.connect(self._open_one_lens_dialog)
+
+        rows = [("", self.cb_one_lens), ("f (single lens)", self.sp_fsingle),
+                ("", self.btn_one_lens),
+                ("Mode", self.cmb_winmode), ("waist", self.sp_win),
                 ("waist_in", self.sp_win_in),
                 ("width x", self.sp_width), ("width y", self.sp_width_y),
                 ("", self.cb_link_width),
@@ -1128,6 +1610,7 @@ class BeatingMultitoneWindow(QMainWindow):
         lay.addWidget(hint, len(rows), 0, 1, 2)
         self._sync_winmode_enabled()
         self._sync_width_enabled()
+        self._sync_one_lens_enabled()
         return g
 
     def _group_amps(self):
@@ -1148,7 +1631,8 @@ class BeatingMultitoneWindow(QMainWindow):
         lay = QGridLayout(g)
         self.sp_frabi = QDoubleSpinBox()
         self.sp_frabi.setRange(0.001, 100.0); self.sp_frabi.setDecimals(4)
-        self.sp_frabi.setSingleStep(0.05); self.sp_frabi.setValue(0.2)
+        self.sp_frabi.setSingleStep(0.05)
+        self.sp_frabi.setValue(self.state["f_rabi"] * 1e-6)
         self.sp_frabi.setSuffix(" MHz"); self.sp_frabi.setKeyboardTracking(False)
         self.sp_frabi.setToolTip("Rabi frequency Omega/2pi. From it follows the "
                                  "pi pulse duration T = 1/(2 f_Rabi).")
@@ -1225,7 +1709,7 @@ class BeatingMultitoneWindow(QMainWindow):
         g = QGroupBox("Time axis")
         lay = QGridLayout(g)
         self.sp_periods = self._ispin(self.state["n_periods"], 1, 50)
-        self.sp_fpp = self._ispin(self.state["frames_per_period"], 8, 400)
+        self.sp_fpp = self._ispin(self.state["frames_per_period"], 8, 2000)
         self.sp_grid = self._ispin(self.state["grid_n"], 60, 600)
         lay.addWidget(QLabel("Periods"), 0, 0); lay.addWidget(self.sp_periods, 0, 1)
         self.sp_fpp.setToolTip(
@@ -1235,6 +1719,22 @@ class BeatingMultitoneWindow(QMainWindow):
             "too few and states the required number.")
         lay.addWidget(QLabel("Frames/period"), 1, 0); lay.addWidget(self.sp_fpp, 1, 1)
         lay.addWidget(QLabel("Grid resolution"), 2, 0); lay.addWidget(self.sp_grid, 2, 1)
+        self.sp_texp = QDoubleSpinBox()
+        self.sp_texp.setRange(0.0, 100000.0); self.sp_texp.setDecimals(3)
+        self.sp_texp.setSingleStep(5.0); self.sp_texp.setSuffix(" us")
+        self.sp_texp.setValue(self.state["t_exp"] * 1e6)
+        self.sp_texp.setKeyboardTracking(False)
+        self.sp_texp.setToolTip(
+            "Camera exposure. 0 = instantaneous intensity, as before.\n\n"
+            "A finite exposure is a boxcar in time: the Fourier coefficient\n"
+            "of beat order d is multiplied by sinc(d*f_0*t_exp). Slow beats\n"
+            "survive, fast ones are averaged away - at t_exp = 20 us and\n"
+            "f_0 = 10 kHz the fundamental keeps 94 %, while 120 kHz is left\n"
+            "with 8 %. All images and the sigma_t map then show what the\n"
+            "CAMERA records; the pulse and Rabi analysis stays instantaneous,\n"
+            "because the atom does not integrate.")
+        self.sp_texp.valueChanged.connect(self._on_param_changed)
+        lay.addWidget(QLabel("Camera exposure"), 3, 0); lay.addWidget(self.sp_texp, 3, 1)
 
         self.slider_t = QSlider(Qt.Horizontal)
         self.slider_t.setMinimum(0)
@@ -1410,7 +1910,8 @@ class BeatingMultitoneWindow(QMainWindow):
         """Common setup for everything that has to do with the pulse."""
         s = self.state
         cxs, cys, f_spots, _, _, _, _ = compute_centers_and_freqs(
-            s["N_x"], s["N_y"], s["width_x"], s["width_y"], s["f1"], s["f2"], s["offset"])
+            s["N_x"], s["N_y"], s["width_x"], s["width_y"], s["f1"], s["f2"],
+            s["offset"], s["one_lens"], s["f_single"])
         f0 = fundamental_beat_frequency(f_spots)
         amp = amp_spots_from_ratios(s["r_x"], s["r_y"], s["N_x"], s["N_y"])
         win_eff = s["win"] * (s["airy_factor"] if s["use_airy"] else 1.0)
@@ -1535,6 +2036,16 @@ class BeatingMultitoneWindow(QMainWindow):
         self.cb_fastdraw.stateChanged.connect(lambda _: self.draw_frame(full=True))
         lay.addWidget(self.cb_fastdraw)
 
+        self.cb_heavy = QCheckBox("pulse / spectrum also at many spots")
+        self.cb_heavy.setChecked(self.state["heavy_analysis"])
+        self.cb_heavy.setToolTip(
+            "The pulse-area and spectrum analysis runs over ALL spot pairs and\n"
+            "therefore costs O(S^2) - fine at 12 spots, minutes at 180. Above\n"
+            "64 spots it is skipped unless this is ticked. Images, uniformity\n"
+            "and the sigma_t map are unaffected, they use the fast path.")
+        self.cb_heavy.stateChanged.connect(self._on_param_changed)
+        lay.addWidget(self.cb_heavy)
+
         self.cb_live = QCheckBox("record U(t) live")
         self.cb_live.setChecked(True)
         self.cb_live.setToolTip(
@@ -1562,6 +2073,36 @@ class BeatingMultitoneWindow(QMainWindow):
             "makes frames incomparable to each other.")
         self.cmb_scale.currentIndexChanged.connect(lambda _: self.draw_frame(full=True))
         lay.addWidget(self.cmb_scale)
+        self.btn_power = QPushButton("Power / intensity ...")
+        self.btn_power.setToolTip(
+            "Opens the power budget: from an assumed Rabi frequency (or from\n"
+            "an available power, the other way round) it gives the intensity,\n"
+            "the power in the profile, per spot and per RF tone, plus the\n"
+            "photon scattering per pulse.\n\n"
+            "Atomic coefficients come from kern/rb85_raman.py.")
+        self.btn_power.clicked.connect(self._open_power_budget)
+        lay.addWidget(self.btn_power)
+        self.btn_pulse = QPushButton("Pulse area / trigger jitter ...")
+        self.btn_pulse.setToolTip(
+            "Opens a window for the pulsed case: a rectangular pulse of a\n"
+            "given length is triggered onto the time window of highest\n"
+            "intensity, its Rabi area is computed, and the area is scanned\n"
+            "over the trigger error.\n\n"
+            "A pulse is the same boxcar in time as a camera exposure, only\n"
+            "much shorter - at 1 us it damps 120 kHz only to 0.98, so it\n"
+            "samples the beating instead of averaging it away.")
+        self.btn_pulse.clicked.connect(self._open_pulse_timing)
+        lay.addWidget(self.btn_pulse)
+        self.btn_camera = QPushButton("Camera frame series ...")
+        self.btn_camera.setToolTip(
+            "Opens a window with the images a camera really records when the\n"
+            "trigger delay is stepped over one beat period: top row the raw\n"
+            "frames, bottom row the deviation from the time average.\n\n"
+            "The window stays open. Change the tone phases here, press\n"
+            "'Recompute', then 'Neu zeichnen' there - that is how to compare\n"
+            "phase sets by what the camera would show.")
+        self.btn_camera.clicked.connect(self._open_camera_series)
+        lay.addWidget(self.btn_camera)
         self.btn_save = QPushButton("Save view as PDF")
         self.btn_save.clicked.connect(self._on_save_clicked)
         lay.addWidget(self.btn_save)
@@ -1578,6 +2119,91 @@ class BeatingMultitoneWindow(QMainWindow):
         out = self.state["win_mode"] == "output"
         self.sp_win.setEnabled(out)
         self.sp_win_in.setEnabled(not out)
+
+    def _sync_one_lens_enabled(self):
+        """f1/f2 belong to the telescope build, f_single to the other one -
+        exactly one pair is meaningful at a time."""
+        one = self.state["one_lens"]
+        self.sp_fsingle.setEnabled(one)
+        self.sp_f1.setEnabled(not one)
+        self.sp_f2.setEnabled(not one)
+
+    def _on_one_lens_changed(self, _):
+        newly_on = self.cb_one_lens.isChecked() and not self.state["one_lens"]
+        self.state["one_lens"] = self.cb_one_lens.isChecked()
+        self._sync_one_lens_enabled()
+        if newly_on:
+            # Switching the build changes the geometry completely; the design
+            # window is the only sensible next step, so it opens by itself.
+            if self._open_one_lens_dialog():
+                return
+        self._on_param_changed()
+
+    def _open_one_lens_dialog(self):
+        """Design window: target beating period -> tone numbers and widths.
+
+        Returns True when a parameter set was taken over."""
+        if one_lens_design is None:
+            QMessageBox.warning(
+                self, "Module missing",
+                "one_lens_design.py was not found next to this file.")
+            return False
+        self._read_widgets()
+        dlg = one_lens_design.OneLensDesignDialog(self, self.state)
+        if dlg.exec_() != dlg.Accepted or not dlg.result_candidate:
+            return False
+        r = dlg.result_candidate
+        s = self.state
+        s["one_lens"] = True
+        s["f_single"] = r["f_single"]
+        s["target_period"] = r["target_period"]
+        s["n_max"] = r["n_max"]
+        s["t_exp"] = r["t_exp"]
+        s["win_mode"] = "input"          # in front of the lens is what is known
+        s["win_in"] = r["win_in"]
+        s["win_in_single"] = r["win_in"]
+        blocked = [self.cb_one_lens, self.sp_fsingle, self.cmb_winmode,
+                   self.sp_win_in, self.sp_nx, self.sp_ny, self.sp_width,
+                   self.sp_width_y, self.cb_link_width, self.sp_texp]
+        for w in blocked:
+            w.blockSignals(True)
+        try:
+            self.cb_one_lens.setChecked(True)
+            self.sp_fsingle.setValue(r["f_single"] * 1e3)
+            self.cmb_winmode.setCurrentIndex(1)
+            self.sp_win_in.setValue(r["win_in"] * 1e3)
+            self.sp_nx.setValue(r["N_x"])
+            self.sp_ny.setValue(r["N_y"])
+            self.cb_link_width.setChecked(bool(r["link_width"]))
+            self.sp_width.setValue(r["width_x"] * 1e-6)
+            self.sp_width_y.setValue(r["width_y"] * 1e-6)
+            self.sp_texp.setValue(r["t_exp"] * 1e6)
+        finally:
+            for w in blocked:
+                w.blockSignals(False)
+        self._sync_one_lens_enabled()
+        self._sync_winmode_enabled()
+        self._sync_width_enabled()
+        self._rebuild_phase_fields()
+        # Time sampling. The highest beat order is
+        #     K = (N_x-1)*k_x + (N_y-1)*k_y,   k = df * T_target,
+        # Nyquist wants more than 2K samples per fundamental period. With a
+        # hundred and more tones that is a lot of frames, so the window is
+        # cut back to a single period and the grid is coarsened - otherwise
+        # the cube alone would be hundreds of MB.
+        k_x = int(round(r["width_x"] / max(r["N_x"] - 1, 1) * r["target_period"]))
+        k_y = int(round(r["width_y"] / max(r["N_y"] - 1, 1) * r["target_period"]))
+        need = 2 * ((r["N_x"] - 1) * k_x + (r["N_y"] - 1) * k_y) + 1
+        n_spots = r["N_x"] * r["N_y"]
+        for w, val in ((self.sp_fpp, int(min(self.sp_fpp.maximum(), max(60, need)))),
+                       (self.sp_periods, 1 if need > 200 else self.sp_periods.value()),
+                       (self.sp_grid, min(self.sp_grid.value(), 140)
+                        if n_spots > 100 else self.sp_grid.value())):
+            w.blockSignals(True)
+            w.setValue(val)
+            w.blockSignals(False)
+        self.recompute()
+        return True
 
     def _sync_width_enabled(self):
         self.sp_width_y.setEnabled(not self.cb_link_width.isChecked())
@@ -1611,6 +2237,10 @@ class BeatingMultitoneWindow(QMainWindow):
         s["offset"] = self.sp_offset.value() * 1e6
         s["f1"] = self.sp_f1.value() * 1e-3
         s["f2"] = self.sp_f2.value() * 1e-3
+        s["one_lens"] = self.cb_one_lens.isChecked()
+        s["f_single"] = self.sp_fsingle.value() * 1e-3
+        s["t_exp"] = self.sp_texp.value() * 1e-6
+        s["heavy_analysis"] = self.cb_heavy.isChecked()
         s["r_x"] = self.sp_rx.value()
         s["r_y"] = self.sp_ry.value()
         s["grid_n"] = self.sp_grid.value()
@@ -1629,13 +2259,15 @@ class BeatingMultitoneWindow(QMainWindow):
         # other one is updated accordingly and shown in its field.
         if s["win_mode"] == "output":
             s["win"] = self.sp_win.value() * 1e-6
-            s["win_in"] = conjugate_waist(s["win"], s["f1"], s["f2"], s["lambda_opt"])
+            s["win_in"] = conjugate_waist(s["win"], s["f1"], s["f2"], s["lambda_opt"],
+                                          s["one_lens"], s["f_single"])
             self.sp_win_in.blockSignals(True)
             self.sp_win_in.setValue(s["win_in"] * 1e3)
             self.sp_win_in.blockSignals(False)
         else:
             s["win_in"] = self.sp_win_in.value() * 1e-3
-            s["win"] = conjugate_waist(s["win_in"], s["f1"], s["f2"], s["lambda_opt"])
+            s["win"] = conjugate_waist(s["win_in"], s["f1"], s["f2"], s["lambda_opt"],
+                                       s["one_lens"], s["f_single"])
             self.sp_win.blockSignals(True)
             self.sp_win.setValue(s["win"] * 1e6)
             self.sp_win.blockSignals(False)
@@ -1706,7 +2338,8 @@ class BeatingMultitoneWindow(QMainWindow):
 
         centers_x, centers_y, f_spots, r_center_x, r_center_y, fx_freq, fy_freq = \
             compute_centers_and_freqs(s["N_x"], s["N_y"], s["width_x"], s["width_y"],
-                                      s["f1"], s["f2"], s["offset"])
+                                      s["f1"], s["f2"], s["offset"],
+                                      s["one_lens"], s["f_single"])
         amp_spots = amp_spots_from_ratios(s["r_x"], s["r_y"], s["N_x"], s["N_y"])
         n_spots = len(f_spots)
 
@@ -1758,6 +2391,17 @@ class BeatingMultitoneWindow(QMainWindow):
 
         cube = intensity_cube(F, f_spots, phases, t)
 
+        # Camera exposure: cyclic running mean over the frames that fall into
+        # t_exp. Exact in the same sense as the frame sampling itself - if
+        # there are enough frames for the fastest beat (the warning below),
+        # the running mean is the boxcar. The mean over whole periods is
+        # untouched by it, only the envelopes and the modulation change.
+        n_win = int(round(s["t_exp"] * n_frames / max(s["n_periods"] * T0, 1e-30))) \
+            if (s["t_exp"] > 0 and np.isfinite(T0)) else 0
+        t_exp_eff = (n_win * (s["n_periods"] * T0) / n_frames) if n_win > 1 else 0.0
+        if n_win > 1:
+            cube = boxcar_in_time(cube, n_win)
+
         # References. I_avg is the time average; over a whole fundamental
         # period it must be exactly the incoherent sum sum_s A_s^2 |u_s|^2 of
         # the previous GUIs - that is precisely what resid checks.
@@ -1773,7 +2417,8 @@ class BeatingMultitoneWindow(QMainWindow):
         # single spot dominates, up to the number of spots where all
         # contribute equally.
         k_orders = beat_orders(f_spots, f0) if f0 > 0 else np.zeros(len(f_spots), int)
-        mean_exact, var_exact = time_stats_exact(F, k_orders, phases)
+        mean_exact, var_exact = time_stats_exact(F, k_orders, phases,
+                                                 f0=f0, t_exp=t_exp_eff)
         sigma_rel = np.sqrt(np.maximum(var_exact, 0.0)) / np.maximum(mean_exact, 1e-300)
 
         I_max_map = cube.max(axis=0).astype(np.float64)
@@ -1782,7 +2427,10 @@ class BeatingMultitoneWindow(QMainWindow):
         depth = (I_max_map - I_min_map) / np.maximum(I_max_map + I_min_map, 1e-300)
         plateau = I_avg > 0.5 * I_avg.max() if I_avg.max() > 0 else np.zeros_like(I_avg, bool)
         if plateau.any():
+            heavy_ok = s["heavy_analysis"] or n_spots <= 64
             try:
+                if not heavy_ok:
+                    raise RuntimeError("skipped, too many spots")
                 obj_spec = VariationObjective(F, k_orders, plateau)
                 spectrum = obj_spec.components(phases)
             except Exception:
@@ -1805,6 +2453,8 @@ class BeatingMultitoneWindow(QMainWindow):
             }
             # --- pulsed operation: uniformity of the accumulated Rabi area ---
             try:
+                if not heavy_ok:
+                    raise RuntimeError("skipped, too many spots")
                 t_p = 1.0 / (2.0 * s["f_rabi"])
                 pa = PulseArea(F, k_orders, f0, circ_mask, law=s["rabi_law"])
                 t0_scan = np.linspace(0.0, T0, 90, endpoint=False) if periodic else np.zeros(1)
@@ -1850,8 +2500,10 @@ class BeatingMultitoneWindow(QMainWindow):
             spectrum = {}
             u_series, u_ref = {}, {}
             pulse = None
-        crest_x = crest_factor(fx_freq, s["phase_x"])
-        crest_y = crest_factor(fy_freq, s["phase_y"])
+        crest_x = crest_factor(fx_freq, s["phase_x"],
+                               amps=amps_from_ratio(s["r_x"], s["N_x"]))
+        crest_y = crest_factor(fy_freq, s["phase_y"],
+                               amps=amps_from_ratio(s["r_y"], s["N_y"]))
 
         self.cache = {
             "x": x, "y": y, "X": X, "Y": Y,
@@ -1935,8 +2587,24 @@ class BeatingMultitoneWindow(QMainWindow):
                      f"{beats[-1] / f0:.0f} x f_0; Nyquist requires at least "
                      f"{need_fpp}. Otherwise the time average and the envelopes are "
                      f"wrong (aliasing).")
+        if s["one_lens"]:
+            build = (f"single lens f = {s['f_single'] * 1e3:.1f} mm, "
+                     f"waist before it {s['win_in'] * 1e3:.3f} mm "
+                     f"-> w_0 = {s['win'] * 1e6:.3f} um")
+        else:
+            build = (f"telescope f1/f2 = {s['f1'] * 1e3:.0f}/{s['f2'] * 1e3:.0f} mm "
+                     f"+ fLO = {fLO * 1e3:.2f} mm")
+        if t_exp_eff > 0:
+            build += (f"   |   camera exposure {t_exp_eff * 1e6:.2f} us "
+                      f"({n_win} frames), fundamental kept at "
+                      f"{abs(float(np.sinc(f0 * t_exp_eff))) * 100:.0f} %")
+        elif s["t_exp"] > 0:
+            build += "   |   exposure < one frame, ignored"
+        if not (s["heavy_analysis"] or n_spots <= 64):
+            build += "   |   pulse/spectrum skipped (>64 spots)"
         self.lbl_status.setText(
-            f"done: {n_frames} frames, {len(f_spots)} spots, grid {s['grid_n']}^2.\n" + note)
+            f"done: {n_frames} frames, {len(f_spots)} spots, grid {s['grid_n']}^2.\n"
+            + build + "\n" + note)
         if periodic and s["frames_per_period"] < need_fpp:
             self.lbl_status.setStyleSheet("color: #a00; font-size: 10px; font-weight: bold;")
         else:
@@ -2472,20 +3140,132 @@ class BeatingMultitoneWindow(QMainWindow):
         self.canvas.draw_idle()
 
     # --------------------------------------------------------
+    def _open_power_budget(self):
+        """Leistung und Intensitaet des Profils, eigenes Fenster."""
+        if power_budget is None:
+            QMessageBox.warning(
+                self, "Module missing",
+                "power_budget.py was not found next to this file.")
+            return
+        if not self.cache:
+            self.recompute()
+        dlg = getattr(self, "_power_dlg", None)
+        if dlg is None:
+            fns = dict(profile_total_power=profile_total_power,
+                       single_spot_power=single_spot_power,
+                       amps_from_ratio=amps_from_ratio,
+                       sigma_thermal=sigma_thermal,
+                       atom_local_stack=atom_local_stack,
+                       time_stats_exact=time_stats_exact)
+            dlg = power_budget.PowerBudgetDialog(self, fns)
+            self._power_dlg = dlg
+        else:
+            dlg.recompute()
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _open_pulse_timing(self):
+        """Pulsflaeche und Trigger-Jitter, eigenes Fenster."""
+        if pulse_timing is None:
+            QMessageBox.warning(
+                self, "Module missing",
+                "pulse_timing.py was not found next to this file.")
+            return
+        if not self.cache:
+            self.recompute()
+        dlg = getattr(self, "_pulse_dlg", None)
+        if dlg is None:
+            fns = dict(beat_coeffs_mean=beat_coeffs_mean,
+                       pulse_area_curve=pulse_area_curve,
+                       pulse_area_map=pulse_area_map,
+                       camera_frames_exact=camera_frames_exact,
+                       sqrt_mean_series=sqrt_mean_series,
+                       sqrt_area_curve=sqrt_area_curve,
+                       sqrt_area_map=sqrt_area_map,
+                       time_stats_exact=time_stats_exact,
+                       sigma_thermal=sigma_thermal,
+                       atom_local_stack=atom_local_stack)
+            dlg = pulse_timing.PulseTimingDialog(self, fns)
+            self._pulse_dlg = dlg
+        else:
+            dlg.recompute()
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _open_camera_series(self):
+        """Bildserie einer Kamera ueber eine Grundperiode, eigenes Fenster."""
+        if camera_series is None:
+            QMessageBox.warning(
+                self, "Module missing",
+                "camera_series.py was not found next to this file.")
+            return
+        if not self.cache:
+            self.recompute()
+        dlg = getattr(self, "_camera_dlg", None)
+        if dlg is None:
+            dlg = camera_series.CameraSeriesDialog(self, camera_frames_exact)
+            self._camera_dlg = dlg
+        else:
+            dlg.redraw()
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
     def _on_save_clicked(self):
         self.draw_frame(full=True)
         stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
         s = self.state
         # Vector PDF instead of a raster image: the outputs end up in LaTeX
         # documents, where a PNG is needlessly blurry after downscaling.
+        tag = (f"_1lens{s['f_single'] * 1e3:.0f}mm" if s["one_lens"] else "")
+        tag += (f"_texp{s['t_exp'] * 1e6:.0f}us" if s["t_exp"] > 0 else "")
         name = (f"Beating_N{s['N_x']}x{s['N_y']}_"
                 f"{'Airy' if s['use_airy'] else 'Gauss'}_"
-                f"w{s['win'] * 1e6:.3f}um_width{s['width_x'] * 1e-6:.4f}MHz_"
-                f"frame{self.frame_idx:04d}_{stamp}.pdf")
-        path = self.out_dir / name
+                f"w{s['win'] * 1e6:.3f}um_width{s['width_x'] * 1e-6:.4f}MHz"
+                f"{tag}_frame{self.frame_idx:04d}_{stamp}")
+        path = self.out_dir / (name + ".pdf")
         try:
             self.fig.savefig(path, format="pdf", bbox_inches="tight")
-            self.lbl_status.setText(f"saved: {short_name(path)}")
+            # Parameter daneben als Textdatei - ein Bild ohne die Zahlen,
+            # aus denen es entstanden ist, ist spaeter nicht rekonstruierbar.
+            c = self.cache
+            lines = [f"{stamp}", "",
+                     "build: " + ("single lens f = %.3f mm, waist before lens "
+                                  "%.4f mm" % (s["f_single"] * 1e3, s["win_in"] * 1e3)
+                                  if s["one_lens"] else
+                                  "telescope f1 = %.2f mm, f2 = %.2f mm, fLO = %.2f mm"
+                                  % (s["f1"] * 1e3, s["f2"] * 1e3, fLO * 1e3)),
+                     f"AOD: theta_max = {theta_max * 1e3:.1f} mrad, "
+                     f"f_band = {f_band * 1e-6:.1f} MHz, "
+                     f"offset = {s['offset'] * 1e-6:.4f} MHz",
+                     f"lambda = {s['lambda_opt'] * 1e9:.2f} nm",
+                     f"N_x x N_y = {s['N_x']} x {s['N_y']}",
+                     f"width_x = {s['width_x'] * 1e-6:.6f} MHz, "
+                     f"width_y = {s['width_y'] * 1e-6:.6f} MHz",
+                     f"waist (focus) = {s['win'] * 1e6:.4f} um, "
+                     f"profile = {'Airy' if s['use_airy'] else 'Gauss'} "
+                     f"(factor {s['airy_factor']:.4f})",
+                     f"r_x = {s['r_x']:.4f}, r_y = {s['r_y']:.4f}",
+                     f"camera exposure = {s['t_exp'] * 1e6:.3f} us",
+                     f"grid = {s['grid_n']}^2, frames/period = "
+                     f"{s['frames_per_period']}, periods = {s['n_periods']}",
+                     f"frame index = {self.frame_idx}"]
+            if c:
+                lines += [f"f_0 = {c['f0'] * 1e-3:.6f} kHz  ->  T_0 = "
+                          f"{c['T0'] * 1e6:.4f} us",
+                          f"spots = {len(c['f_spots'])}, degenerate groups = "
+                          f"{len(c['degen'])}, resid = {c['resid'] * 100:.4f} %",
+                          f"sigma_t/<I> (plateau) = {c['sigma_rms'] * 100:.2f} %, "
+                          f"modulation depth = {c['depth_med'] * 100:.2f} %"]
+            lines.append("phases x [deg] = "
+                         + ", ".join(f"{v:.2f}" for v in np.degrees(s["phase_x"])))
+            lines.append("phases y [deg] = "
+                         + ", ".join(f"{v:.2f}" for v in np.degrees(s["phase_y"])))
+            (self.out_dir / (name + ".txt")).write_text("\n".join(lines),
+                                                        encoding="utf-8")
+            self.lbl_status.setText(f"saved: {short_name(path)} (+ .txt)")
             self.lbl_status.setToolTip(str(path))
         except Exception as exc:
             QMessageBox.critical(self, "Saving failed", str(exc))
