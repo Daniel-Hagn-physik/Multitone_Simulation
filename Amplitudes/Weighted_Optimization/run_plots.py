@@ -343,6 +343,34 @@ class PlotsDialog(QDialog):
             lambda _i: self._sync_guide_state())
         valley_form.addRow("Talpunkt-Auswahl:", self.valley_select)
 
+        self.valley_legend_place = QComboBox()
+        for _key, label in report.VALLEY_LEGEND_CHOICES:
+            self.valley_legend_place.addItem(label)
+        self.valley_legend_place.setToolTip(
+            "Wo die beiden Legenden des SCHNITTPLOTS stehen (Karte links,\n"
+            "Querschnitt rechts).\n\n"
+            "  Unter die Panels: je eine Legende unterhalb ihres Panels. Nichts\n"
+            "  wird verdeckt, dafuer bleibt weniger Hoehe fuer die Panels selbst.\n\n"
+            "  Ins Panel: unten rechts in die Karte bzw. den Schnitt, eine Stufe\n"
+            "  kleiner gesetzt. Die Panels werden dadurch groesser - ob die\n"
+            "  Legende dort etwas verdeckt, haengt vom Datensatz ab.")
+        valley_form.addRow("Legende Karte + Schnitt:", self.valley_legend_place)
+
+        # Bewusst ein ZWEITER Schalter: die Panel-Schnitte haben andere
+        # Platzverhaeltnisse als der Schnittplot - vier bzw. sechs kleine
+        # Felder gegen zwei grosse -, und wo die Legende jeweils am besten
+        # liegt, entscheidet sich damit unabhaengig voneinander.
+        self.panels_legend_place = QComboBox()
+        for _key, label in report.VALLEY_LEGEND_CHOICES:
+            self.panels_legend_place.addItem(label)
+        self.panels_legend_place.setToolTip(
+            "Dasselbe fuer die PANEL-SCHNITTE (jede Groesse in einem eigenen\n"
+            "Feld, Datei ..._line_panels_...).\n\n"
+            "  Unter die Panels: EINE gemeinsame Legende unter der ganzen Figur.\n\n"
+            "  Ins Panel: jedes Feld bekommt seine eigene Legende oben rechts -\n"
+            "  bei vielen Feldern uebersichtlicher, kostet aber Platz im Feld.")
+        valley_form.addRow("Legende Panel-Schnitte:", self.panels_legend_place)
+
         self.valley_guide_follow = QComboBox()
         for _key, label in report.FOLLOW_CHOICES:
             self.valley_guide_follow.addItem(label)
@@ -420,14 +448,20 @@ class PlotsDialog(QDialog):
         traces_grid = QGridLayout()
         for position, key in enumerate(report.TRACE_ORDER):
             box = QCheckBox(TRACE_LABELS[key])
-            box.setChecked(True)
+            # Vorgehakt ist nur der schlanke Satz aus report.LINE_CUT_TRACES
+            # (die Zielgroesse J). Alles andere steht bereits in der
+            # Kartenuebersicht und im Kreuzschnitt; neben der Karte ergaben
+            # fuenf Kurven drei gestaffelte y-Achsen. Wer sie doch braucht,
+            # hakt sie an - die Auswahl bleibt frei.
+            box.setChecked(key in report.LINE_CUT_TRACES)
             self.trace_boxes[key] = box
             traces_grid.addWidget(box, position // 2, position % 2)
         valley_layout.addLayout(traces_grid)
 
         traces_hint = QLabel(
             "Je mehr Haken, desto mehr y-Achsen. Die Fuehrungsgroesse wird immer "
-            "mitgezeichnet, auch ohne Haken.")
+            "mitgezeichnet, auch ohne Haken. Voreingestellt ist nur J - die "
+            "uebrigen Groessen stehen schon in der Kartenuebersicht.")
         traces_hint.setWordWrap(True)
         traces_hint.setStyleSheet("color: gray;")
         valley_layout.addWidget(traces_hint)
@@ -620,7 +654,8 @@ class PlotsDialog(QDialog):
         for widget in [self.valley_path_mode, self.valley_follow, self.valley_axis,
                        self.valley_select, self.valley_guide_follow,
                        self.valley_guide_halfwidth, self.valley_limit,
-                       self.valley_map_show_path,
+                       self.valley_map_show_path, self.valley_legend_place,
+                       self.panels_legend_place,
                        *self.trace_boxes.values()]:
             widget.setEnabled(bool(checked))
         self._sync_valley_fit_state()
@@ -1111,6 +1146,10 @@ class PlotsDialog(QDialog):
             valley_traces=[key for key, box in self.trace_boxes.items() if box.isChecked()],
             valley_fit_line=self.valley_fit_line.isChecked(),
             valley_map_show_path=self.valley_map_show_path.isChecked(),
+            valley_legend_placement=report.VALLEY_LEGEND_CHOICES[
+                self.valley_legend_place.currentIndex()][0],
+            panel_legend_placement=report.VALLEY_LEGEND_CHOICES[
+                self.panels_legend_place.currentIndex()][0],
             valley_path_mode=self._current_path_mode(),
             valley_select=self._current_select(),
             valley_guide_follow=report.FOLLOW_CHOICES[
@@ -1168,6 +1207,8 @@ def main():
             best_point_value2=params["best_point_value2"],
             point_cuts=params["point_cuts"],
             valley_map_show_path=params["valley_map_show_path"],
+            valley_legend_placement=params["valley_legend_placement"],
+            panel_legend_placement=params["panel_legend_placement"],
             fit_line_on_maps=params["fit_line_on_maps"],
             fit_line_dashed_extrapolation=params["fit_line_dashed_extrapolation"],
             amplitude_maps=params["amplitude_maps"],

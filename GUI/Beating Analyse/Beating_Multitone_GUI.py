@@ -126,6 +126,7 @@ some 100 kHz apart. Whether the splitting is bridged inside or outside the
 multitone path is exactly what the coupling law above encodes.
 """
 
+import os
 import sys
 import math
 import datetime
@@ -184,7 +185,15 @@ theta_max = 43e-3       # rad maximum deflection angle
 f_band = 36e6           # Hz  AOD bandwidth
 pitch = 5.288e-6        # m   physical atom spacing (for information only)
 
-OUT_DIR_CANDIDATES = [
+# Where images and their parameter files go. GUI/Bilder is the agreed place;
+# the path relative to this file is the fallback, so a clone somewhere else
+# still writes next to itself instead of into a stranger's Desktop.
+_HERE = FilePath(__file__).resolve().parent
+OUT_DIR_CANDIDATES = (
+    [FilePath(r"C:\Users\Legion\OneDrive\Desktop\Multitone_Simulation\GUI\Bilder")]
+    if os.name == "nt" else []) + [
+    _HERE.parent / "Bilder",
+    _HERE / "Bilder",
     FilePath(r"\\brain43\public\__Transfer__\DHagn\LokalerRaman_Master\PythonCode\Multitone_FlatTop"),
 ]
 
@@ -512,6 +521,24 @@ def schroeder_phases(N):
     Approximately minimises the crest factor of the summed signal."""
     n = np.arange(N)
     return -np.pi * n * (n - 1) / max(N, 1)
+
+
+def kitayoshi_phases(N):
+    """Kitayoshi phases (H. Kitayoshi, S. Sumida, K. Shirakawa, S. Takeshita,
+    "DSP synthesized signal source for analog testing stimulus and new test
+    method", IEEE Int. Test Conf. 1985, pp. 825-834):
+
+        phi_k = phi_0 - (2 pi / N) * sum_{j=1..k} j
+              = pi/2 - pi * k(k+1) / N ,      k = 0 ... N-1
+
+    Same quadratic family as Schroeder - a linear frequency chirp - only the
+    index is shifted by one and there is a constant offset of pi/2. A constant
+    offset is physically irrelevant (it is a global phase), so the two differ
+    only in which tone gets which phase, and the crest factors come out within
+    a few percent of each other. Kitayoshi is the version quoted in the
+    mixed-signal test literature."""
+    k = np.arange(N)
+    return np.pi / 2.0 - np.pi * k * (k + 1) / max(N, 1)
 
 
 def spot_phases_from_tones(phase_x, phase_y, N_x, N_y):
@@ -1792,7 +1819,7 @@ class BeatingMultitoneWindow(QMainWindow):
 
         btns = QHBoxLayout()
         for label, fn in (("0", "zero"), ("Schroeder", "schroeder"),
-                          ("randomise", "random")):
+                          ("Kitayoshi", "kitayoshi"), ("randomise", "random")):
             b = QPushButton(label)
             b.clicked.connect(lambda _, k=fn: self._apply_phase_preset(k))
             btns.addWidget(b)
@@ -1876,6 +1903,8 @@ class BeatingMultitoneWindow(QMainWindow):
             px, py = np.zeros(N_x), np.zeros(N_y)
         elif kind == "schroeder":
             px, py = schroeder_phases(N_x), schroeder_phases(N_y)
+        elif kind == "kitayoshi":
+            px, py = kitayoshi_phases(N_x), kitayoshi_phases(N_y)
         else:
             rng = np.random.default_rng()
             px = rng.uniform(0, 2 * np.pi, N_x)
@@ -3185,7 +3214,9 @@ class BeatingMultitoneWindow(QMainWindow):
                        sqrt_area_map=sqrt_area_map,
                        time_stats_exact=time_stats_exact,
                        sigma_thermal=sigma_thermal,
-                       atom_local_stack=atom_local_stack)
+                       atom_local_stack=atom_local_stack,
+                       profile_total_power=profile_total_power,
+                       amps_from_ratio=amps_from_ratio)
             dlg = pulse_timing.PulseTimingDialog(self, fns)
             self._pulse_dlg = dlg
         else:

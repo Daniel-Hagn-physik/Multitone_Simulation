@@ -1,0 +1,56 @@
+2026-09-09_123526
+
+=== PROFILE ===
+N_x x N_y              = 3 x 4
+width_x / width_y      = 0.370000 / 0.370000 MHz
+r_x / r_y              = 0.9700 / 1.1600
+waist                  = 1.0500 um   profile = Airy (factor 1.4830)
+build                  = telescope f1 = 75.00 mm, f2 = 750.00 mm
+lambda / offset        = 795.00 nm / 100.0000 MHz
+f_0 / T_0              = 61.666667 kHz / 16.2162 us
+tone phases x [deg]    = 0.00, 0.00, 0.00
+tone phases y [deg]    = 0.00, 0.00, 0.00, 0.00
+
+=== EVALUATION REGION ===
+region                 = atom, sigma = 107.6 nm
+atom T / nu_r          = 17.00 uK / 60.40 kHz  ->  sigma = 107.64 nm
+weighting              = Gaussian position probability density W(r), NOT a hard mask
+note                   = all curves are weighted SPATIAL MEANS <.>_W; only the map is point by point
+
+=== PULSE ===
+Omega/2pi (reference)  = 1.000000 MHz  (on the time averaged intensity in the region)
+T_p                    = 1.000000 us  (pi pulse at 0.500000 us)
+law                    = Omega ~ I
+pulse start t_0        = 15.716216 us in the cycle  (t_0 is the START of the pulse)
+pulse end t_0 + T_p    = 16.716216 us
+<theta>_W(0)           = 8.850347 pi   MEAN over the region
+theta on the reference = 2.000000 pi
+sigma_theta/<theta>_W  = 0.7654 %   spatial spread in the region
+  same for time average= 0.4040 %
+<sin^2(theta/2)>_W     = 0.936987   MEAN of the excitation (per point, then averaged)
+eta (light shift)      = 0.000000
+deviation at +-1.000 us = 45.0792 %
+
+=== POWER  (in the profile, i.e. after both AODs) ===
+Delta                  = -8.000 GHz   C_rabi = 71.9850 rad/s per W/m^2 (fallback constant)
+I_ref                  = 8.728465 W/cm^2   MEAN over time AND region
+A_eff                  = 14.4405 um^2   (= integral I dA / <I>)
+P_profile              = 0.00126043 mW
+P per spot             = 0.10503607 uW mean, 0.12545498 uW brightest, 0.08772339 uW weakest
+P per RF tone x        = 0.42014430 uW mean, 0.43737695 uW strongest
+P per RF tone y        = 0.31510822 uW mean, 0.36153618 uW strongest
+not included           = AOD diffraction efficiency, optics transmission, intermodulation
+
+=== OPTICS AND AOD ===
+AOD                    = theta_max = 43.0 mrad, f_band = 36.0 MHz  ->  v_ac = 665.6 m/s
+profile                = Airy, airy factor 1.4830
+grid / frames / periods= 200^2 / 60 / 3
+camera exposure        = 0.0000 us  (main GUI, images only)
+
+=== FILES ===
+  Beating_N3x4_w1.050um_width0.3700MHz_rx0.97_ry1.16_T0-16.22us_frabi1.000MHz_tp1.000us_atom_2026-09-09_123526_curves.pdf
+  Beating_N3x4_w1.050um_width0.3700MHz_rx0.97_ry1.16_T0-16.22us_frabi1.000MHz_tp1.000us_atom_2026-09-09_123526_map.pdf
+
+MEAN over atom, sigma = 107.6 nm:  <theta>_W(0) = 8.8503 pi  ->  excitation <sin^2(theta/2)>_W = 0.937   |   sigma_theta/<theta>_W = 0.77 %  (time average in the same region: 0.40 %)
+the pulse STARTS at t_0 = 15.7162 us and ends at t_0 + T_p = 16.7162 us (t_0 is the start, never the centre);  at +-1.000 us trigger error the mean area deviates by 45.08 %, 140 ns until 1 % area error
+POWER for this Rabi frequency:  I_ref = 8.728 W/cm^2 (mean over time AND region)  |  P_profile = 0.00126 mW  |  per spot 0.10504 uW mean, 0.12545 uW brightest  |  per RF tone x 0.43738 uW, y 0.36154 uW (strongest)

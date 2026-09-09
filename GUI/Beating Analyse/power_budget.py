@@ -1,47 +1,54 @@
-"""Leistung und Intensitaet des Multitone-Profils.
+"""Power and intensity of the multitone profile.
 
-WAS HIER GERECHNET WIRD
-Die Simulation kennt die Intensitaet nur bis auf eine Konstante - die Felder
-sind auf 1 im Spotzentrum normiert, Watt kommen darin nicht vor. Die Konstante
-faellt, sobald man EINE physikalische Vorgabe macht. Es gibt zwei natuerliche:
+WHAT IS COMPUTED HERE
+The simulation knows the intensity only up to a constant - the fields are
+normalised to 1 at the spot centre, watts do not appear in them. The constant
+is fixed as soon as ONE physical input is given. There are two natural ones:
 
-    "ich will Omega/2pi = X"      -> daraus folgt die Leistung
-    "ich habe P Milliwatt"        -> daraus folgt Omega/2pi
+    "I want Omega/2pi = X"      -> the power follows
+    "I have P milliwatt"        -> Omega/2pi follows
 
-Beide Richtungen stehen zur Auswahl; gerechnet wird immer dieselbe Kette.
+Both directions are selectable; the same chain is computed either way.
 
-DIE KETTE
-1. Atomphysik. kern/rb85_raman.py eliminiert die 5P-Zustaende adiabatisch, mit
-   voller Summe ueber D1 UND D2 samt Hyperfeinstruktur und mit Vorzeichen, und
-   liefert
+THE CHAIN
+1. Atomic physics. kern/rb85_raman.py adiabatically eliminates the 5P states,
+   with the full, sign-correct sum over D1 AND D2 including hyperfine
+   structure, and returns
 
        Omega = C_rabi * I ,     delta_LS = C_shift * I ,   Gamma = C_scatter * I
 
-   alle linear in der Intensitaet. Aus C_rabi folgt die Intensitaet, die die
-   gewuenschte Rabi-Frequenz macht.
+   all linear in the intensity. C_rabi gives the intensity that makes the
+   wanted Rabi frequency.
 
-2. Bezugspunkt. Diese Intensitaet ist die des ZEITMITTELS im Auswertebereich -
-   dieselbe Konvention wie im Pulsfenster, also die Rabi-Frequenz, die man im
-   Labor ohne Trigger misst.
+2. Reference. That intensity is the one of the TIME AVERAGE in the evaluation
+   region - the same convention as in the pulse window, i.e. the Rabi
+   frequency one measures in the lab without a trigger. With the atom weighted
+   option it is the mean weighted with the atomic position probability
+   density; the other options are hard masks and average over areas on which
+   no single atom sits.
 
-3. Flaeche. Fuer ein Flattop ist die Leistung nicht I mal irgendeiner
-   Strahlflaeche, sondern
+3. Area. For a flat top the power is not I times some beam area but
 
-       P = I_ref * A_eff ,      A_eff = (Integral I dA) / <I>_Bereich .
+       P = I_ref * A_eff ,      A_eff = (integral I dA) / <I>_region .
 
-   Das Flaechenintegral kommt analytisch aus der Summe der Einzelspots
-   (profile_total_power im Haupt-GUI), nicht aus dem Rechengitter - das
-   schneidet die Airy-Ringe ab und liegt um ein halbes Prozent zu tief.
+   The area integral comes analytically from the sum of the single spots
+   (profile_total_power in the main GUI), not from the computation grid - that
+   one truncates the Airy rings and comes out half a percent low.
 
-4. Aufteilung. Die Leistung eines Spots (n,m) geht mit a_x(n)^2 * a_y(m)^2,
-   die eines RF-TONS n der x-Achse mit a_x(n)^2 / sum a_x^2 - der Ton speist
-   ja alle Spots seiner Spalte. Bei r_x = r_y = 1 sind alle Toene gleich, bei
-   r != 1 nicht, und das ist die Zahl, die der AWG-Kanal aushalten muss.
+4. Splitting. The power of spot (n,m) goes as a_x(n)^2 * a_y(m)^2, that of RF
+   TONE n of the x axis as a_x(n)^2 / sum a_x^2 - the tone feeds all spots of
+   its column. At r_x = r_y = 1 all tones are equal, at r != 1 they are not,
+   and that is the number the AWG channel has to survive.
 
-WAS NICHT DRIN STECKT
-Beugungseffizienz des AOD, Transmission der Optik, Intermodulation. Die
-angegebene Leistung ist die IM PROFIL, also nach dem AOD. Was vorne
-hineinmuss, ist erheblich mehr und haengt am Aufbau.
+5. Power chain. Before the AOD, times the diffraction efficiency of BOTH AODs
+   (the spot is diffracted twice) times the optics transmission. What comes
+   out is what is available in the profile; the ratio to what is needed is the
+   headroom, and the headroom is really a detuning budget: Omega goes as
+   I/Delta and the scattering rate as I/Delta^2, so at fixed Rabi frequency
+   more detuning plus more power buys less scattering.
+
+WHAT IS NOT IN HERE
+Intermodulation in the AOD, its fill time, polarisation errors.
 """
 
 import datetime
@@ -55,10 +62,10 @@ from PyQt5.QtWidgets import (
 
 
 def _load_raman():
-    """kern/rb85_raman.py laden, ohne das GUI zu sprengen, wenn arc fehlt.
+    """Load kern/rb85_raman.py without breaking the GUI when arc is missing.
 
-    Die Kopie in kern/ ist die gepflegte; die daneben liegende aeltere wird
-    nur als Rueckfallebene genommen."""
+    The copy in kern/ is the maintained one; the older sibling next to it is
+    only a fallback."""
     for mod in ("kern.rb85_raman", "rb85_raman"):
         try:
             return __import__(mod, fromlist=["RamanRb85"]), None
@@ -68,15 +75,15 @@ def _load_raman():
 
 
 class PowerBudgetDialog(QDialog):
-    """Nicht-modales Fenster; das Haupt-GUI bleibt bedienbar."""
+    """Modeless window; the main GUI stays usable."""
 
-    # C_rabi fuer Delta = -8 GHz, beta = 0.5, sigma+/sigma+, m_F = 0.
-    # Nur Rueckfallwert, wenn rb85_raman nicht importiert werden kann.
+    # C_rabi for Delta = -8 GHz, beta = 0.5, sigma+/sigma+, m_F = 0.
+    # Fallback only, used when rb85_raman cannot be imported.
     C_RABI_FALLBACK = 71.985
 
     def __init__(self, parent, fns):
         super().__init__(parent)
-        self.setWindowTitle("Leistung und Intensitaet des Profils")
+        self.setWindowTitle("Power and intensity of the profile")
         self.resize(980, 760)
         self.parent_win = parent
         self.fns = fns
@@ -93,11 +100,11 @@ class PowerBudgetDialog(QDialog):
         root.addWidget(self.out, 1)
 
         row = QHBoxLayout()
-        self.btn_calc = QPushButton("Neu rechnen")
+        self.btn_calc = QPushButton("Recompute")
         self.btn_calc.clicked.connect(self.recompute)
-        self.btn_save = QPushButton("Als Textdatei speichern")
+        self.btn_save = QPushButton("Save as text file")
         self.btn_save.clicked.connect(self._on_save)
-        btn_close = QPushButton("Schliessen")
+        btn_close = QPushButton("Close")
         btn_close.clicked.connect(self.close)
         row.addWidget(self.btn_calc)
         row.addStretch(1)
@@ -117,73 +124,73 @@ class PowerBudgetDialog(QDialog):
         return w
 
     def _group_inputs(self):
-        g = QGroupBox("Vorgabe")
+        g = QGroupBox("Input")
         lay = QGridLayout(g)
         s = self.parent_win.state
 
         self.cmb_mode = QComboBox()
-        self.cmb_mode.addItems(["Rabi-Frequenz vorgeben -> Leistung",
-                                "Leistung vorgeben -> Rabi-Frequenz"])
+        self.cmb_mode.addItems(["given Rabi frequency -> power",
+                                "given power -> Rabi frequency"])
         self.cmb_mode.currentIndexChanged.connect(self._sync_mode)
 
         self.sp_frabi = self._dspin((s.get("f_rabi") or 1e6) * 1e-6,
                                     0.0001, 1000.0, 4, 0.1, "MHz")
         self.sp_power = self._dspin(1.0, 1e-6, 1e6, 5, 0.1, "mW")
         self.sp_delta = self._dspin(-8.0, -2000.0, 2000.0, 3, 1.0, "GHz")
-        self.sp_delta.setToolTip("Raman-Verstimmung vom 5P_1/2-Schwerpunkt.\n"
-                                 "Negativ = rot. Omega geht wie I/Delta, die\n"
-                                 "Streurate wie I/Delta^2 - mehr Verstimmung\n"
-                                 "bei mehr Leistung kauft also Qualitaet.")
+        self.sp_delta.setToolTip("Raman detuning from the 5P_1/2 centroid.\n"
+                                 "Negative = red. Omega goes as I/Delta, the\n"
+                                 "scattering rate as I/Delta^2 - more detuning\n"
+                                 "with more power therefore buys quality.")
         self.sp_beta = self._dspin(0.5, 0.01, 0.99, 3, 0.05)
-        self.sp_beta.setToolTip("Leistungsaufteilung auf die beiden Raman-Zweige.\n"
-                                "0.5 = haelftig, das Optimum fuer Omega.")
+        self.sp_beta.setToolTip("Power split between the two Raman legs.\n"
+                                "0.5 = even, the optimum for Omega.")
         self.sp_m = QSpinBox(); self.sp_m.setRange(-2, 2); self.sp_m.setValue(0)
-        self.sp_m.setToolTip("m_F des adressierten Uhrenzustands.")
+        self.sp_m.setToolTip("m_F of the addressed clock state.")
         self.sp_tp = self._dspin(1.0, 0.0001, 10000.0, 4, 0.1, "us")
-        self.sp_tp.setToolTip("Pulslaenge, nur fuer die Streuwahrscheinlichkeit\n"
-                              "und die Pulsflaeche in der Ausgabe.")
+        self.sp_tp.setToolTip("Pulse length, only for the scattering probability\n"
+                              "and the pulse area in the output.")
         self.cmb_region = QComboBox()
-        self.cmb_region.addItems(["atomgewichtet (thermisch)", "Plateau",
+        self.cmb_region.addItems(["atom weighted (thermal)", "Plateau",
                                   "Kreis (Radius aus dem Haupt-GUI)",
-                                  "Spotzentren"])
+                                  "spot centres"])
         self.cmb_region.setToolTip(
-            "Worauf sich die Rabi-Frequenz bezieht: das Zeitmittel der\n"
-            "Intensitaet in diesem Bereich. 'atomgewichtet' ist die einzige\n"
-            "Wahl, die dieselbe Groesse benutzt wie das Pulsfenster - sonst\n"
-            "kalibriert man f_rabi auf eine Flaeche und rechnet die\n"
-            "Pulsflaeche am Atom.")
+            "What the Rabi frequency refers to: the time average of the\n"
+            "intensity in this region. 'atom weighted' is the only choice\n"
+            "that uses the same quantity as the pulse window - otherwise one\n"
+            "calibrates f_rabi on an area and computes the pulse area at the\n"
+            "atom.")
         self.sp_T = self._dspin(17.0, 0.01, 10000.0, 2, 1.0, "uK")
         self.sp_nu = self._dspin(60.4, 0.1, 100000.0, 2, 1.0, "kHz")
         self.sp_pin = self._dspin(300.0, 0.001, 1e6, 3, 10.0, "mW")
-        self.sp_pin.setToolTip("Optische Leistung VOR dem AOD - was der Strahl\n"
-                               "mitbringt.")
+        self.sp_pin.setToolTip("Optical power BEFORE the AOD - what the beam\n"
+                               "brings along.")
         self.sp_eff_x = self._dspin(0.70, 0.001, 1.0, 4, 0.05)
         self.sp_eff_x.setToolTip(
-            "Gesamte Beugungseffizienz des x-AOD in die 1. Ordnung, ueber ALLE\n"
-            "seine Toene zusammen - die Groesse, die man am Aufbau misst.\n"
-            "Die Aufteilung auf die einzelnen Toene steckt schon in r_x.")
+            "Total diffraction efficiency of the x-AOD into the 1st order, over\n"
+            "ALL of its tones together - the quantity one measures at the\n"
+            "setup. The split between the tones is already in r_x.")
         self.sp_eff_y = self._dspin(0.70, 0.001, 1.0, 4, 0.05)
-        self.sp_eff_y.setToolTip("Dasselbe fuer den y-AOD. Beide multiplizieren\n"
-                                 "sich - der Spot wird zweimal gebeugt.")
+        self.sp_eff_y.setToolTip("Same for the y-AOD. The two multiply - the spot\n"
+                                 "is diffracted twice.")
         self.sp_trans = self._dspin(0.80, 0.001, 1.0, 4, 0.05)
-        self.sp_trans.setToolTip("Transmission der Optik zwischen AOD und Atom.")
+        self.sp_trans.setToolTip("Transmission of the optics between AOD and atom.")
         self.sp_crabi = self._dspin(self.C_RABI_FALLBACK, 1e-6, 1e9, 4, 1.0)
-        self.sp_crabi.setToolTip("C_rabi in rad/s pro W/m^2. Wird aus\n"
-                                 "kern/rb85_raman.py geholt; von Hand nur\n"
-                                 "editierbar, wenn das Modul fehlt.")
+        self.sp_crabi.setToolTip("C_rabi in rad/s per W/m^2. Taken from\n"
+                                 "kern/rb85_raman.py; editable by hand only\n"
+                                 "when that module is missing.")
         self.sp_crabi.setEnabled(self._raman_mod is None)
 
-        rows = [("Modus", self.cmb_mode), ("Omega/2pi", self.sp_frabi),
-                ("Leistung im Profil", self.sp_power),
-                ("Verstimmung Delta", self.sp_delta),
-                ("Aufteilung beta", self.sp_beta), ("m_F", self.sp_m),
-                ("Pulslaenge", self.sp_tp), ("Bezugsbereich", self.cmb_region),
+        rows = [("mode", self.cmb_mode), ("Omega/2pi", self.sp_frabi),
+                ("power in the profile", self.sp_power),
+                ("detuning Delta", self.sp_delta),
+                ("power split beta", self.sp_beta), ("m_F", self.sp_m),
+                ("pulse length", self.sp_tp), ("reference region", self.cmb_region),
                 ("C_rabi [rad/s / (W/m^2)]", self.sp_crabi),
-                ("Atom T", self.sp_T), ("Fallenfrequenz nu_r", self.sp_nu),
-                ("Leistung vor dem AOD", self.sp_pin),
-                ("Beugung AOD x", self.sp_eff_x),
-                ("Beugung AOD y", self.sp_eff_y),
-                ("Transmission Optik", self.sp_trans)]
+                ("atom T", self.sp_T), ("trap frequency nu_r", self.sp_nu),
+                ("power before the AOD", self.sp_pin),
+                ("diffraction AOD x", self.sp_eff_x),
+                ("diffraction AOD y", self.sp_eff_y),
+                ("optics transmission", self.sp_trans)]
         for i, (name, w) in enumerate(rows):
             lay.addWidget(QLabel(name), i % 3, 2 * (i // 3))
             lay.addWidget(w, i % 3, 2 * (i // 3) + 1)
@@ -200,11 +207,11 @@ class PowerBudgetDialog(QDialog):
         self.sp_power.setEnabled(not by_rabi)
 
     def _reference(self, c):
-        """<I> im gewaehlten Bereich, in Simulationseinheiten, plus Name.
+        """<I> in the chosen region, in simulation units, plus its name.
 
-        Im atomgewichteten Fall auf einem eigenen feinen Gitter um den
-        Atomort, mit W(r) als Gewicht - dieselbe Groesse, auf die auch das
-        Pulsfenster normiert."""
+        In the atom weighted case on a dedicated fine grid around the atom,
+        with W(r) as the weight - the same quantity the pulse window
+        normalises to."""
         if self.cmb_region.currentIndex() != 0:
             mask, name = self._mask(c)
             if not mask.any():
@@ -235,12 +242,12 @@ class PowerBudgetDialog(QDialog):
 
     # ------------------------------------------------------------
     def _coefficients(self):
-        """C_rabi, C_shift, C_scatter (F=3), eta - aus rb85_raman oder Rueckfall."""
+        """C_rabi, C_shift, C_scatter (F=3), eta - from rb85_raman or fallback."""
         if self._raman_mod is None:
             return dict(C_rabi=self.sp_crabi.value(), eta=float("nan"),
                         C_scatter_3=float("nan"), C_scatter_2=float("nan"),
-                        source="Rueckfallwert von Hand (rb85_raman nicht "
-                               "ladbar: %s)" % self._raman_err)
+                        source="manual fallback (rb85_raman not loadable: "
+                               "%s)" % self._raman_err)
         r = self._raman_mod.RamanRb85(delta_Hz=self.sp_delta.value() * 1e9,
                                       beta=self.sp_beta.value(), q=1)
         c = r.coeff(self.sp_m.value())
@@ -249,23 +256,23 @@ class PowerBudgetDialog(QDialog):
         self.sp_crabi.blockSignals(False)
         return dict(C_rabi=c["C_rabi"], eta=c["eta"],
                     C_scatter_3=c["C_scatter_3"], C_scatter_2=c["C_scatter_2"],
-                    source="kern/rb85_raman.py, sigma+/sigma+ kopropagierend, "
-                           "volle Summe ueber D1 und D2")
+                    source="kern/rb85_raman.py, sigma+/sigma+ co-propagating, "
+                           "full sum over D1 and D2")
 
     def recompute(self):
         c = getattr(self.parent_win, "cache", {}) or {}
         if not c or "mean_exact" not in c:
-            QMessageBox.information(self, "Nichts zu rechnen",
-                                    "Im Haupt-GUI erst 'Recompute' druecken.")
+            QMessageBox.information(self, "Nothing to compute",
+                                    "Press 'Recompute' in the main GUI first.")
             return
         s = self.parent_win.state
         I_ref_sim, region = self._reference(c)
         if not np.isfinite(I_ref_sim) or I_ref_sim <= 0:
-            QMessageBox.information(self, "Leerer Bereich", "Der Bereich ist leer.")
+            QMessageBox.information(self, "Empty region", "The region is empty.")
             return
 
         coef = self._coefficients()
-        self.lbl_src.setText("C_rabi = %.4f rad/s pro W/m^2   (%s)"
+        self.lbl_src.setText("C_rabi = %.4f rad/s per W/m^2   (%s)"
                              % (coef["C_rabi"], coef["source"]))
 
         # --- Profilgeometrie in Simulationseinheiten ---
@@ -275,7 +282,7 @@ class PowerBudgetDialog(QDialog):
         A_eff = P_sim / I_ref_sim                      # m^2
         I_peak_sim = float(np.max(c["mean_exact"]))
 
-        # --- die eine physikalische Vorgabe ---
+        # --- die eine physikalische Input ---
         t_p = self.sp_tp.value() * 1e-6
         if self.cmb_mode.currentIndex() == 0:
             f_rabi = self.sp_frabi.value() * 1e6
@@ -294,7 +301,7 @@ class PowerBudgetDialog(QDialog):
 
         scale = I_ref / I_ref_sim                      # W/m^2 pro Simulationseinheit
 
-        # --- Aufteilung auf Spots und RF-Toene ---
+        # --- split over spots and RF tones ---
         w_spot = amp ** 2
         P_spot = P_tot * w_spot / w_spot.sum()
         ax = self.fns["amps_from_ratio"](s["r_x"], s["N_x"]) ** 2
@@ -311,119 +318,119 @@ class PowerBudgetDialog(QDialog):
 
         u = "µ"
         L = []
-        L.append("Bezug: Omega/2pi gilt fuer das ZEITMITTEL der Intensitaet im "
-                 "Bereich '%s'." % region)
+        L.append("Reference: Omega/2pi refers to the TIME AVERAGE of the intensity in the "
+                 "region '%s'." % region)
         L.append("")
         L.append("ATOM")
         L.append("  Delta                     %12.3f GHz   (beta = %.3f, m_F = %+d)"
                  % (self.sp_delta.value(), self.sp_beta.value(), self.sp_m.value()))
-        L.append("  C_rabi                    %12.4f rad/s pro W/m^2"
+        L.append("  C_rabi                    %12.4f rad/s per W/m^2"
                  % coef["C_rabi"])
         if np.isfinite(coef["eta"]):
-            L.append("  eta = delta_LS/Omega      %12.4f        -> Kontrast <= %.4f"
+            L.append("  eta = delta_LS/Omega      %12.4f        -> contrast <= %.4f"
                      % (coef["eta"], 1.0 / (1.0 + coef["eta"] ** 2)))
         L.append("")
-        L.append("PROFIL")
-        L.append("  Toene                     %12d  x  %-6d (= %d Spots)"
+        L.append("PROFILE")
+        L.append("  tones                     %12d  x  %-6d (= %d spots)"
                  % (s["N_x"], s["N_y"], len(amp)))
-        L.append("  Waist                     %12.4f %sm" % (s["win"] * 1e6, u))
-        L.append("  Flaeche eines Spots       %12.4f %sm^2"
+        L.append("  waist                     %12.4f %sm" % (s["win"] * 1e6, u))
+        L.append("  area of one spot          %12.4f %sm^2"
                  % (self.fns["single_spot_power"](s["win"], s["use_airy"],
                                                   s["airy_factor"]) * 1e12, u))
-        L.append("  effektive Flaeche A_eff   %12.1f %sm^2   (= Integral I dA / <I>)"
+        L.append("  effective area A_eff     %12.1f %sm^2   (= integral I dA / <I>)"
                  % (A_eff * 1e12, u))
         L.append("")
-        L.append("INTENSITAET")
-        L.append("  Referenz <I> im Bereich   %12.4f W/cm^2" % (I_ref * 1e-4))
-        L.append("  Spitze des Zeitmittels    %12.4f W/cm^2   (%.2f x Referenz)"
+        L.append("INTENSITY")
+        L.append("  reference <I> (MEAN)    %12.4f W/cm^2" % (I_ref * 1e-4))
+        L.append("  peak of the time avg.   %12.4f W/cm^2   (%.2f x reference)"
                  % (I_peak_avg * 1e-4, I_peak_avg / I_ref))
         if np.isfinite(I_peak_inst):
-            L.append("  Spitze momentan           %12.4f W/cm^2   (%.2f x Referenz)"
+            L.append("  peak instantaneous          %12.4f W/cm^2   (%.2f x reference)"
                      % (I_peak_inst * 1e-4, I_peak_inst / I_ref))
-            L.append("     (aus dem Zeitwuerfel; haengt an Bildern/Periode und "
-                     "an der eingestellten Belichtung)")
+            L.append("     (from the time cube; depends on frames per period "
+                     "and on the exposure set in the main GUI)")
         L.append("")
-        L.append("LEISTUNG   -   im Profil, also NACH dem AOD")
-        L.append("  gesamt                    %12.5f mW" % (P_tot * 1e3))
-        L.append("  pro Spot   Mittel         %12.5f %sW" % (P_spot.mean() * 1e6, u))
-        L.append("             hellster       %12.5f %sW" % (P_spot.max() * 1e6, u))
-        L.append("             schwaechster   %12.5f %sW" % (P_spot.min() * 1e6, u))
-        L.append("  pro RF-Ton x  Mittel      %12.5f %sW   (%d Toene)"
+        L.append("POWER   -   in the profile, i.e. AFTER the AODs")
+        L.append("  total                     %12.5f mW" % (P_tot * 1e3))
+        L.append("  per spot   mean           %12.5f %sW" % (P_spot.mean() * 1e6, u))
+        L.append("             brightest      %12.5f %sW" % (P_spot.max() * 1e6, u))
+        L.append("             weakest       %12.5f %sW" % (P_spot.min() * 1e6, u))
+        L.append("  per RF tone x  mean      %12.5f %sW   (%d tones)"
                  % (P_tx.mean() * 1e6, u, s["N_x"]))
-        L.append("                staerkster  %12.5f %sW" % (P_tx.max() * 1e6, u))
-        L.append("  pro RF-Ton y  Mittel      %12.5f %sW   (%d Toene)"
+        L.append("                strongest %12.5f %sW" % (P_tx.max() * 1e6, u))
+        L.append("  per RF tone y  mean      %12.5f %sW   (%d tones)"
                  % (P_ty.mean() * 1e6, u, s["N_y"]))
-        L.append("                staerkster  %12.5f %sW" % (P_ty.max() * 1e6, u))
+        L.append("                strongest %12.5f %sW" % (P_ty.max() * 1e6, u))
         if abs(s["r_x"] - 1) < 1e-9 and abs(s["r_y"] - 1) < 1e-9:
-            L.append("     (r_x = r_y = 1: alle Toene gleich stark)")
+            L.append("     (r_x = r_y = 1: all tones equal)")
         else:
-            L.append("     (r_x = %.4f, r_y = %.4f: die aeusseren Toene tragen "
-                     "r^2 der inneren)" % (s["r_x"], s["r_y"]))
+            L.append("     (r_x = %.4f, r_y = %.4f: the outer tones carry r^2 of the inner "
+                     "ones)" % (s["r_x"], s["r_y"]))
         L.append("")
-        L.append("PULS   T_p = %.4f %ss" % (t_p * 1e6, u))
-        L.append("  Flaeche auf der Referenz  %12.4f pi        (pi-Puls bei %.4f %ss)"
+        L.append("PULSE   T_p = %.4f %ss" % (t_p * 1e6, u))
+        L.append("  area at the reference   %12.4f pi        (pi pulse at %.4f %ss)"
                  % (theta_ref, 0.5e6 / f_rabi if f_rabi > 0 else float("nan"), u))
         if np.isfinite(gam3):
-            L.append("  Streurate F=3 / F=2       %12.1f / %.1f 1/s" % (gam3, gam2))
-            L.append("  Streuung pro Puls         %12.4f %%" % (100 * p_sc))
+            L.append("  scattering rate F=3/F=2      %12.1f / %.1f 1/s" % (gam3, gam2))
+            L.append("  scattering per pulse        %12.4f %%" % (100 * p_sc))
         L.append("")
-        L.append("LEISTUNGSKETTE   -   zweimal gebeugt, x-AOD und y-AOD")
+        L.append("POWER CHAIN   -   diffracted twice, x-AOD and y-AOD")
         P_in = self.sp_pin.value() * 1e-3
         ex, ey, tr = (self.sp_eff_x.value(), self.sp_eff_y.value(),
                       self.sp_trans.value())
         chain = ex * ey * tr
         P_avail = P_in * chain
-        L.append("  vor dem AOD               %12.4f mW" % (P_in * 1e3))
-        L.append("  x %5.3f (AOD x) x %5.3f (AOD y) x %5.3f (Optik) = %.4f"
+        L.append("  before the AOD              %12.4f mW" % (P_in * 1e3))
+        L.append("  x %5.3f (AOD x) x %5.3f (AOD y) x %5.3f (optics) = %.4f"
                  % (ex, ey, tr, chain))
-        L.append("  verfuegbar im Profil      %12.4f mW" % (P_avail * 1e3))
-        L.append("  davon gebraucht           %12.5f mW   (%.4f %% der "
-                 "verfuegbaren)" % (P_tot * 1e3, 100 * P_tot / max(P_avail, 1e-30)))
+        L.append("  available in profile     %12.4f mW" % (P_avail * 1e3))
+        L.append("  of which needed           %12.5f mW   (%.4f %% of what is "
+                 "available)" % (P_tot * 1e3, 100 * P_tot / max(P_avail, 1e-30)))
         if P_avail > 0:
             head = P_avail / max(P_tot, 1e-30)
-            L.append("  Reserve                   %12.1f x" % head)
-            L.append("  benoetigte Beugung        %12.3e  (x*y*Optik, fuer "
-                     "genau %.4f MHz)" % (chain / head, f_rabi * 1e-6))
+            L.append("  headroom                  %12.1f x" % head)
+            L.append("  diffraction needed        %12.3e  (x*y*optics, for exactly "
+                     "%.4f MHz)" % (chain / head, f_rabi * 1e-6))
             L.append("")
-            L.append("  Die Reserve ist keine Einladung, mehr Leistung aufs Atom")
-            L.append("  zu geben: Omega geht wie I/Delta, die Streurate wie")
-            L.append("  I/Delta^2. Bei FESTER Rabi-Frequenz sinkt die Streuung")
-            L.append("  also mit der Verstimmung, und die Reserve ist genau das")
-            L.append("  Budget dafuer. Statt zu extrapolieren wird Delta hier mit")
-            L.append("  denselben Koeffizienten wirklich durchgerechnet:")
+            L.append("  The headroom is not an invitation to put more power on the")
+            L.append("  atom: Omega goes as I/Delta, the scattering rate as I/Delta^2.")
+            L.append("  At FIXED Rabi frequency the scattering therefore drops with")
+            L.append("  the detuning, and the headroom is exactly the budget for it.")
+            L.append("  Instead of extrapolating, Delta is really solved for here")
+            L.append("  with the same coefficients:")
             best = self._solve_delta(f_rabi, A_eff, P_avail)
             if best is None:
-                L.append("    (keine Loesung im abgesuchten Bereich)")
+                L.append("    (no solution within the searched range)")
             else:
                 dd, I_d, g3_d = best
                 cap = abs(abs(dd) - 3000.0) < 1e-6
-                L.append("    Delta = %.1f GHz -> %.1f GHz  bei gleicher "
-                         "Rabi-Frequenz%s" % (self.sp_delta.value(), dd,
-                                              "  (Rand der Suche!)" if cap else ""))
+                L.append("    Delta = %.1f GHz -> %.1f GHz  at the same Rabi "
+                         "frequency%s" % (self.sp_delta.value(), dd,
+                                              "  (edge of the search!)" if cap else ""))
                 if cap:
-                    L.append("    Die Leistung reicht also noch ueber 3 THz "
-                             "hinaus - dort ist die Naeherung 'weit von D1,")
-                    L.append("    weit von D2' aber nicht mehr gut, D2 liegt "
-                             "7.1 THz entfernt und der Beitrag dreht das")
-                    L.append("    Vorzeichen. Die Leistung ist nicht die "
-                             "Grenze, die Optik und der AOD sind es.")
-                L.append("    dort I = %.1f W/cm^2, P = %.4f mW "
-                         "(= die verfuegbare Leistung)"
+                    L.append("    So the power is enough beyond 3 THz - but there the "
+                             "assumption 'far from D1,")
+                    L.append("    far from D2' no longer holds: D2 is 7.1 THz away and "
+                             "its contribution flips the")
+                    L.append("    sign. Power is not the limit here, the optics and the "
+                             "AOD are.")
+                L.append("    there I = %.1f W/cm^2, P = %.4f mW "
+                         "(= the available power)"
                          % (I_d * 1e-4, I_d * A_eff * 1e3))
-                L.append("    Streuung pro Puls        %.4f %% -> %.5f %%"
+                L.append("    scattering per pulse       %.4f %% -> %.5f %%"
                          % (100 * p_sc, 100 * (1 - np.exp(-g3_d * t_p))))
         L.append("")
-        L.append("NICHT enthalten: Intermodulation im AOD, Fuellzeit, "
-                 "Polarisationsfehler.")
+        L.append("NOT included: intermodulation in the AOD, fill time, polarisation "
+                 "errors.")
         self._text = "\n".join(L)
         self.out.setPlainText(self._text)
 
     # ------------------------------------------------------------
     def _solve_delta(self, f_rabi, A_eff, P_avail, d_max=3000.0, n=600):
-        """Groesste Verstimmung, bei der die verfuegbare Leistung noch fuer
-        f_rabi reicht - mit den echten Koeffizienten, nicht mit Omega ~ 1/Delta.
+        """Largest detuning at which the available power still delivers f_rabi -
+        with the real coefficients, not with Omega ~ 1/Delta.
 
-        Rueckgabe (Delta_GHz, I [W/m^2], Streurate F=3 [1/s]) oder None."""
+        Returns (Delta_GHz, I [W/m^2], scattering rate F=3 [1/s]) or None."""
         if self._raman_mod is None or P_avail <= 0:
             return None
         sign = -1.0 if self.sp_delta.value() < 0 else 1.0
@@ -446,10 +453,14 @@ class PowerBudgetDialog(QDialog):
             return
         s = self.parent_win.state
         stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        name = "Leistungsbudget_N{}x{}_{}.txt".format(s["N_x"], s["N_y"], stamp)
+        name = "PowerBudget_N{}x{}_w{:.3f}um_width{:.4f}MHz_{}_report.md".format(
+            s["N_x"], s["N_y"], s["win"] * 1e6, s["width_x"] * 1e-6, stamp)
         try:
-            (self.parent_win.out_dir / name).write_text(
-                stamp + "\n\n" + self._text + "\n", encoding="utf-8")
-            self.lbl_src.setText("gespeichert: " + name)
+            md = ("# Power and intensity of the multitone profile\n\n"
+                  "Generated %s by `power_budget.py` "
+                  "(Beating_Multitone_GUI).\n\n```\n%s\n```\n"
+                  % (stamp, self._text))
+            (self.parent_win.out_dir / name).write_text(md, encoding="utf-8")
+            self.lbl_src.setText("saved: " + name)
         except Exception as exc:
-            QMessageBox.critical(self, "Speichern fehlgeschlagen", str(exc))
+            QMessageBox.critical(self, "Saving failed", str(exc))

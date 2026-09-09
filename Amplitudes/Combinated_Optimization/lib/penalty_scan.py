@@ -204,7 +204,10 @@ def run_penalty_scan(opt, win_input_range, width_range,
         checkpoint_path, win_input_range, width_range, n_win_input, n_width,
         opt.N_x, opt.N_y, extra_match=extra_match,
         airy_scale_factor=opt.airy_scale_factor,
-        optics_match=dict(n_grid=opt.n_grid, weighted_n_grid=opt.weighted_n_grid,
+        # coherent gehoert zum Rechenmodell: ein fortgesetzter Scan darf
+        # nicht halb kohaerent, halb inkohaerent gerechnet sein.
+        optics_match=dict(coherent=bool(getattr(opt, 'coherent', True)),
+                          n_grid=opt.n_grid, weighted_n_grid=opt.weighted_n_grid,
                           atom_offset_x=getattr(opt, 'atom_offset_x', 0.0),
                           atom_offset_y=getattr(opt, 'atom_offset_y', 0.0)),
         verbose=verbose,
@@ -247,6 +250,12 @@ def run_penalty_scan(opt, win_input_range, width_range,
             N_x=opt.N_x, N_y=opt.N_y, f1=opt.f1, f2=opt.f2, fLO=opt.fLO,
             lambda_opt=opt.lambda_opt, theta_max=opt.theta_max, f_band=opt.f_band,
             profile=opt.profile,
+            # Kohaerenz (statische Interferenz frequenzentarteter Spots,
+            # siehe coherence.py). Sie veraendert JEDE Metrik dieses Scans
+            # und gehoert deshalb in den Datensatz - fehlt der Schluessel,
+            # gilt die Datei als inkohaerent gerechnet (Stand vor 2026-09-04).
+            coherent=bool(getattr(opt, "coherent", True)),
+            n_degenerate_pairs=opt.n_degenerate_pairs(),
             # Der Airy-Skalenfaktor bestimmt die physikalische Spotgroesse
             # (first_zero_radius = airy_scale_factor * win) und damit JEDE
             # Metrik dieses Scans. Er gehoert deshalb in den Datensatz -

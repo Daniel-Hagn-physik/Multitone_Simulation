@@ -47,7 +47,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, LogNorm
 from matplotlib.patches import Patch
-from matplotlib.ticker import FormatStrFormatter, MaxNLocator
+from matplotlib.ticker import FormatStrFormatter, MaxNLocator, MultipleLocator
 
 from . import paths
 from . import scan_data
@@ -223,12 +223,57 @@ ZUSATZ_ACHSE_PT = 40.0
 # 0.7 ist gemessen die Grenze, ab der die Legende in die Karte passt und
 # gleichzeitig im Dokument noch lesbar bleibt (Grundschrift 6.3 pt,
 # Titel 7 pt bei Textbreite).
+# Seit die Legenden der beiden zweispaltigen Figuren (Talschnitt,
+# Kreuzschnitt) nicht mehr IM Bild stehen, ueberragen sie die Panels nicht
+# mehr - der Grund fuer die kleinere Stufe ist damit entfallen, beide zeichnen
+# jetzt mit dichte=1.0. Die Konstante bleibt fuer eigene Skripte stehen.
 ZWEI_PANEL_DICHTE = 0.70
 
-# Querschnitt: Karte und Schnitt nebeneinander. Im Dokument sind das
-# 6.3 x 2.87 Zoll - breiter als hoch, aber hoch genug, dass Titel,
-# Achsenbeschriftung und Legende unter den Panels Platz haben.
-VALLEY_FIGSIZE = (11.4, 5.2)
+# Querschnitt: Karte und Schnitt nebeneinander, auf voller Textbreite.
+#
+# Diese Geometrie ist in Hard_, Weighted_ und Combinated_Optimization
+# ABSICHTLICH DIESELBE (6.3 x 3.6 Zoll, zwei gleich breite Panels, Legenden
+# unter den Panels): der Plot "J als Karte + Schnitt daneben" soll aus allen
+# drei Ordnern und ueber alle Datensaetze hinweg dasselbe Bild ergeben.
+# 6.3 Zoll ist die Textbreite (A4, 2.5-cm-Raender), die Datei wird im
+# Dokument also nicht mehr skaliert. Wer hier etwas aendert, aendert es in
+# allen drei Ordnern.
+VALLEY_FIGSIZE = (6.3, 3.6)
+VALLEY_WIDTH_RATIOS = [1.0, 1.0]
+# Beide Legenden stehen UNTER ihrem Panel, nicht im Bild: in der Karte
+# ueberdeckte die Legende (mit den Koordinaten des Arbeitspunkts) die
+# Heatmap, um die es geht.
+VALLEY_LEGEND_ANCHOR = (0.5, -0.16)
+
+# Wohin die beiden Legenden des Schnittplots gehoeren.
+#
+# "below"  - je eine Figur-Legende unter ihrem Panel ("outside"-Ort).
+#            constrained_layout reserviert den Platz, die Panels werden
+#            entsprechend kleiner, nichts ueberlappt. Voreinstellung.
+# "inside" - im Panel unten rechts, eine Stufe kleiner. Spart die Zeilen
+#            unter der Figur; ob die Legende die Kurven verdeckt, haengt am
+#            Datensatz, deshalb ist es die Wahl des Nutzers und nicht die
+#            Voreinstellung.
+VALLEY_LEGEND_CHOICES = [
+    ("below", "Unter die Panels"),
+    ("inside", "Ins Panel, unten rechts (kleinere Schrift)"),
+]
+VALLEY_LEGEND_PLACEMENT_DEFAULT = "below"
+# Beide Legenden des Schnittplots stehen eine Stufe kleiner als die
+# Achsenbeschriftung. Nicht kosmetisch, sondern gemessen: in voller Groesse
+# stossen die beiden Kaesten unter der Figur in der Mitte aneinander (die
+# Koordinaten des Arbeitspunkts stehen in beiden), das "MHz" des linken wurde
+# abgeschnitten. Bei 0.85 bleibt in allen geprueften Faellen eine Luecke von
+# mindestens 0.15 Figurbreiten; im Panel passt der Kasten damit ebenfalls
+# neben die Kurven.
+VALLEY_LEGEND_SCALE = 1.0
+# ... und sie darf ihr Panel nicht ueberragen. Reicht die volle Groesse dafuer
+# nicht (der Eintrag des Arbeitspunkts ist mit seinen Koordinaten der
+# laengste), wird die Schrift so weit nachgezogen, dass der Kasten
+# hineinpasst - die ZEILENAUFTEILUNG bleibt dabei unangetastet, U, eta und J
+# stehen also auch dann nebeneinander. Untergrenze ist diese absolute Groesse,
+# darunter waere die Legende gedruckt nicht mehr lesbar.
+VALLEY_LEGEND_MIN_PT = 6.0
 
 WORKING_POINT_LABEL = "Working point"
 
@@ -245,20 +290,65 @@ def working_point_label(best, at_edge=False):
     steht bewusst nicht davor: ein einzelner roter Stern ist selbsterklaerend,
     und die Legende soll die Zahlen tragen.
     """
+    # `at_edge` steuert nur noch die FORM des Sterns (offen statt gefuellt);
+    # der Zusatz "(at scan edge)" stand frueher auch im Legendentext und
+    # machte ihn doppelt so lang - dass der Punkt am Rand liegt, sagen der
+    # offene Stern und der Bericht.
     if not best or best.get('width') is None or best.get('waist_um') is None:
-        return WORKING_POINT_LABEL + (" (at scan edge)" if at_edge else "")
-    text = (r"$\omega$ = %.3f $\mu$m, width = %.3f MHz"
+        return WORKING_POINT_LABEL
+    # Waist auf zwei Nachkommastellen: das Gitter ist feiner, die dritte
+    # Stelle unterscheidet aber keine Arbeitspunkte mehr, die man von Hand
+    # ansteuern wuerde - und der Text steht in jeder Legende.
+    return (r"$\omega$ = %.2f $\mu$m, width = %.3f MHz"
             % (best['waist_um'], best['width'] * 1e-6))
-    return text + " (at scan edge)" if at_edge else text
 
 
-def draw_working_point_line(ax, best, axis, label=True):
+def koordinaten_label(axis, wert):
+    """Eine einzelne Koordinate in der Schreibweise der Legenden:
+    "omega = 1.05 um", "omega_in = 1.70 mm" oder "width = 0.370 MHz".
+    Der Waist auf zwei Nachkommastellen, die width auf drei."""
+    if axis == "width":
+        return r"width = %.3f MHz" % float(wert)
+    if axis == "waist_mm":
+        return r"%s = %.3f mm" % (WIN_INPUT_SYMBOL, float(wert))
+    return r"%s = %.2f $\mu$m" % (WAIST_UM_SYMBOL, float(wert))
+
+
+def working_point_axis_label(best, axis):
+    """Beschriftung des Arbeitspunkts in einem SCHNITT.
+
+    Dort ist von ihm nur die eine Koordinate der Schnittachse uebrig - der
+    senkrechte Strich markiert genau sie -, und nur die steht deshalb in der
+    Legende. Die vollstaendigen Koordinaten traegt der Stern in der Karte
+    daneben. Ausgeschrieben waere der Eintrag laenger als alle Kurvennamen
+    zusammen und der Legendenkasten breiter als das Panel, in dem er steht."""
+    if not best:
+        return WORKING_POINT_LABEL
+    if axis == "width":
+        wert = best.get('width')
+        return (WORKING_POINT_LABEL if wert is None
+                else koordinaten_label(axis, wert * 1e-6))
+    if axis == "waist_mm":
+        wert = best.get('win_input')
+        return (WORKING_POINT_LABEL if wert is None
+                else koordinaten_label(axis, wert * 1e3))
+    wert = best.get('waist_um')
+    return (WORKING_POINT_LABEL if wert is None
+            else koordinaten_label("waist_um", wert))
+
+
+def draw_working_point_line(ax, best, axis, label=True, text=None):
     """Der Arbeitspunkt in einem KURVENplot: eine senkrechte Linie an seiner
     Stelle auf der Schnittachse.
 
     In einer Karte ist der Punkt ein Punkt; in einem Schnitt ueber den Waist
     (oder ueber width) ist von ihm nur die eine Koordinate uebrig - also eine
-    Linie. Gibt zurueck, ob gezeichnet wurde.
+    Linie.
+
+    Der Legendentext ist die Koordinate der Schnittachse - genau die, die der
+    Strich markiert (siehe working_point_axis_label). Die vollstaendigen
+    Koordinaten traegt der Stern in der Karte. `text` ueberschreibt ihn.
+    Gibt die Linie zurueck (oder False, wenn nichts gezeichnet wurde).
     """
     if not best or best.get('width') is None:
         return False
@@ -271,11 +361,28 @@ def draw_working_point_line(ax, best, axis, label=True):
         x = None if x is None else x * 1e3
     if x is None or not np.isfinite(x):
         return False
-    ax.axvline(x, label=(working_point_label(best, best.get('at_edge'))
-                         if label else "_nolegend_"),
-               **SD(WORKING_POINT_LINE_STYLE))
-    return True
-WIDTH_LABEL = "Width (MHz)"
+    beschriftung = text or working_point_axis_label(best, axis)
+    return ax.axvline(x, label=(beschriftung if label else "_nolegend_"),
+                      **SD(WORKING_POINT_LINE_STYLE))
+# Achsenbeschriftung - WORTGLEICH mit Combinated_Optimization/lib/report.py,
+# damit Abbildungen aus den drei Ordnern in einem Dokument nebeneinander
+# nicht auseinanderfallen. Einheiten stehen in eckigen Klammern; die runden
+# bleiben dem erklaerenden Zusatz vorbehalten.
+#
+# Der Waist NACH den Linsen ist der in der Atomebene wirksame. Frueher hiess
+# er "Waist at focus omega' (µm, after lenses)"; der Strich sollte "nach der
+# Linse" heissen, sagte das aber nur fuer den, der die Konvention schon kennt.
+# "in the atomic plane" sagt es direkt und macht den Strich ueberfluessig.
+WAIST_UM_LABEL = r"Waist in the atomic plane $\omega$ [$\mu$m]"
+# Kurzform fuer zwei Panels nebeneinander: dort bleiben je rund 2.5 Zoll, und
+# der ausgeschriebene Name laeuft ueber den Figurrand hinaus.
+WAIST_UM_LABEL_SHORT = r"Waist $\omega$ [$\mu$m]"
+WAIST_UM_SYMBOL = r"$\omega$"
+WIN_INPUT_LABEL = r"Input waist $\omega_{\mathrm{in}}$ [mm] (before lenses)"
+WIN_INPUT_LABEL_SHORT = r"Input waist $\omega_{\mathrm{in}}$ [mm]"
+WIN_INPUT_SYMBOL = r"$\omega_{\mathrm{in}}$"
+
+WIDTH_LABEL = "Width [MHz]"
 
 # ----------------------------------------------------------------------
 # Beschriftung der Metriken - haengt an der Familie dieses Ordners
@@ -290,14 +397,17 @@ _WEIGHTED = (paths.FLAVOR == "weighted")
 _IDX = "w" if _WEIGHTED else "h"
 U_SYMBOL = r"$U_%s$" % _IDX
 C_SYMBOL = r"$\eta_%s$" % _IDX
-U_CBAR = ((r"Uniformity $U_w = \sigma_w/\mu_w$ (%)") if _WEIGHTED
-          else (r"Uniformity $U_h = \sigma/\mu$ (%)"))
-C_CBAR = r"Crosstalk $\eta_%s$ (%%)" % _IDX
+# Colorbar-Beschriftung der Karten: NUR das Symbol, wie an der y-Achse der
+# Schnitte. Was die Groesse ist, steht im Titel ueber der Karte - die
+# ausgeschriebene Definition daneben noch einmal zu wiederholen, kostete
+# Breite und stand in jeder der vier Karten ein zweites Mal.
+U_CBAR = U_SYMBOL + " [%]"
+C_CBAR = C_SYMBOL + " [%]"
 U_TITLE = (r"Uniformity $U_w$ (atom-weighted)" if _WEIGHTED
-           else r"Uniformity $U_h$ (hard mask)")
+           else r"Uniformity $U_h$ (hard metric)")
 C_TITLE = (r"Crosstalk $\eta_w$ (atom-weighted)" if _WEIGHTED
-           else r"Crosstalk $\eta_h$ (hard mask)")
-FAMILY_TITLE = "atom-weighted" if _WEIGHTED else "hard mask"
+           else r"Crosstalk $\eta_h$ (hard metric)")
+FAMILY_TITLE = "atom-weighted" if _WEIGHTED else "hard metric"
 
 
 # ======================================================================
@@ -346,7 +456,8 @@ BEST_POINT_EDGE_STYLE = dict(marker='*', markerfacecolor='none',
                              markersize=16, markeredgewidth=1.6, linestyle='none')
 BEST_POINT_STYLE = dict(marker='*', color='red', markersize=16,
                         markeredgecolor='white', markeredgewidth=1.2, linestyle='none')
-FIT_LINE_LABEL = "Linear model fit"
+# Wortgleich mit Combinated_Optimization - derselbe Plot, dieselbe Legende.
+FIT_LINE_LABEL = "Linear fit"
 
 
 # ======================================================================
@@ -359,12 +470,12 @@ def win_axis_values(results, win_axis):
     win_input_vals = np.asarray(results['win_input_vals'], dtype=float)
     if win_axis == "before_lens":
         return (win_input_vals * 1e3,
-                r"Input waist $\omega_{\mathrm{in}}$ (mm, before lenses)", False)
+                WIN_INPUT_LABEL, False)
     if win_axis == "after_lens":
         x = np.array([win_input_to_win(w, results['f1'], results['f2'],
                                        results['lambda_opt'], results['fLO'])
                       for w in win_input_vals]) * 1e6
-        label = r"Waist at focus $\omega'$ ($\mu$m, after lenses)"
+        label = WAIST_UM_LABEL
         if len(x) > 1 and x[0] > x[-1]:
             return x[::-1], label, True
         return x, label, False
@@ -377,10 +488,8 @@ def win_axis_values(results, win_axis):
 # (omega' = nach den Linsen, omega_in = davor) und die Achse des Schnitts
 # daneben, die die lange Fassung weiterhin traegt.
 _KURZE_ACHSENLABEL = {
-    r"Input waist $\omega_{\mathrm{in}}$ (mm, before lenses)":
-        r"$\omega_{\mathrm{in}}$ (mm)",
-    r"Waist at focus $\omega'$ ($\mu$m, after lenses)":
-        r"$\omega'$ ($\mu$m)",
+    WIN_INPUT_LABEL: WIN_INPUT_LABEL_SHORT,
+    WAIST_UM_LABEL: WAIST_UM_LABEL_SHORT,
 }
 
 
@@ -442,7 +551,7 @@ def draw_best_point_marker(ax, results, win_axis, legend=True, best=None,
 FORBIDDEN_LINE_STYLE = dict(color="#d62728", linewidth=1.8, linestyle="-")
 FORBIDDEN_FILL_STYLE = dict(facecolor="none", edgecolor="#d62728",
                             hatch="///", linewidth=0.0, alpha=0.55)
-FORBIDDEN_LABEL = "corner spots overlap"
+FORBIDDEN_LABEL = "Corner spots overlap"
 
 
 def forbidden_curve(results, win_axis, factor=FORBIDDEN_FACTOR_DEFAULT, n=400):
@@ -694,11 +803,21 @@ def output_prefix(results):
             f"{n_win}x{n_width}pts_{tag}_{date.today().isoformat()}")
 
 
-def _finish(fig, out_dir, filename, save, show, confirm_overwrite):
+def _finish(fig, out_dir, filename, save, show, confirm_overwrite, tight=True):
+    """Speichern und schliessen.
+
+    tight=False speichert in der EINGESTELLTEN Figurgroesse statt auf den
+    Inhalt zugeschnitten. Das ist fuer den Schnittplot wichtig: mit
+    bbox_inches='tight' haengt die Seitengroesse an der Breite der
+    Legendentexte, und die aendert sich mit dem Datensatz (die Koordinaten
+    des Arbeitspunkts stehen darin). Zwei Dateien desselben Plots waren so
+    verschieden gross - im Dokument nebeneinander sofort sichtbar. Ohne
+    'tight' ist die Seite immer exakt VALLEY_FIGSIZE; constrained_layout
+    sorgt dafuer, dass Legenden und Beschriftung darin Platz finden."""
     out_path = None
     if save:
         out_path = resolve_save_path(out_dir, filename, confirm_overwrite=confirm_overwrite)
-        fig.savefig(out_path, dpi=300, bbox_inches='tight')
+        fig.savefig(out_path, dpi=300, **({'bbox_inches': 'tight'} if tight else {}))
         print(f"Plot gespeichert: {out_path}")
     if show:
         plt.show()
@@ -738,6 +857,169 @@ def _label_laenge(text):
     """
     s = re.sub(r"\\[a-zA-Z]+", "x", str(text))
     return len(s.replace("$", "").replace("{", "").replace("}", ""))
+
+
+# Ein unsichtbarer Platzhalter, um eine Legendenzeile aufzufuellen.
+_LEER_HANDLE_STIL = dict(linestyle="none", marker="none")
+
+
+def _legende_fontsize(fontsize=None, scale=VALLEY_LEGEND_SCALE):
+    """Schriftgroesse der Legenden im Schnittplot: eine Stufe kleiner als die
+    uebergebene bzw. die eingestellte. Die rcParams sind zu diesem Zeitpunkt
+    bereits auf die Figurbreite skaliert, der Faktor wirkt also relativ."""
+    wert = fontsize
+    if wert is None:
+        wert = plt.rcParams.get("legend.fontsize") or plt.rcParams.get("font.size")
+    try:
+        wert = float(wert)
+    except (TypeError, ValueError):
+        wert = 9.0
+    return wert * float(scale)
+
+
+def _legende_breite(fig, legende, renderer):
+    """Breite der Legende als Anteil der Figurbreite."""
+    kasten = legende.get_window_extent(renderer)
+    return kasten.transformed(fig.transFigure.inverted()).width
+
+
+def _eine_legende(fig, ax, zeilen, ncol, placement, aussen_loc, groesse):
+    """Eine der beiden Legenden des Schnittplots. `zeilen` ist die gewuenschte
+    ZEILEN-Aufteilung der Eintraege (z.B. die Kurven in einer Zeile, der
+    Arbeitspunkt in der naechsten).
+
+    placement="below": Figur-Legende an `aussen_loc` ("outside lower left"
+        bzw. "... right"), mehrspaltig gemaess `zeilen`. constrained_layout
+        reserviert den Platz unterhalb der Achsenbeschriftung.
+    placement="inside": Achsenlegende unten rechts, mit DERSELBEN
+        Zeilenaufteilung wie unter der Figur - U, eta und J stehen auch hier
+        nebeneinander. BEWUSST ausserhalb
+        der Layout-Rechnung (`set_in_layout(False)`), sonst schruempfte
+        constrained_layout das Panel um genau die Flaeche, die die Legende
+        darin einnimmt."""
+    eintraege = [h for zeile in zeilen for h in zeile]
+    if not eintraege:
+        return None
+    handles, labels = _legende_zeilen(zeilen, ncol)
+    if placement == "inside":
+        legende = ax.legend(handles, labels, loc="lower right", ncol=ncol,
+                            framealpha=0.9, fontsize=groesse)
+        legende.set_in_layout(False)
+        return legende
+    return fig.legend(handles, labels, loc=aussen_loc, ncol=ncol,
+                      framealpha=0.9, fontsize=groesse)
+
+
+def _legenden_zentrieren(fig, paare):
+    """Jede Legende waagerecht mittig unter ihr Panel.
+
+    "outside lower left/right" laesst constrained_layout den Platz unter der
+    Figur reservieren - richtet den Kasten dann aber am Figurrand aus, nicht
+    am Panel; unter der Karte stand er dadurch weit links. Deshalb: einmal
+    zeichnen (damit das Layout steht), die Layout-Rechnung einfrieren und die
+    Kaesten auf die Mitte ihres Panels schieben. Die Hoehe bleibt, wie das
+    Layout sie bestimmt hat.
+
+    Nur fuer die Figur-Legenden; im Panel stehen sie ohnehin an ihrer Ecke."""
+    try:
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        fig.set_layout_engine("none")
+        for legende, ax in paare:
+            if legende is None:
+                continue
+            kasten = legende.get_window_extent(renderer)
+            kasten = kasten.transformed(fig.transFigure.inverted())
+            panel = ax.get_position()
+            legende.set_loc("lower center")
+            legende.set_bbox_to_anchor((panel.x0 + panel.width / 2, kasten.y0),
+                                       transform=fig.transFigure)
+    except Exception:
+        pass
+
+
+def _schnitt_legenden(fig, ax_map, karten_zeilen, ax_cut, cut_zeilen, ncol,
+                      placement, fontsize=None):
+    """Beide Legenden des Schnittplots.
+
+    Keine der beiden darf ihr Panel ueberragen: die Kartenlegende schoebe
+    sich sonst neben die Karte, und unter der Figur stiessen die beiden
+    Kaesten in der Mitte aneinander.
+
+    Passt ein Kasten nicht, wird AUSSCHLIESSLICH die Schrift verkleinert.
+    Die uebergebene ZEILENAUFTEILUNG ist gesetzt: U, eta und J stehen
+    nebeneinander, und wenn das nur bei kleinerer Schrift geht, dann eben
+    bei kleinerer Schrift. Sie untereinander zu setzen zoege die Legende in
+    die Laenge und risse eine Luecke zwischen Panel und Kasten.
+
+    JEDE Legende wird nur so weit verkleinert, wie IHR Panel es verlangt -
+    vorher diktierte die Kartenlegende (ihr Stern-Eintrag traegt beide
+    Koordinaten und ist der laengste Text der Figur) auch die Groesse der
+    Schnittlegende.
+
+    Gemessen statt geschaetzt; die Kastenbreite ist in guter Naeherung
+    proportional zur Schriftgroesse, ein Durchgang genuegt also."""
+    basis = _legende_fontsize(fontsize)
+    karte = _eine_legende(fig, ax_map, karten_zeilen, 1, placement,
+                          "outside lower left", basis)
+    schnitt = _eine_legende(fig, ax_cut, cut_zeilen, ncol, placement,
+                            "outside lower right", basis)
+    try:
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+    except Exception:
+        renderer = None
+
+    def passt(legende, ax):
+        return _legende_breite(fig, legende, renderer) <= ax.get_position().width
+
+    def weg(legende):
+        if placement == "inside":
+            legende.remove()
+        else:
+            fig.legends.remove(legende)
+
+    if renderer is not None and schnitt is not None and not passt(schnitt, ax_cut):
+        breite = _legende_breite(fig, schnitt, renderer)
+        groesse = max(VALLEY_LEGEND_MIN_PT,
+                      basis * ax_cut.get_position().width / breite * 0.97)
+        weg(schnitt)
+        schnitt = _eine_legende(fig, ax_cut, cut_zeilen, ncol, placement,
+                                "outside lower right", groesse)
+
+    if renderer is not None and karte is not None and not passt(karte, ax_map):
+        breite = _legende_breite(fig, karte, renderer)
+        groesse = max(VALLEY_LEGEND_MIN_PT,
+                      basis * ax_map.get_position().width / breite * 0.97)
+        weg(karte)
+        karte = _eine_legende(fig, ax_map, karten_zeilen, 1, placement,
+                              "outside lower left", groesse)
+
+    if placement != "inside":
+        _legenden_zentrieren(fig, ((karte, ax_map), (schnitt, ax_cut)))
+    return karte, schnitt
+
+
+def _legende_zeilen(zeilen, ncol):
+    """(handles, labels) so umsortiert, dass matplotlibs SPALTENWEISE
+    Fuellung die uebergebenen ZEILEN ergibt.
+
+    matplotlib verteilt Legendeneintraege spaltenweise. Eine gewuenschte
+    ZEILEN-Aufteilung - die Kurven oben, der Arbeitspunkt in einer eigenen
+    Zeile darunter - kommt dabei nur heraus, wenn man die Eintraege vorher
+    umordnet und kurze Zeilen mit unsichtbaren Platzhaltern auffuellt."""
+    gitter = [list(z) + [None] * (ncol - len(z)) for z in zeilen]
+    handles, labels = [], []
+    for spalte in range(ncol):
+        for zeile in gitter:
+            eintrag = zeile[spalte]
+            if eintrag is None:
+                handles.append(plt.Line2D([], [], **_LEER_HANDLE_STIL))
+                labels.append("")
+            else:
+                handles.append(eintrag)
+                labels.append(eintrag.get_label())
+    return handles, labels
 
 
 def legend_ncol(labels, max_chars=78, symbol_breite=6):
@@ -972,8 +1254,8 @@ def plot_region(results, prefix, out_dir=None, win_axis="before_lens",
     Z_plot = Z[:, ::-1] if reversed_ else Z
 
     alpha = float(results.get('alpha', 0.7))
-    score_label = r"$J = \alpha\,U_%s + (1-\alpha)\,\eta_%s$ (%%)" % (_IDX, _IDX)
-    title = f"Objective $J$ ({FAMILY_TITLE}, " + rf"$\alpha$ = {alpha:.2f})"
+    score_label = r"$J_%s$ [%%]" % _IDX
+    title = f"Combined score ({FAMILY_TITLE}, " + rf"$\alpha$ = {alpha:.2f})"
 
     with dokument_stil(REGION_FIGSIZE[0]):
         fig, ax = plt.subplots(figsize=REGION_FIGSIZE, constrained_layout=True)
@@ -992,28 +1274,67 @@ def plot_region(results, prefix, out_dir=None, win_axis="before_lens",
         if forbidden_factor is not None:
             draw_forbidden_region(ax, results, win_axis, forbidden_factor)
         if draw_best_point:
-            draw_best_point_marker(ax, results, win_axis, best=best_point)
-        elif forbidden_factor is not None:
-            ax.legend(loc="best", framealpha=0.85)
+            draw_best_point_marker(ax, results, win_axis, legend=False,
+                                   label=True, best=best_point)
+        # Legende UNTER die Karte, nicht hinein: mit den Koordinaten des
+        # Arbeitspunkts und dem verbotenen Bereich war sie breiter als die
+        # halbe Karte und verdeckte je nach Datensatz einen anderen Teil der
+        # Heatmap - dieselbe Anordnung wie im Schnittplot.
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(handles, labels, loc="upper center",
+                      bbox_to_anchor=(0.5, -0.16),
+                      ncol=legend_ncol(labels), framealpha=0.9)
         return _finish(fig, out_dir, f"{prefix}_region.pdf", save, show, confirm_overwrite)
 
 
+def _plotter_punkt(best):
+    """`win_input_fixed`/`width_fixed` fuer die Scan-Plotter aus dem
+    Arbeitspunkt.
+
+    Ohne sie legen die Plotter ihre Schnitte durch den GLOBAL besten
+    Gitterpunkt - nicht durch den im Dialog eingestellten Punkt. Genau den
+    zeigen aber alle uebrigen Plots; zwei verschiedene Punkte in einer
+    Auswertung sind eine Fehlerquelle. Die Plotter runden den Wert selbst auf
+    die naechste Gitterzeile/-spalte und beschriften ihn dann als
+    "selected point (cut origin)" statt "best point (global optimum)".
+    Leeres dict, wenn es keinen Arbeitspunkt gibt - dann bleibt es beim
+    bisherigen Verhalten."""
+    if not best:
+        return {}
+    punkt = {}
+    if best.get('win_input') is not None:
+        punkt['win_input_fixed'] = float(best['win_input'])
+    if best.get('width') is not None:
+        punkt['width_fixed'] = float(best['width'])
+    return punkt
+
+
 def plot_overview(results, out_dir=None, save=True, show=False,
-                  confirm_overwrite=None):
-    """Die PNG-Uebersicht des jeweiligen Scan-Plotters (unveraenderte
-    Module aus lib/): beim Amplituden-Scan die 6-Panel-Uebersicht plus die
-    Schnitte, beim Fest-Amplituden-Scan die zwei Heatmaps."""
+                  confirm_overwrite=None, best_point=None,
+                  win_axis="after_lens"):
+    """Die Uebersicht des jeweiligen Scan-Plotters (unveraenderte Module aus
+    lib/): beim Amplituden-Scan die 6-Panel-Uebersicht plus die Schnitte,
+    beim Fest-Amplituden-Scan die zwei Heatmaps.
+
+    `best_point`: der Arbeitspunkt - die Schnitte laufen dann durch ihn und
+    nicht durch das globale Optimum (siehe _plotter_punkt).
+    `win_axis`: dieselbe Waist-Konvention wie in allen uebrigen Plots - wer
+    alles in µm anzeigen laesst, bekommt sie auch hier."""
     out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
     if has_amplitudes(results):
         plotter = AmplitudeScanPlotter(results, out_dir=out_dir,
                                        confirm_overwrite=confirm_overwrite)
-        overview = plotter.plot_scan2d_combined(show=show, save=save)
-        cuts = plotter.plot_dependence_cuts(show=show, save=save)
+        punkt = _plotter_punkt(best_point)
+        overview = plotter.plot_scan2d_combined(show=show, save=save,
+                                                win_axis=win_axis, **punkt)
+        cuts = plotter.plot_dependence_cuts(show=show, save=save,
+                                            win_axis=win_axis, **punkt)
         return dict(overview=overview, dependence_cuts=cuts)
     plotter = FixedScanPlotter(results, out_dir=out_dir,
                                confirm_overwrite=confirm_overwrite)
     overview = plotter.plot_scan2d_combined(show=show, save=save,
-                                            win_axis="after_lens")
+                                            win_axis=win_axis)
     return dict(overview=overview, dependence_cuts=None)
 
 
@@ -1042,7 +1363,10 @@ POINT_CUT_STYLE = {
     "r_y": dict(color="#ff7f0e", marker="s"),
 }
 POINT_MARK_STYLE = dict(color="red", linestyle="--", linewidth=1.3, alpha=0.7)
-POINT_CUT_FIGSIZE = (10.4, 4.4)
+# Derselbe Zuschnitt wie der Talschnitt (VALLEY_FIGSIZE): zwei Panels auf
+# Textbreite, feste Seitengroesse. Die Figuren eines Dokuments sollen
+# nebeneinander nach demselben Format aussehen.
+POINT_CUT_FIGSIZE = (6.3, 3.6)
 
 
 def point_cut_indices(results, best=None):
@@ -1086,16 +1410,35 @@ def plot_point_cuts(results, prefix, best=None, out_dir=None,
     width_mhz = np.asarray(results['width_vals'], dtype=float) * 1e-6
     if win_axis == "after_lens":
         x_col = waist_um_of(results)
-        x_label = r"Waist at focus $\omega'$ ($\mu$m, after lenses)"
+        x_label = WAIST_UM_LABEL
         waist_einheit = "$\\mu$m"
     else:
         x_col = np.asarray(results['win_input_vals'], dtype=float) * 1e3
-        x_label = r"Input waist $\omega_{\mathrm{in}}$ (mm, before lenses)"
+        x_label = WIN_INPUT_LABEL
         waist_einheit = "mm"
     ordnung = np.argsort(x_col)
 
-    # Wo genau steht der Stern? Bei einem selbst gewaehlten Punkt zwischen
-    # den Gitterpunkten, sonst exakt auf der Zeile/Spalte.
+    # Die Koordinaten des ARBEITSPUNKTS - dieselben Zahlen wie ueberall sonst.
+    #
+    # Zwei Regeln, die beide gelten muessen:
+    #
+    # 1. Innerhalb dieser Figur benennen der Titel des einen Panels und der
+    #    Legendeneintrag des anderen DIESELBE Linie ("Cut at width = 0.290
+    #    MHz" links, "width = 0.290 MHz" rechts). Beide kommen deshalb aus
+    #    x_mark/y_mark, nicht einmal daher und einmal von woanders - sonst
+    #    stehen nach dem Runden zwei verschiedene Werte fuer dieselbe Linie
+    #    im Bild.
+    # 2. Ueber die ganze Auswertung hinweg zeigt jeder Plot denselben
+    #    Arbeitspunkt mit denselben Zahlen: der Stern in den Karten, der
+    #    Strich im Talschnitt, die Panel-Schnitte und der Bericht. Deshalb
+    #    die Koordinaten des Punkts und NICHT die der Gitterlinie - bei einem
+    #    frei gewaehlten Punkt liegen die dazwischen und koennen auf der
+    #    angezeigten Stelle anders runden (gemessen: 0.2865 MHz gewaehlt,
+    #    Gitterzeile 0.2850 -> "0.286" gegen "0.285").
+    #
+    # Die Kurven selbst stammen aus der naechstgelegenen Gitterzeile/-spalte
+    # (i, j) - naeher als eine halbe Gitterweite laesst sich ein Schnitt
+    # durch einen freien Punkt nicht legen. Welche das ist, steht im Bericht.
     if best.get('off_grid'):
         x_mark = (float(best['waist_um']) if win_axis == "after_lens"
                   else float(best['win_input']) * 1e3)
@@ -1103,24 +1446,31 @@ def plot_point_cuts(results, prefix, best=None, out_dir=None,
     else:
         x_mark, y_mark = float(x_col[j]), float(width_mhz[i])
 
+    # Jedes Panel schneidet bei EINER festen Groesse und laeuft ueber die
+    # andere: der Titel nennt die feste, die rote Linie in der Legende die
+    # laufende - dieselbe Aufteilung wie im Talschnitt, wo der Stern in der
+    # Karte die feste Koordinate traegt und der Strich die der Schnittachse.
+    waist_axis = "waist_um" if win_axis == "after_lens" else "waist_mm"
     panels = [
         ("waist", x_col[ordnung], x_label,
-         f"Cut at width = {width_mhz[i]:.4f} MHz", x_mark),
+         "Cut at " + koordinaten_label("width", y_mark), x_mark, waist_axis),
         ("width", width_mhz, WIDTH_LABEL,
-         f"Cut at waist = {x_col[j]:.4f} {waist_einheit}", y_mark),
+         "Cut at " + koordinaten_label(waist_axis, x_mark), y_mark, "width"),
     ]
 
-    with dokument_stil(POINT_CUT_FIGSIZE[0], legend_fontsize=legend_fontsize,
-                       dichte=ZWEI_PANEL_DICHTE):
+    with dokument_stil(POINT_CUT_FIGSIZE[0], legend_fontsize=legend_fontsize):
         fig, axes = plt.subplots(1, 2, figsize=POINT_CUT_FIGSIZE, sharey=True,
                                  constrained_layout=True)
-        for ax, (achse, x, xl, titel, marke) in zip(axes, panels):
+        for ax, (achse, x, xl, titel, marke, marken_axis) in zip(axes, panels):
             for key in gewaehlt:
                 grid = _grid_for(results, key)
                 werte = grid[i, :][ordnung] if achse == "waist" else grid[:, j]
                 ax.plot(x, werte, linewidth=S(1.5), markersize=S(3.4),
                         label=TRACE_SPECS[key][0], **POINT_CUT_STYLE[key])
-            ax.axvline(marke, **SD(POINT_MARK_STYLE))
+            # Die Linie traegt die Koordinate, an der sie steht - in jedem
+            # Panel also die Groesse der jeweiligen x-Achse.
+            ax.axvline(marke, label=koordinaten_label(marken_axis, marke),
+                       **SD(POINT_MARK_STYLE))
             # Der Wert je Kurve genau am Punkt - auf dem Gitter abgelesen.
             # Etwas kleinerer Stern als in den Karten: hier sitzt er auf einer
             # Kurve und soll sie nicht verdecken.
@@ -1128,25 +1478,35 @@ def plot_point_cuts(results, prefix, best=None, out_dir=None,
             for key in gewaehlt:
                 grid = _grid_for(results, key)
                 ax.plot([marke], [grid[i, j]], **stern_stil)
-            ax.set_xlabel(xl)
+            # Kurzform wie im Talschnitt: zwei Panels auf Textbreite, die
+            # ausgeschriebene Fassung lief aus der Figur.
+            ax.set_xlabel(kurzes_achsenlabel(xl))
             ax.set_title(titel)
             # Wie in der Talschnitt-Karte: die automatische Teilung kennt die
             # Breite der Zahlen nicht und setzte im schmalen Panel mehr
             # Striche, als nebeneinander passen.
             ax.xaxis.set_major_locator(MaxNLocator(nbins=5, steps=[1, 2, 5, 10]))
             ax.grid(True, alpha=0.25)
+        # sharey=True: das Raster auf der linken Achse gilt fuer beide.
+        _achsenraster(axes[0], TRACE_SPECS[gewaehlt[0]][1])
         axes[0].set_ylabel(r"Amplitude ratio $r_x$, $r_y$")
 
-        handles, labels = axes[0].get_legend_handles_labels()
-        handles.append(plt.Line2D([], [], **SD(POINT_MARK_STYLE)))
-        labels.append(WORKING_POINT_LABEL
-                      + (" (nearest grid line)" if best.get('off_grid') else ""))
-        # Schriftgroesse kommt aus dokument_stil() - nicht noch einmal von
-        # Hand setzen, sonst waere sie nicht mitskaliert.
-        fig.legend(handles, labels, loc="outside lower center",
-                   ncol=legend_ncol(labels), framealpha=0.9)
+        # Je Panel eine eigene Legende OBEN RECHTS im Bild: die Linie heisst
+        # in den beiden Panels verschieden (jeweils ihre eigene Koordinate),
+        # eine gemeinsame Legende unter der Figur koennte das nicht zeigen.
+        # `set_in_layout(False)`, damit constrained_layout die Panels nicht um
+        # die Flaeche der Legende schrumpft - wie im Talschnitt.
+        for ax in axes:
+            handles, labels = ax.get_legend_handles_labels()
+            if not handles:
+                continue
+            legende = ax.legend(handles, labels, loc="upper right",
+                                ncol=legend_ncol(labels), framealpha=0.9,
+                                fontsize=_legende_fontsize(legend_fontsize))
+            legende.set_in_layout(False)
+        # tight=False: feste Seitengroesse wie beim Talschnitt.
         return _finish(fig, out_dir, f"{prefix}_point_cuts.pdf", save, show,
-                       confirm_overwrite)
+                       confirm_overwrite, tight=False)
 
 
 # ======================================================================
@@ -1615,7 +1975,9 @@ def make_all(results, win_axis="before_lens", draw_best_point=True,
              forbidden_factor=None, forbidden_excluded=False,
              forbidden_draw=True, best_point_follow=None, best_point_value=None,
              best_point_value2=None, point_cuts=False,
-             valley_map_show_path=False):
+             valley_map_show_path=False,
+             valley_legend_placement=VALLEY_LEGEND_PLACEMENT_DEFAULT,
+             panel_legend_placement=VALLEY_LEGEND_PLACEMENT_DEFAULT):
     """Erzeugt alle zum Datensatz passenden Plots und den Bericht.
 
     Gibt ein dict mit den Pfaden zurueck. `results` sollte vorher durch
@@ -1737,6 +2099,7 @@ def make_all(results, win_axis="before_lens", draw_best_point=True,
             guide_halfwidth=valley_guide_halfwidth,
             waist_range=valley_waist_range, width_range=valley_width_range,
             map_show_path=valley_map_show_path,
+            legend_placement=valley_legend_placement,
             draw_best_point=draw_best_point, best_point=stern)
         if braucht_fit:
             out['valley_line'] = fit_valley_line(
@@ -1756,7 +2119,8 @@ def make_all(results, win_axis="before_lens", draw_best_point=True,
                 guide_halfwidth=valley_guide_halfwidth,
                 waist_range=valley_waist_range, width_range=valley_width_range,
                 draw_best_point=draw_best_point, best_point=stern,
-                show_extrapolated=valley_map_show_path)
+                show_extrapolated=valley_map_show_path,
+                legend_placement=panel_legend_placement)
             if panels is not None:
                 out['plots']['line_panels'] = panels
     if point_cuts:
@@ -1777,7 +2141,8 @@ def make_all(results, win_axis="before_lens", draw_best_point=True,
     if plot_scan_overview:
         out['plots']['overview'] = plot_overview(
             results, out_dir=plots_dir, save=save, show=show,
-            confirm_overwrite=confirm_overwrite)
+            confirm_overwrite=confirm_overwrite, best_point=stern,
+            win_axis=win_axis)
 
     if save:
         report_path = results_dir / f"{prefix}_Report.md"
@@ -1838,13 +2203,21 @@ FOLLOW_CHOICES = [
 TRACE_SPECS = {
     "uniformity": (U_SYMBOL, "%", "#44AA99", True),
     "crosstalk": (C_SYMBOL, "%", "#CC3311", True),
-    "score": (r"$J$", "%", "#000000", True),
+    "score": (r"$J_%s$" % _IDX, "%", "#000000", True),
     "r_x": (r"$r_x$", "", "#1f77b4", False),
     "r_y": (r"$r_y$", "", "#ff7f0e", False),
 }
 
 # Reihenfolge der y-Achsen im Querschnitt (nur die angehakten erscheinen)
 TRACE_ORDER = ["uniformity", "crosstalk", "score", "r_x", "r_y"]
+
+# Der schlanke Schnitt: NUR die Zielgroesse J. Uniformity, Crosstalk, r_x und
+# r_y stehen bereits in der 2x2-Kartenuebersicht und im Kreuzschnitt; neben
+# der Karte ergaben sie fuenf Kurven auf drei gestaffelten y-Achsen. Das ist
+# die VOREINSTELLUNG der Haken in run_plots.py, keine feste Liste - wer mehr
+# sehen will, hakt mehr an. (Combinated_Optimization zeigt hier J_c, U_c und
+# eta_c, weil dort die beiden Haelften von J die eigentliche Aussage sind.)
+LINE_CUT_TRACES = ["score"]
 
 VALLEY_AXIS_CHOICES = [
     ("waist_um", "Waist nach der Linse (µm)"),
@@ -2046,8 +2419,8 @@ def extract_valley(results, axis="waist_um", follow="score",
         cols = gueltig
         rows = np.argmin(safe[:, gueltig], axis=0)
         x = waist_um[cols] if axis == "waist_um" else win_input_vals[cols] * 1e3
-        x_label = ("Waist at focus $\\omega'$ ($\\mu$m, after lenses)" if axis == "waist_um"
-                   else "Input waist $\\omega_{\\mathrm{in}}$ (mm, before lenses)")
+        x_label = (WAIST_UM_LABEL if axis == "waist_um"
+                   else WIN_INPUT_LABEL)
 
     if select == "guided":
         # Die Leitgerade ist immer width = a*waist + b ueber der µm-Achse
@@ -2151,10 +2524,25 @@ FOLLOW_PLOT_LABELS = {
 # die Leiste hoch ist - er lief oben aus der Figur. Das Symbol genuegt: was J,
 # U und eta bedeuten, steht im Bericht und in den Titeln der Metrik-Karten.
 FOLLOW_CBAR_LABELS = {
-    "score": r"$J$",
+    "score": r"$J_%s$" % _IDX,
     "uniformity": U_SYMBOL,
     "crosstalk": C_SYMBOL,
 }
+
+# Ueberschrift der KARTE im Schnittplot. Sie nennt, WAS die Karte zeigt -
+# nicht, in welchem Modus geschnitten wurde: "Linear fit" bzw. "Minimum path"
+# beschrieb die Linie darin, nicht die Heatmap darunter. Welcher Modus laeuft,
+# sagen die Linie selbst und ihr Legendeneintrag; der Titel der Karte gehoert
+# der Groesse. Dieselbe Formulierung wie ueber der J-Karte (plot_region).
+FOLLOW_MAP_TITLES = {
+    "score": "Combined score (%s)" % FAMILY_TITLE,
+    "uniformity": U_TITLE,
+    "crosstalk": C_TITLE,
+}
+
+
+def follow_map_title(follow):
+    return FOLLOW_MAP_TITLES.get(follow, follow_plot_label(follow))
 
 
 def follow_plot_label(follow):
@@ -2310,6 +2698,56 @@ def _entzerre_achse(ax, werte_liste, ziel=AXIS_NOISE_TARGET):
     ax.set_ylim(mitte - soll / 2, mitte + soll / 2)
 
 
+# Feinste Tick-Schrittweite je Einheit - die UNTERGRENZE der Aufloesung
+# einer Schnitt-Achse.
+#
+# Ohne sie zoomt matplotlib auf die tatsaechliche Schwankung: r_x laeuft in
+# manchen Datensaetzen nur zwischen 0.9995 und 1.0020, das
+# Diskretisierungsrauschen des Intensitaetsgitters fuellt dann die ganze
+# Achse und sieht wie ein Verlauf aus. Mit dem Raster steht r_x da, was es
+# ist: konstant 1.00 auf zwei Nachkommastellen.
+#
+#   ""  (r_x, r_y)  -> 0.01, also hoechstens zwei Nachkommastellen
+#   "%" (U, eta, J) -> 0.1,  also hoechstens eine
+ACHSEN_MINDESTSCHRITT = {"": 0.01, "%": 0.1}
+# So viele Schritte muessen mindestens auf die Achse passen (sonst wird sie
+# aufgeweitet) ...
+ACHSEN_MIN_SCHRITTE = 4
+# ... und hoechstens so viele Striche sollen es werden (sonst wird die
+# Schrittweite vergroessert: 1, 2, 5, 10, 20, 50, ... x Mindestschritt).
+ACHSEN_MAX_TICKS = 7
+_RASTER_FAKTOREN = [f * 10 ** k for k in range(7) for f in (1, 2, 5)]
+
+
+def _achsenraster(ax, einheit):
+    """Feste Tick-Aufloesung fuer eine Schnitt-Achse.
+
+    Weitet den Bereich auf, bis mindestens ACHSEN_MIN_SCHRITTE Schritte der
+    Einheit hineinpassen, waehlt daraus eine Schrittweite mit hoechstens
+    ACHSEN_MAX_TICKS Strichen und rundet die Grenzen nach aussen auf ein
+    Vielfaches davon. Die Zahl der Nachkommastellen folgt der Schrittweite -
+    ein Tick zeigt nie mehr Stellen, als er unterscheidet."""
+    schritt0 = ACHSEN_MINDESTSCHRITT.get(einheit)
+    if schritt0 is None:
+        return
+    lo, hi = (float(v) for v in ax.get_ylim())
+    if not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
+        return
+    mitte = 0.5 * (lo + hi)
+    spanne = max(hi - lo, schritt0 * ACHSEN_MIN_SCHRITTE)
+    lo, hi = mitte - spanne / 2, mitte + spanne / 2
+    schritt = schritt0 * _RASTER_FAKTOREN[-1]
+    for faktor in _RASTER_FAKTOREN:
+        if spanne / (schritt0 * faktor) <= ACHSEN_MAX_TICKS:
+            schritt = schritt0 * faktor
+            break
+    ax.set_ylim(np.floor(lo / schritt) * schritt,
+                np.ceil(hi / schritt) * schritt)
+    ax.yaxis.set_major_locator(MultipleLocator(schritt))
+    stellen = max(0, int(np.ceil(-np.log10(schritt) - 1e-9)))
+    ax.yaxis.set_major_formatter(FormatStrFormatter(f"%.{stellen}f"))
+
+
 # Eine helle Kurvenfarbe ist als LINIE gut zu sehen, als Achsenbeschriftung
 # auf weissem Grund aber zu blass. Ticks und Achsenlabel werden deshalb
 # abgedunkelt, wenn die Farbe zu hell ist - die Linie selbst behaelt ihre
@@ -2330,7 +2768,7 @@ def _axis_label_for_group(gruppe):
     labels = [TRACE_SPECS[k][0] for k in gruppe]
     einheit = TRACE_SPECS[gruppe[0]][1]
     text = ", ".join(labels)
-    return f"{text} ({einheit})" if einheit else text
+    return f"{text} [{einheit}]" if einheit else text
 
 
 def _break_at(werte, unbenutzt):
@@ -2361,7 +2799,8 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
                     guide_follow=GUIDE_FOLLOW_DEFAULT,
                     guide_halfwidth=GUIDE_HALFWIDTH_DEFAULT,
                     waist_range=None, width_range=None,
-                    map_show_path=False, draw_best_point=True, best_point=None):
+                    map_show_path=False, draw_best_point=True, best_point=None,
+                    legend_placement=VALLEY_LEGEND_PLACEMENT_DEFAULT):
     """Querschnitt: links die Heatmap der Fuehrungsgroesse mit dem Pfad,
     rechts der Schnitt entlang dieses Pfads.
 
@@ -2390,8 +2829,12 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
                           waist_range=waist_range, width_range=width_range)
 
     verfuegbar = available_trace_keys(results)
-    gewaehlt = list(verfuegbar) if traces is None else [k for k in TRACE_ORDER
-                                                       if k in traces and k in verfuegbar]
+    if traces is None:
+        # Ohne Vorgabe der schlanke Satz (LINE_CUT_TRACES), nicht mehr alles,
+        # was der Datensatz hergibt.
+        gewaehlt = [k for k in LINE_CUT_TRACES if k in verfuegbar] or list(verfuegbar)
+    else:
+        gewaehlt = [k for k in TRACE_ORDER if k in traces and k in verfuegbar]
     if follow in verfuegbar and follow not in gewaehlt:
         gewaehlt.insert(0, follow)
     if not gewaehlt:
@@ -2430,12 +2873,16 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
     # 6.3 x 2.87 Zoll bei Textbreite. Der Platz fuer zusaetzliche y-Achsen
     # muss darin stecken - er kostet Panel-Breite, und das ist ehrlich so:
     # fuenf y-Achsen nebeneinander sind fuenf y-Achsen nebeneinander.
+    # dichte=1.0 (nicht ZWEI_PANEL_DICHTE): seit die Legenden UNTER den
+    # Panels stehen, ueberragt die Kartenlegende die Karte nicht mehr - der
+    # Grund fuer die kleinere Stufe ist damit weg, und die Beschriftung darf
+    # so gross sein wie in den uebrigen Dokument-Abbildungen. Combinated_
+    # Optimization setzt fuer denselben Plot dieselben Groessen.
     breite, hoehe = VALLEY_FIGSIZE
-    with dokument_stil(breite, legend_fontsize=legend_fontsize,
-                       dichte=ZWEI_PANEL_DICHTE):
+    with dokument_stil(breite, legend_fontsize=legend_fontsize, dichte=1.0):
         fig, (ax_map, ax_cut) = plt.subplots(
             1, 2, figsize=(breite, hoehe), constrained_layout=True,
-            gridspec_kw={"width_ratios": [1.0, 1.35]})
+            gridspec_kw={"width_ratios": list(VALLEY_WIDTH_RATIOS)})
 
         # ---------------- links: Karte mit Pfad ----------------
         # Knappe Karte (Default): nur der verbotene Bereich und die Gerade.
@@ -2448,7 +2895,7 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
             fit_fuer_maske is None and path_mode != "line")
 
         im = ax_map.pcolormesh(x_heat, width_vals * 1e-6, Z, shading="auto", cmap="magma_r")
-        label = follow_cbar_label(follow) + (" (%)" if skala == 100.0 else "")
+        label = follow_cbar_label(follow) + (" [%]" if skala == 100.0 else "")
         fig.colorbar(im, ax=ax_map, label=label)
         ax_map.set_xlabel(kurzes_achsenlabel(x_heat_label))
         # Die Karte ist das schmalere der beiden Panels; die automatische
@@ -2464,7 +2911,7 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
 
         if path_mode == "line":
             fit = valley["fit"]
-            ax_map.set_title("Linear fit to the minimum path")
+            ax_map.set_title(follow_map_title(follow))
             if zeige_pfad:
                 # Der echte Talpfad blass im Bild - nur so ist zu sehen, wie
                 # weit die Gerade von den tatsaechlichen Minima abweicht.
@@ -2482,22 +2929,30 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
                                 np.asarray(tal["y_heat"])[tal_unbenutzt],
                                 label=f"not used ({int(tal_unbenutzt.sum())})",
                                 **SD(UNUSED_STYLE))
-            # Im Geradenmodus IST dieser Pfad die Gerade. Ohne die Pfadpunkte
-            # wird er als glatte Strecke gezeichnet und heisst schlicht so -
-            # sonst stuende zweimal dasselbe in der Legende.
-            ax_map.plot(x_pfad, y_pfad, color=VALLEY_FIT_STYLE["color"], linewidth=S(2.0),
-                        marker=("o" if zeige_pfad else None), markersize=S(3.2),
-                        markeredgecolor="white", markeredgewidth=S(0.4),
-                        label=(f"cut along the fitted line "
-                               f"({valley['n_points']}/{valley['n_total']} pts)"
-                               if zeige_pfad else FIT_LINE_LABEL))
+            # Die Gerade laeuft IMMER durch das ganze Bild - dieselbe
+            # Funktion und derselbe Anblick wie in den Metrik-Karten.
+            #
+            # Vorher wurde hier statt ihrer der SCHNITTPFAD gezeichnet. Der
+            # endet, wo die Gerade das gescannte width-Fenster verlaesst
+            # (oder wo ein Suchbereich sie abschneidet) - die Linie hoerte
+            # dadurch mitten in der Karte auf, obwohl dieselbe Gerade in der
+            # Kartenuebersicht daneben durchlief.
+            draw_fit_line_on_map(ax_map, results, fit, win_axis)
             extrap = np.asarray(valley["extrapolated"], dtype=bool)
-            if zeige_pfad and extrap.any():
-                ax_map.plot(x_pfad[extrap], y_pfad[extrap],
-                            label=f"extrapolated ({int(extrap.sum())})",
-                            **SD(EXTRAPOLATED_MARKER))
+            if zeige_pfad:
+                # Die tatsaechlich geschnittenen Stellen als Punkte AUF der
+                # Geraden - ohne eigene Linie, die ist schon gezeichnet.
+                ax_map.plot(x_pfad, y_pfad, linestyle="none", marker="o",
+                            markersize=S(3.2), color=VALLEY_FIT_STYLE["color"],
+                            markeredgecolor="white", markeredgewidth=S(0.4),
+                            label=(f"cut along the fitted line "
+                                   f"({valley['n_points']}/{valley['n_total']} pts)"))
+                if extrap.any():
+                    ax_map.plot(x_pfad[extrap], y_pfad[extrap],
+                                label=f"extrapolated ({int(extrap.sum())})",
+                                **SD(EXTRAPOLATED_MARKER))
         else:
-            ax_map.set_title("Minimum path")
+            ax_map.set_title(follow_map_title(follow))
             fit = fit_fuer_maske
             if zeige_pfad:
                 ax_map.plot(_break_at(x_pfad, unbenutzt), _break_at(y_pfad, unbenutzt),
@@ -2510,20 +2965,18 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
                                 label=f"not used ({int(unbenutzt.sum())})",
                                 **SD(UNUSED_STYLE))
             if fit is not None:
-                draw_valley_line(ax_map, fit)
+                # Auch hier durch das ganze Bild, nicht nur von der ersten
+                # bis zur letzten benutzten Stuetzstelle.
+                draw_fit_line_on_map(ax_map, results, fit, win_axis)
         if draw_best_point:
             draw_best_point_marker(ax_map, results, win_axis, legend=False,
                                    label=True, best=best_point)
         # Ohne einen einzigen Eintrag gar keinen leeren Kasten zeichnen.
-        if ax_map.get_legend_handles_labels()[0]:
-            # Die Kartenlegende liegt bewusst IM Bild, ueber der Heatmap. Sie
-            # darf deshalb nicht in die Layout-Rechnung eingehen:
-            # constrained_layout zaehlt Achsenlegenden seit matplotlib 3.6 mit
-            # und schrumpfte die Karte, sobald die (mitskalierte) Legende
-            # breiter wurde als die Spalte - bei fuenf Kurven blieb von der
-            # Karte nur noch ein Streifen uebrig.
-            kartenlegende = ax_map.legend(loc="lower right", framealpha=0.9)
-            kartenlegende.set_in_layout(False)
+        # Die Eintraege der Karte nur SAMMELN - gezeichnet werden beide
+        # Legenden erst am Ende, gemeinsam und in derselben Schriftgroesse
+        # (siehe _schnitt_legenden).
+        karten_handles, _karten_labels = ax_map.get_legend_handles_labels()
+        karten_zeilen = [[h] for h in karten_handles]
 
         # ------------- rechts: Querschnitt, eine y-Achse je Gruppe -------------
         linien = []
@@ -2547,6 +3000,7 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
                                  linewidth=S(1.5), label=label)
                 linien.append(linie)
             _entzerre_achse(ax, [werte_benutzt[k] for k in gruppe])
+            _achsenraster(ax, TRACE_SPECS[gruppe[0]][1])
             achsen_label = _axis_label_for_group(gruppe)
             achsen_farbe = _achsenfarbe(TRACE_SPECS[gruppe[0]][2] if len(gruppe) == 1
                                         else MULTI_TRACE_AXIS_COLOR)
@@ -2555,31 +3009,53 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
             if position > 0:
                 ax.spines["right"].set_color(achsen_farbe)
 
-        # Ohne Legendeneintrag: den traegt der Stern in der Karte links.
+        # Der Strich bekommt einen eigenen Eintrag in der Legende des
+        # Schnitts, und zwar denselben Text wie der Stern in der Karte
+        # links: seine beiden Koordinaten. Beide meinen denselben Punkt -
+        # zwei verschiedene Namen dafuer in einer Figur waeren eine Frage,
+        # die sich der Leser nicht stellen soll.
+        marke = None
         if draw_best_point:
-            draw_working_point_line(ax_cut, best_point, axis, label=False)
-        ax_cut.set_xlabel(valley["x_label"])
+            gezeichnet = draw_working_point_line(
+                ax_cut, _mit_waist_um(results, best_point), axis, label=True)
+            marke = gezeichnet if gezeichnet is not False else None
+        # Auch hier die Kurzform: bei zwei Panels auf Textbreite lief die
+        # ausgeschriebene Fassung rechts aus der Figur heraus. Welche
+        # Konvention gemeint ist, sagt das Symbol - und die Karte links
+        # traegt dieselbe Achse.
+        ax_cut.set_xlabel(kurzes_achsenlabel(valley["x_label"]))
         # Ueberschrift des rechten Panels. Im Geradenmodus ist der Schnitt
         # entlang der Fit-Geraden gelegt, im Talmodus entlang des Minimums -
         # beides heisst "Cross-section along ...", damit die beiden Fassungen
         # nebeneinander als dasselbe Bild erkennbar bleiben.
-        titel = ("Cross-section along fit" if path_mode == "line"
-                 else "Cross-section along minimum path")
-        ax_cut.set_title(titel)
+        # In beiden Pfadmodi derselbe Titel: was geschnitten wurde, sagt der
+        # Titel der Karte links ("Linear fit" bzw. "Minimum path").
+        ax_cut.set_title("Cross section")
         ax_cut.grid(True, alpha=0.25)
-        ax_cut.legend(linien, [ln.get_label() for ln in linien],
-                      loc="upper center",
-                      # Der Abstand nach unten muss Teilstrich-Zahlen UND
-                      # Achsenbeschriftung ueberspringen; beide wachsen mit dem
-                      # Massstab, ein fester Bruchteil der Achsenhoehe schob die
-                      # Legende sonst mitten in die x-Beschriftung.
-                      bbox_to_anchor=(0.5, -(S(0.09) + 0.04)),
-                      ncol=legend_ncol([ln.get_label() for ln in linien]),
-                      framealpha=0.9)
+        # Die Kurven in eine Zeile (bei vielen umgebrochen), der
+        # Arbeitspunkt in eine eigene Zeile darunter.
+        # Die Kurven bleiben NEBENEINANDER in einer Zeile. Der Arbeitspunkt
+        # traegt nur noch die Koordinate der Schnittachse und ist damit kurz
+        # genug, um sich eine Zeile mit einer Kurve zu teilen - mindestens
+        # zwei Eintraege pro Zeile, statt ihn immer allein zu setzen.
+        ncol = legend_ncol([ln.get_label() for ln in linien])
+        if marke is not None:
+            ncol = max(2, ncol)
+        zeilen = [linien[i:i + ncol] for i in range(0, len(linien), ncol)]
+        if marke is not None:
+            if zeilen and len(zeilen[-1]) < ncol:
+                zeilen[-1].append(marke)
+            else:
+                zeilen.append([marke])
+        _schnitt_legenden(fig, ax_map, karten_zeilen, ax_cut, zeilen,
+                          ncol=ncol, placement=legend_placement)
 
         pfad_tag = "line" if path_mode == "line" else "valley"
         dateiname = f"{prefix}_{pfad_tag}_{follow}_over_{axis}.pdf"
-        return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite)
+        # tight=False: feste Seitengroesse, unabhaengig von Datensatz und
+        # Legendentext - siehe _finish().
+        return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite,
+                       tight=False)
 
 
 # ======================================================================
@@ -3233,7 +3709,8 @@ def plot_line_panels(results, prefix, axis="waist_um", follow="score",
                      guide_halfwidth=GUIDE_HALFWIDTH_DEFAULT,
                      waist_range=None, width_range=None, path=None,
                      draw_best_point=True, best_point=None,
-                     show_extrapolated=False):
+                     show_extrapolated=False,
+                     legend_placement=VALLEY_LEGEND_PLACEMENT_DEFAULT):
     """Jede Groesse der Uebersicht als Schnitt entlang der Geraden.
 
     `path`: fertiges Ergebnis von extract_line_cut() - sonst wird es selbst
@@ -3264,13 +3741,22 @@ def plot_line_panels(results, prefix, axis="waist_um", follow="score",
         for ax, feld in zip(axes.flat, felder):
             y = np.asarray(path["values"][feld["trace"]], dtype=float)
             ax.plot(x, y, color=TRACE_SPECS[feld["trace"]][2], linewidth=S(1.6))
+            # Bei einer Legende JE PANEL braucht auch jedes Panel seine
+            # eigenen Eintraege; bei der gemeinsamen Legende unter der Figur
+            # genuegt einer, sonst stuende dasselbe vier- bzw. sechsmal drin.
+            eigene_legende = (legend_placement == "inside")
             if extrap.any():
-                ax.plot(x[extrap], y[extrap], **SD(EXTRAPOLATED_MARKER))
+                ax.plot(x[extrap], y[extrap],
+                        label=(f"extrapolated ({int(extrap.sum())})"
+                               if eigene_legende else "_nolegend_"),
+                        **SD(EXTRAPOLATED_MARKER))
             if draw_best_point:
                 # In jedem Feld dieselbe Stelle - so liest man alle Werte am
                 # Arbeitspunkt in einem Blick ab.
-                draw_working_point_line(ax, best_point, axis,
-                                        label=(ax is axes.flat[0]))
+                draw_working_point_line(
+                    ax, best_point, axis,
+                    label=(eigene_legende or ax is axes.flat[0]))
+            _achsenraster(ax, TRACE_SPECS[feld["trace"]][1])
             ax.set_ylabel(feld["ylabel"])
             ax.set_title(feld["title"])
             ax.grid(True, alpha=0.25)
@@ -3279,13 +3765,28 @@ def plot_line_panels(results, prefix, axis="waist_um", follow="score",
         for ax in axes[-1, :]:
             ax.set_xlabel(path["x_label"])
 
-        handles, labels = axes.flat[0].get_legend_handles_labels()
-        if extrap.any():
-            handles.append(plt.Line2D([], [], **SD(EXTRAPOLATED_MARKER)))
-            labels.append(f"extrapolated ({int(extrap.sum())})")
-        if handles:
-            fig.legend(handles, labels, loc="outside lower center",
-                       ncol=legend_ncol(labels), framealpha=0.9)
+        if legend_placement == "inside":
+            # Je Panel eine eigene Legende oben rechts, wie im Kreuzschnitt.
+            # `set_in_layout(False)`: sonst schruempfte constrained_layout
+            # jedes Panel um die Flaeche seiner Legende.
+            for ax in axes.flat[:len(felder)]:
+                handles, labels = ax.get_legend_handles_labels()
+                if not handles:
+                    continue
+                # Volle Legendenschrift, nicht die verkleinerte des
+                # Schnittplots: hier steht je Feld nur EIN kurzer Eintrag,
+                # der passt ohne Nachhelfen neben die Kurve.
+                legende = ax.legend(handles, labels, loc="upper right",
+                                    ncol=legend_ncol(labels), framealpha=0.9)
+                legende.set_in_layout(False)
+        else:
+            handles, labels = axes.flat[0].get_legend_handles_labels()
+            if extrap.any():
+                handles.append(plt.Line2D([], [], **SD(EXTRAPOLATED_MARKER)))
+                labels.append(f"extrapolated ({int(extrap.sum())})")
+            if handles:
+                fig.legend(handles, labels, loc="outside lower center",
+                           ncol=legend_ncol(labels), framealpha=0.9)
 
         dateiname = f"{prefix}_line_panels_over_{axis}.pdf"
         return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite)
@@ -3399,8 +3900,8 @@ def extract_line_cut(results, axis="waist_um", follow="score", fit=None,
     if ueber_width:
         x_label = WIDTH_LABEL
     else:
-        x_label = ("Waist at focus $\\omega'$ ($\\mu$m, after lenses)" if axis == "waist_um"
-                   else "Input waist $\\omega_{\\mathrm{in}}$ (mm, before lenses)")
+        x_label = (WAIST_UM_LABEL if axis == "waist_um"
+                   else WIN_INPUT_LABEL)
     waist_um_out = waist_arr if win_axis == "after_lens" else np.full_like(waist_arr, np.nan)
     waist_mm_out = waist_arr if win_axis == "before_lens" else np.full_like(waist_arr, np.nan)
 

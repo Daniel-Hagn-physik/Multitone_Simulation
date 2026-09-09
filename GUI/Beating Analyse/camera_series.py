@@ -1,28 +1,32 @@
-"""Bildserie einer Kamera ueber eine Beating-Periode.
+"""Camera frame series over one beat period.
 
-Was das Fenster zeigt: was eine Kamera mit endlicher Belichtung wirklich
-aufnimmt, wenn man den Trigger-Delay in Schritten ueber eine Grundperiode
-durchfaehrt - obere Reihe die Rohbilder, untere Reihe die Abweichung vom
-Zeitmittel. Letztere ist das, was man im Labor auswertet: der Untergrund faellt
-heraus und die Schwebung steht als Vorzeichenmuster da.
+What the window shows: what a camera with a finite exposure really records
+when the trigger delay is stepped over one fundamental period - top row the
+raw frames, bottom row the deviation from the time average. The latter is what
+one evaluates in the lab: the background drops out and the beating stands
+there as a signed pattern.
 
-Die Bilder werden NICHT aus dem Wuerfel gemittelt, sondern exakt gerechnet.
-I(t) ist ein trigonometrisches Polynom in exp(2 pi i f_0 t),
+The frames are NOT averaged from the cube, they are computed exactly. I(t) is
+a trigonometric polynomial in exp(2 pi i f_0 t),
 
     I(r,t) = sum_d C_d(r) exp(2 pi i d f_0 t) ,
 
-und eine Belichtung t_exp ab t_0 ist darauf ein Boxcar:
+and an exposure t_exp starting at t_0 is a boxcar on it:
 
     I_cam(r, t_0) = sum_d C_d(r) * sinc(d f_0 t_exp)
                                  * exp(2 pi i d f_0 (t_0 + t_exp/2))
 
-mit sinc(z) = sin(pi z)/(pi z). Das gilt fuer BELIEBIGE t_0 und t_exp - keine
-Rundung auf ein Zeitraster, kein Aliasing. Die C_d kommen aus einer FFT ueber
-die Beat-Ordnungen, also ohne Schleife ueber Spotpaare.
+with sinc(z) = sin(pi z)/(pi z). This holds for ARBITRARY t_0 and t_exp - no
+rounding to a time grid, no aliasing. The C_d come from an FFT over the beat
+orders, i.e. without any loop over spot pairs.
 
-Die Phasen kommen bei jedem Zeichnen frisch aus dem Haupt-GUI. Phasen dort
-umstellen, 'Recompute', hier 'Neu zeichnen' - das ist der Arbeitsablauf, fuer
-den das Fenster gebaut ist.
+The phases are taken fresh from the main GUI on every draw. Change the phases
+there, press 'Recompute', then 'Redraw' here - that is the workflow this
+window was built for.
+
+NO SPATIAL AVERAGING happens here at all: the image IS the spatial resolution.
+Only the two figures of merit below the plot average - the per-pixel swing
+(median and p90 over the plateau pixels) and the total light in the plateau.
 """
 
 import datetime
@@ -37,18 +41,20 @@ from PyQt5.QtWidgets import (
     QCheckBox, QPushButton, QComboBox, QGroupBox, QGridLayout, QMessageBox
 )
 
+A4_LANDSCAPE = (11.69, 8.27)          # inch - a frame series is wide by nature
+
 
 class CameraSeriesDialog(QDialog):
-    """Nicht-modales Fenster; das Haupt-GUI bleibt bedienbar."""
+    """Modeless window; the main GUI stays usable."""
 
     def __init__(self, parent, frame_fn):
         super().__init__(parent)
-        self.setWindowTitle("Kamera-Bildserie ueber eine Beating-Periode")
-        self.resize(1500, 780)
+        self.setWindowTitle("Camera frame series over one beat period")
+        self.resize(1500, 800)
         self.parent_win = parent
-        self.frame_fn = frame_fn          # camera_frames_exact() des Haupt-GUI
+        self.frame_fn = frame_fn          # camera_frames_exact() of the main GUI
         self._last = None
-        self._T0_seen = None               # Periode, auf die eingestellt wurde
+        self._T0_seen = None              # period the times were set up for
 
         root = QVBoxLayout(self)
         root.addWidget(self._group_inputs())
@@ -63,11 +69,11 @@ class CameraSeriesDialog(QDialog):
         root.addWidget(self.lbl_info)
 
         row = QHBoxLayout()
-        self.btn_draw = QPushButton("Neu zeichnen")
+        self.btn_draw = QPushButton("Redraw")
         self.btn_draw.clicked.connect(self.redraw)
-        self.btn_save = QPushButton("Als PDF speichern")
+        self.btn_save = QPushButton("Save PDF (LaTeX, A4)")
         self.btn_save.clicked.connect(self._on_save)
-        btn_close = QPushButton("Schliessen")
+        btn_close = QPushButton("Close")
         btn_close.clicked.connect(self.close)
         row.addWidget(self.btn_draw)
         row.addStretch(1)
@@ -79,14 +85,14 @@ class CameraSeriesDialog(QDialog):
 
     # ------------------------------------------------------------
     def _group_inputs(self):
-        g = QGroupBox("Aufnahme")
+        g = QGroupBox("Acquisition")
         lay = QGridLayout(g)
         c = getattr(self.parent_win, "cache", {}) or {}
         T0 = c.get("T0", 100e-6)
         t_exp0 = self.parent_win.state.get("t_exp") or 20e-6
-        # Eine Serie braucht mehrere Bilder pro Periode. Passt die im
-        # Haupt-GUI eingestellte Belichtung nicht dazu (z.B. 20 us bei einer
-        # Periode von 13 us), wird auf ein Fuenftel der Periode aufgesetzt.
+        # A series needs several frames per period. If the exposure set in the
+        # main GUI does not fit (say 20 us at a period of 13 us), start from a
+        # fifth of the period instead.
         if T0 and np.isfinite(T0) and t_exp0 > 0.5 * T0:
             t_exp0 = T0 / 5.0
 
@@ -96,10 +102,10 @@ class CameraSeriesDialog(QDialog):
         self.sp_texp.setValue(t_exp0 * 1e6)
         self.sp_texp.setKeyboardTracking(False)
         self.sp_texp.setToolTip(
-            "Belichtungszeit pro Bild. Sie daempft die Beat-Ordnung d mit\\n"
-            "sinc(d*f_0*t_exp): langsame Anteile bleiben stehen, schnelle\\n"
-            "werden weggemittelt. Bei t_exp = T_0 ist jedes Bild das\\n"
-            "Zeitmittel und die untere Reihe wird null - das ist die Probe.")
+            "Exposure time per frame. It damps beat order d by\n"
+            "sinc(d*f_0*t_exp): slow components survive, fast ones are averaged\n"
+            "away. At t_exp = T_0 every frame is the time average and the\n"
+            "bottom row vanishes - that is the built-in check.")
         self.sp_texp.valueChanged.connect(self._on_texp_changed)
 
         self.sp_step = QDoubleSpinBox()
@@ -108,33 +114,35 @@ class CameraSeriesDialog(QDialog):
         self.sp_step.setValue(t_exp0 * 1e6)
         self.sp_step.setKeyboardTracking(False)
         self.sp_step.setToolTip(
-            "Schrittweite des Trigger-Delays von Bild zu Bild. Gleich der\\n"
-            "Belichtung heisst: lueckenlos aneinander. Kleiner heisst\\n"
-            "ueberlappend abgetastet - im Labor genauso machbar, weil jedes\\n"
-            "Bild ein eigener Schuss ist.")
+            "Step of the trigger delay from frame to frame. Equal to the\n"
+            "exposure means gapless; smaller means oversampled - equally\n"
+            "feasible in the lab, because every frame is its own shot.")
         self.sp_step.valueChanged.connect(lambda _: self._sync_n())
 
         self.sp_n = QSpinBox()
         self.sp_n.setRange(1, 12)
         self.sp_n.setValue(max(1, min(12, int(round(T0 / max(t_exp0, 1e-12))))))
-        self.sp_n.setToolTip("Anzahl Bilder. Voreinstellung: so viele, wie eine\\n"
-                             "Grundperiode fassen.")
+        self.sp_n.setToolTip("Number of frames. Default: as many as fit into one\n"
+                             "fundamental period.")
 
         self.cmb_row2 = QComboBox()
-        self.cmb_row2.addItems(["Abweichung vom Zeitmittel",
-                                "Verhaeltnis zum Zeitmittel",
-                                "keine zweite Reihe"])
-        self.cb_common = QCheckBox("gemeinsame Farbskala")
+        self.cmb_row2.addItems(["deviation from the time average",
+                                "ratio to the time average",
+                                "no second row"])
+        self.cb_common = QCheckBox("common colour scale")
         self.cb_common.setChecked(True)
         self.cb_common.setToolTip(
-            "Aus: jedes Bild wird einzeln voll ausgesteuert. Das sieht\\n"
-            "kontrastreicher aus, macht die Bilder aber untereinander\\n"
-            "unvergleichbar - genau der Fehler, den man am Messplatz nicht\\n"
-            "machen will.")
+            "Off: every frame is scaled to its own maximum. That looks more\n"
+            "contrasty but makes the frames incomparable - exactly the mistake\n"
+            "one does not want to make at the setup.")
+        self.cb_suptitle = QCheckBox("title inside the figure")
+        self.cb_suptitle.setChecked(True)
+        self.cb_suptitle.setToolTip("Switch off for LaTeX: the caption belongs\n"
+                                    "in \\caption{}, not in the graphic.")
 
-        rows = [("Belichtung", self.sp_texp), ("Schritt Trigger-Delay", self.sp_step),
-                ("Bilder", self.sp_n), ("Untere Reihe", self.cmb_row2),
-                ("", self.cb_common)]
+        rows = [("exposure", self.sp_texp), ("trigger delay step", self.sp_step),
+                ("frames", self.sp_n), ("bottom row", self.cmb_row2),
+                ("", self.cb_common), ("", self.cb_suptitle)]
         for i, (name, w) in enumerate(rows):
             lay.addWidget(QLabel(name), 0, 2 * i)
             lay.addWidget(w, 0, 2 * i + 1)
@@ -150,11 +158,10 @@ class CameraSeriesDialog(QDialog):
         self._sync_n()
 
     def _apply_defaults(self, T0):
-        """Zeiten auf eine neue Grundperiode aufsetzen.
+        """Set the times up for a new fundamental period.
 
-        Nur wenn sich T_0 geaendert hat - eine vom Benutzer absichtlich
-        gesetzte Serie (kuerzerer Ausschnitt, ueberlappende Abtastung) soll
-        ein 'Neu zeichnen' nicht zurueckwerfen."""
+        Only when T_0 has changed - a deliberately chosen series (a shorter
+        excerpt, oversampled steps) must not be thrown away by a 'Redraw'."""
         t_exp = self.parent_win.state.get("t_exp") or 0.0
         if not (0 < t_exp <= 0.5 * T0):
             t_exp = T0 / 5.0
@@ -176,18 +183,16 @@ class CameraSeriesDialog(QDialog):
     def redraw(self):
         c = getattr(self.parent_win, "cache", {}) or {}
         if not c or "F_stack" not in c:
-            QMessageBox.information(self, "Nichts zu zeichnen",
-                                    "Im Haupt-GUI erst 'Recompute' druecken.")
+            QMessageBox.information(self, "Nothing to draw",
+                                    "Press 'Recompute' in the main GUI first.")
             return
         f0, T0 = c["f0"], c["T0"]
         if not (f0 > 0 and np.isfinite(T0)):
             QMessageBox.information(
-                self, "Keine Periode",
-                "Die Differenzfrequenzen haben keinen gemeinsamen Teiler - es "
-                "gibt keine Beating-Periode, ueber die eine Serie laufen "
-                "koennte.")
+                self, "No beat period",
+                "The difference frequencies have no common divisor - there is "
+                "no beat period for a series to run over.")
             return
-
         if self._T0_seen is None or abs(T0 - self._T0_seen) > 1e-3 * T0:
             self._apply_defaults(T0)
 
@@ -198,17 +203,24 @@ class CameraSeriesDialog(QDialog):
 
         frames = self.frame_fn(c["F_stack"], c["k_orders"], c["phases"],
                                f0, t_exp, t0)
-        mean = c["mean_exact"]
-        plateau = c["plateau"]
-        self._last = dict(frames=frames, mean=mean, t0=t0, t_exp=t_exp,
-                          step=step, f0=f0, T0=T0)
+        self._last = dict(frames=frames, mean=c["mean_exact"],
+                          plateau=c["plateau"], t0=t0, t_exp=t_exp, step=step,
+                          f0=f0, T0=T0, x=c["x"], y=c["y"])
+        self._draw(self.fig, False)
+        self.canvas.draw_idle()
+        self._write_info()
 
-        x, y = c["x"], c["y"]
+    def _draw(self, fig, a4):
+        L = self._last
+        frames, mean = L["frames"], L["mean"]
+        n = len(frames)
+        x, y = L["x"], L["y"]
         ext = [x[0] * 1e6, x[-1] * 1e6, y[0] * 1e6, y[-1] * 1e6]
         mode = self.cmb_row2.currentIndex()
         n_rows = 1 if mode == 2 else 2
-        self.fig.clear()
-        axes = self.fig.subplots(n_rows, n, squeeze=False)
+        fig.clear()
+        fig.set_size_inches(*(A4_LANDSCAPE if a4 else (15, 6.4)))
+        axes = fig.subplots(n_rows, n, squeeze=False)
         vmax = float(frames.max()) if self.cb_common.isChecked() else None
         norm = max(float(mean.max()), 1e-300)
 
@@ -216,8 +228,9 @@ class CameraSeriesDialog(QDialog):
             a = axes[0][i]
             a.imshow(frames[i] / norm, extent=ext, origin="lower", cmap="inferno",
                      vmin=0.0, vmax=(vmax / norm) if vmax else None)
-            a.set_title("t$_0$ = %.1f - %.1f $\\mu$s"
-                        % (t0[i] * 1e6, (t0[i] + t_exp) * 1e6), fontsize=9)
+            a.set_title(r"$t_0$ = %.1f - %.1f $\mu$s"
+                        % (L["t0"][i] * 1e6, (L["t0"][i] + L["t_exp"]) * 1e6),
+                        fontsize=9)
             a.set_xticks([]); a.set_yticks([])
             if mode == 2:
                 continue
@@ -232,27 +245,32 @@ class CameraSeriesDialog(QDialog):
                 im = b.imshow(d, extent=ext, origin="lower", cmap="coolwarm",
                               vmin=0.0, vmax=2.0)
             b.set_xticks([]); b.set_yticks([])
-        axes[0][0].set_ylabel("Kamerabild", fontsize=9)
+        axes[0][0].set_ylabel("camera frame", fontsize=9)
         if mode != 2:
-            axes[1][0].set_ylabel("Bild $-$ Zeitmittel" if mode == 0
-                                  else "Bild / Zeitmittel", fontsize=9)
-            cb = self.fig.colorbar(im, ax=[axes[1][j] for j in range(n)],
-                                   fraction=0.02, pad=0.01)
-            cb.set_label("% von max$\\langle I\\rangle$" if mode == 0
-                         else "Verhaeltnis", fontsize=9)
+            axes[1][0].set_ylabel("frame $-$ time average" if mode == 0
+                                  else "frame / time average", fontsize=9)
+            cb = fig.colorbar(im, ax=[axes[1][j] for j in range(n)],
+                              fraction=0.02, pad=0.01)
+            cb.set_label(r"% of max$\langle I\rangle$" if mode == 0 else "ratio",
+                         fontsize=9)
 
-        s = self.parent_win.state
-        build = ("eine Linse f = %.1f mm, $w_{in}$ = %.3f mm"
-                 % (s["f_single"] * 1e3, s["win_in"] * 1e3)) if s["one_lens"] \
-            else ("Teleskop %.0f/%.0f mm" % (s["f1"] * 1e3, s["f2"] * 1e3))
-        self.fig.suptitle(
-            "%d$\\times$%d Toene, width %.4f / %.4f MHz  |  %s, $w_0$ = %.2f $\\mu$m  |  "
-            "T$_0$ = %.2f $\\mu$s, Belichtung %.2f $\\mu$s"
-            % (s["N_x"], s["N_y"], s["width_x"] * 1e-6, s["width_y"] * 1e-6,
-               build, s["win"] * 1e6, T0 * 1e6, t_exp * 1e6), fontsize=10)
-        self.canvas.draw_idle()
+        if self.cb_suptitle.isChecked():
+            s = self.parent_win.state
+            build = ("single lens f = %.1f mm, $w_{in}$ = %.3f mm"
+                     % (s["f_single"] * 1e3, s["win_in"] * 1e3)) if s["one_lens"] \
+                else ("telescope %.0f/%.0f mm" % (s["f1"] * 1e3, s["f2"] * 1e3))
+            fig.suptitle(
+                r"%d$\times$%d tones, width %.4f / %.4f MHz  |  %s, "
+                r"$w_0$ = %.2f $\mu$m  |  $T_0$ = %.2f $\mu$s, exposure "
+                r"%.2f $\mu$s  -  no spatial averaging, this is the image itself"
+                % (s["N_x"], s["N_y"], s["width_x"] * 1e-6, s["width_y"] * 1e-6,
+                   build, s["win"] * 1e6, L["T0"] * 1e6, L["t_exp"] * 1e6),
+                fontsize=9.5)
 
-        # Kennzahlen - das, wonach man das Bild am Messplatz beurteilt
+    def _write_info(self):
+        L = self._last
+        frames, mean, plateau = L["frames"], L["mean"], L["plateau"]
+        n = len(frames)
         if plateau.any() and n > 1:
             rel = (frames.max(0) - frames.min(0)) / np.maximum(mean, 1e-300)
             med = float(np.median(rel[plateau]))
@@ -262,60 +280,87 @@ class CameraSeriesDialog(QDialog):
             glob = float(tot.max() - tot.min())
         else:
             med = p90 = glob = float("nan")
-        supp = abs(float(np.sinc(f0 * t_exp)))
-        head = ("nur ein Bild - fuer einen Hub braucht es mindestens zwei"
+        supp = abs(float(np.sinc(L["f0"] * L["t_exp"])))
+        head = ("only one frame - a swing needs at least two"
                 if not np.isfinite(med) else
-                "Hub pro Pixel im Plateau (max-min)/Mittel:  Median {:.0f} %,  "
-                "p90 {:.0f} %.   Gesamtlicht im Plateau schwankt um {:.1f} % "
-                "({})".format(100 * med, 100 * p90, 100 * glob,
-                              "reine Umverteilung, keine Helligkeits"
-                              "aenderung" if glob < 0.05 else
-                              "auch als Helligkeitsaenderung sichtbar"))
+                "per-pixel swing (max-min)/mean:  median {:.0f} %, p90 {:.0f} % "
+                "(MEDIAN over the plateau pixels).  Total light in the plateau "
+                "varies by {:.1f} % ({})".format(
+                    100 * med, 100 * p90, 100 * glob,
+                    "pure redistribution, no brightness change" if glob < 0.05
+                    else "visible as a brightness change too"))
         self.lbl_info.setText(
-            head + ".\nDie Belichtung laesst von der Grundschwingung {:.0f} % "
-            "stehen; {} Bilder a {:.2f} us im Abstand {:.2f} us decken {:.0f} % "
-            "einer Periode ab.".format(
-                100 * supp, n, t_exp * 1e6, step * 1e6,
-                100 * min(1.0, n * step / T0)))
+            head + ".\nThe exposure leaves {:.0f} % of the fundamental "
+            "standing; {} frames of {:.2f} us at a step of {:.2f} us cover "
+            "{:.0f} % of one period.".format(
+                100 * supp, n, L["t_exp"] * 1e6, L["step"] * 1e6,
+                100 * min(1.0, n * L["step"] / L["T0"])))
         self.lbl_period.setText(
-            "Grundperiode T_0 = %.3f us (f_0 = %.4f kHz).   Belichtung = T_0 "
-            "liefert exakt das Zeitmittel - die untere Reihe muss dann "
-            "verschwinden." % (T0 * 1e6, f0 * 1e-3))
+            "Fundamental period T_0 = %.3f us (f_0 = %.4f kHz).  Exposure = T_0 "
+            "gives exactly the time average - the bottom row must then vanish."
+            % (L["T0"] * 1e6, L["f0"] * 1e-3))
 
     # ------------------------------------------------------------
     def _on_save(self):
         if self._last is None:
             return
         s = self.parent_win.state
+        L = self._last
         stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        name = ("Kameraserie_N{}x{}_texp{:.0f}us_step{:.0f}us_{}"
-                .format(s["N_x"], s["N_y"], self._last["t_exp"] * 1e6,
-                        self._last["step"] * 1e6, stamp))
+        name = ("CameraSeries_N{}x{}_texp{:.0f}us_step{:.0f}us_{}"
+                .format(s["N_x"], s["N_y"], L["t_exp"] * 1e6, L["step"] * 1e6,
+                        stamp))
         out = self.parent_win.out_dir
         try:
-            self.fig.savefig(out / (name + ".pdf"), format="pdf",
-                             bbox_inches="tight")
-            lines = [stamp, "",
-                     "N_x x N_y = %d x %d" % (s["N_x"], s["N_y"]),
-                     "width_x = %.6f MHz, width_y = %.6f MHz"
-                     % (s["width_x"] * 1e-6, s["width_y"] * 1e-6),
-                     "build: " + ("single lens f = %.3f mm, w_in = %.4f mm"
-                                  % (s["f_single"] * 1e3, s["win_in"] * 1e3)
-                                  if s["one_lens"] else
-                                  "telescope f1 = %.2f mm, f2 = %.2f mm"
-                                  % (s["f1"] * 1e3, s["f2"] * 1e3)),
-                     "waist (focus) = %.4f um" % (s["win"] * 1e6),
-                     "T_0 = %.4f us (f_0 = %.6f kHz)"
-                     % (self._last["T0"] * 1e6, self._last["f0"] * 1e-3),
-                     "exposure = %.4f us, delay step = %.4f us, frames = %d"
-                     % (self._last["t_exp"] * 1e6, self._last["step"] * 1e6,
-                        len(self._last["t0"])),
-                     "phases x [deg] = " + ", ".join(
-                         "%.2f" % v for v in np.degrees(s["phase_x"])),
-                     "phases y [deg] = " + ", ".join(
-                         "%.2f" % v for v in np.degrees(s["phase_y"])),
-                     "", self.lbl_info.text()]
-            (out / (name + ".txt")).write_text("\n".join(lines), encoding="utf-8")
-            self.lbl_period.setText("gespeichert: " + name + ".pdf (+ .txt)")
+            import matplotlib
+            old_ft = matplotlib.rcParams.get("pdf.fonttype")
+            matplotlib.rcParams["pdf.fonttype"] = 42
+            tmp = Figure(figsize=A4_LANDSCAPE, dpi=100)
+            FigureCanvas(tmp)
+            self._draw(tmp, True)
+            tmp.savefig(out / (name + ".pdf"), format="pdf", bbox_inches="tight")
+            if old_ft is not None:
+                matplotlib.rcParams["pdf.fonttype"] = old_ft
+            rows = [
+                ("N_x x N_y", "%d x %d" % (s["N_x"], s["N_y"])),
+                ("width_x / width_y", "%.6f / %.6f MHz"
+                 % (s["width_x"] * 1e-6, s["width_y"] * 1e-6)),
+                ("r_x / r_y", "%.4f / %.4f" % (s["r_x"], s["r_y"])),
+                ("build", "single lens f = %.3f mm, w_in = %.4f mm"
+                 % (s["f_single"] * 1e3, s["win_in"] * 1e3) if s["one_lens"]
+                 else "telescope f1 = %.2f mm, f2 = %.2f mm"
+                 % (s["f1"] * 1e3, s["f2"] * 1e3)),
+                ("waist (focus)", "%.4f um" % (s["win"] * 1e6)),
+                ("beam profile", "%s, airy factor %.4f"
+                 % ("Airy" if s["use_airy"] else "Gauss", s["airy_factor"])),
+                ("lambda / RF offset", "%.2f nm / %.4f MHz"
+                 % (s["lambda_opt"] * 1e9, s["offset"] * 1e-6)),
+                ("f_0 / T_0", "%.6f kHz / %.4f us"
+                 % (L["f0"] * 1e-3, L["T0"] * 1e6)),
+                ("exposure / delay step", "%.4f / %.4f us"
+                 % (L["t_exp"] * 1e6, L["step"] * 1e6)),
+                ("frames", "%d" % len(L["frames"])),
+                ("tone phases x [deg]", ", ".join("%.2f" % v for v in
+                                                  np.degrees(s["phase_x"]))),
+                ("tone phases y [deg]", ", ".join("%.2f" % v for v in
+                                                  np.degrees(s["phase_y"]))),
+            ]
+            md = ["# Camera frame series", "",
+                  "Generated %s by `camera_series.py` "
+                  "(Beating_Multitone_GUI)." % stamp, "",
+                  "## Parameters", "",
+                  "| quantity | value |", "|---|---|"]
+            md += ["| %s | %s |" % r for r in rows]
+            md += ["", "## Figure", "",
+                   "Top row: the raw camera frames. Bottom row: the deviation "
+                   "from the time average - that is what one evaluates, "
+                   "because the background drops out. **No spatial averaging "
+                   "anywhere**; the image is the spatial resolution.", "",
+                   "## Summary line from the GUI", "", "```",
+                   self.lbl_info.text(), "```",
+                   "", "## Files", "", "- `%s.pdf`" % name, ""]
+            (out / (name + "_report.md")).write_text("\n".join(md),
+                                                     encoding="utf-8")
+            self.lbl_period.setText("saved: " + name + ".pdf (+ _report.md)")
         except Exception as exc:
-            QMessageBox.critical(self, "Speichern fehlgeschlagen", str(exc))
+            QMessageBox.critical(self, "Saving failed", str(exc))

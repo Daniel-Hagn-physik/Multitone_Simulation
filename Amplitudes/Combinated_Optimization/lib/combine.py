@@ -251,6 +251,15 @@ def build_penalty_results(scan, alpha=0.7, combo_lambda=0.75, combo_percentile=2
         lambda_opt=scan['lambda_opt'], theta_max=scan['theta_max'], f_band=scan['f_band'],
         profile=scan['profile'],
         airy_scale_factor=scan.get('airy_scale_factor'),
+        # Rechenmodell und Aufloesung des Scans muessen den Weg aus dem
+        # Roh-Scan in die gespeicherte Datei finden - sonst steht in der
+        # .pkl nicht, WIE sie gerechnet wurde. `coherent` fehlt in Dateien
+        # von vor 2026-09-04; describe() liest genau diese Schluessel.
+        coherent=scan.get('coherent'),
+        n_degenerate_pairs=scan.get('n_degenerate_pairs'),
+        n_grid=scan.get('n_grid'), weighted_n_grid=scan.get('weighted_n_grid'),
+        atom_offset_x=scan.get('atom_offset_x', 0.0),
+        atom_offset_y=scan.get('atom_offset_y', 0.0),
         sigma_atom=scan.get('sigma_atom'),
         atom_mass=scan.get('atom_mass'), atom_temperature=scan.get('atom_temperature'),
         trap_freq_r=scan.get('trap_freq_r'),

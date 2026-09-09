@@ -1,61 +1,58 @@
-"""Ein-Linsen-Modus fuer das Beating-GUI: Optik, Parametersuche, Dialog.
+"""Single-lens mode for the beating GUI: optics, parameter search, dialog.
 
-WARUM EINE EIGENE DATEI
-Der Laboraufbau fuer das Messbild ist nicht der Aufbau, fuer den die GUIs
-gebaut wurden. Dort steht hinter dem AOD ein Teleskop f1 -> f2 und danach die
-Fokussierlinse fLO; hier steht hinter dem AOD nur EINE Linse. Das aendert zwei
-Groessen, und nur diese zwei:
+WHY A SEPARATE FILE
+The lab setup for the measurement image is not the setup the GUIs were built
+for. There, a telescope f1 -> f2 followed by the focusing lens fLO sits behind
+the AOD; here there is only ONE lens. That changes two quantities, and only
+these two:
 
-    Ortsablage im Fokus      r(f)  = f_lens * tan(theta(f))
-    Waist im Fokus           w_0   = lambda * f_lens / (pi * w_in)
+    position in the focus   r(f)  = f_lens * tan(theta(f))
+    waist in the focus      w_0   = lambda * f_lens / (pi * w_in)
 
-Der Winkel selbst bleibt der des AOD,
+The angle itself is still the AOD's,
 
     theta(f) = theta_max * (f - offset) / f_band ,
 
-denn der AOD wird nicht angefasst. Aus beidem folgt die einzige Zahl, auf die
-es bei der Auslegung ankommt - der Tonabstand, der genau einen Spotabstand von
-einem Waist erzeugt:
+because the AOD is not touched. From both follows the only number that matters
+for the design - the tone spacing that puts the spots exactly one waist apart:
 
     df(pitch/waist = 1) = w_0 / (dr/df) = v_ac / (pi * w_in)
 
-mit v_ac = lambda * f_band / theta_max der Schallgeschwindigkeit im AOD. Die
-Brennweite kuerzt sich heraus. Fuer w_in = 1.75 mm und v_ac = 665.6 m/s sind
-das 121.1 kHz - unabhaengig davon, welche Linse man nimmt. Die Linse bestimmt
-nur, wie gross das Bild insgesamt wird (w_0 = 6.51 um bei f = 45 mm), nicht,
-wie viele Toene man braucht.
+with v_ac = lambda * f_band / theta_max the acoustic velocity in the AOD. The
+focal length cancels. For w_in = 1.75 mm and v_ac = 665.6 m/s that is
+121.1 kHz - independent of which lens is used. The lens only sets how large
+the image gets (w_0 = 6.51 um at f = 45 mm), not how many tones are needed.
 
-DIE BEATING-PERIODE
-|E|^2 enthaelt nur Differenzen der Tonfrequenzen. Die Grundperiode ist
-T_0 = 1/f_0 mit f_0 = ggT aller Differenzfrequenzen. Bei gleicher width auf
-beiden Achsen ist
+THE BEAT PERIOD
+|E|^2 contains only differences of the tone frequencies. The fundamental
+period is T_0 = 1/f_0 with f_0 = gcd of all difference frequencies. At equal
+width on both axes,
 
     df_x = width/(N_x-1),  df_y = width/(N_y-1),
-    f_0  = ggT(df_x, df_y) = width / kgV(N_x-1, N_y-1) .
+    f_0  = gcd(df_x, df_y) = width / lcm(N_x-1, N_y-1) .
 
-Eine Zielperiode T legt damit die width fest, sobald das Gitter steht:
+A target period T therefore fixes the width as soon as the grid is chosen:
 
-    width = kgV(N_x-1, N_y-1) / T .
+    width = lcm(N_x-1, N_y-1) / T .
 
-Das ist die ganze Suche. Sie hat einen unangenehmen Zug: bei gleicher width
-zwingt eine lange Periode entweder zu dichten Spots oder zu vielen Toenen.
-Fuer T = 100 us (f_0 = 10 kHz) und pitch/waist = 1 braucht es kgV/(N-1) = 12,
-also teilerfremde N_x-1, N_y-1 um 12 herum - 13x14 Toene bei width 1.56 MHz.
-Wer weniger Toene will, muss entweder dichter setzen (kleineres pitch/waist,
-was dem Flattop nicht schadet, nur das Feld kleiner macht) oder ungleiche
-widths zulassen (Option unten): df_x = 120 kHz, df_y = 130 kHz haben ebenfalls
-ggT 10 kHz, brauchen aber nur 3x4 Toene.
+That is the whole search. It has one unpleasant trait: at equal width a long
+period forces either dense spots or many tones. For T = 100 us (f_0 = 10 kHz)
+and pitch/waist = 1 it needs lcm/(N-1) = 12, i.e. coprime N_x-1, N_y-1 around
+12 - 13x14 tones at width 1.56 MHz. Fewer tones means either setting them
+denser (a smaller pitch/waist, which does not hurt the flat top, it only makes
+the field smaller) or allowing unequal widths (the option below): df_x =
+120 kHz and df_y = 130 kHz also have gcd 10 kHz but need only 3x4 tones.
 
-KAMERA
-Eine Belichtungszeit T_exp ist ein Boxcar in der Zeit. Auf den Fourierkoeffi-
-zienten D_d der Intensitaet (Ordnung d, Frequenz d*f_0) wirkt sie als
+CAMERA
+An exposure time T_exp is a boxcar in time. On the Fourier coefficient D_d of
+the intensity (order d, frequency d*f_0) it acts as
 
-    D_d -> D_d * sinc(d * f_0 * T_exp)   mit sinc(z) = sin(pi z)/(pi z).
+    D_d -> D_d * sinc(d * f_0 * T_exp)   with sinc(z) = sin(pi z)/(pi z).
 
-Bei T_exp = 20 us und f_0 = 10 kHz bleibt die Grundschwingung mit 0.94 fast
-voll stehen, waehrend die schnellen Anteile bei 120/130 kHz auf 0.08 gedaempft
-werden. Die Kamera sieht also gerade das langsame Beating und mittelt das
-schnelle weg - genau das ist der Sinn der Auslegung.
+At T_exp = 20 us and f_0 = 10 kHz the fundamental keeps 0.94 while the fast
+components at 120/130 kHz are damped to 0.08. The camera therefore sees
+exactly the slow beating and averages the fast one away - which is the whole
+point of the design.
 """
 
 import math
@@ -230,7 +227,7 @@ def search_candidates(target_period, lam, f_lens, w_in, waist,
                 if width_x > f_band:
                     continue
             else:
-                # k_x, k_y frei und teilerfremd: das Ziel ist df ~ df1
+                # k_x, k_y free und teilerfremd: das Ziel ist df ~ df1
                 k_star = df1 / f0
                 lo = max(1, int(k_star * 0.4))
                 hi = max(lo + 1, int(k_star * 2.2) + 1)
@@ -253,7 +250,7 @@ def search_candidates(target_period, lam, f_lens, w_in, waist,
             df_x, df_y = f0 * kx, f0 * ky
             rho_x, rho_y = df_x / df1, df_y / df1
             # Tonzahl: zweiseitig um den Standard-Arbeitspunkt (3x4 = 12
-            # Toene) bewertet. Einseitig gestraft wuerde die Suche bei
+            # tones) bewertet. Einseitig gestraft wuerde die Suche bei
             # ungleichen widths, wo rho immer perfekt getroffen wird, auf
             # 2x2 zusammenfallen - ein Gitter, das kein Flattop mehr ist.
             score = (math.hypot(math.log(rho_x / rho_target),
@@ -295,24 +292,24 @@ def suppression_table(f0, t_exp, orders):
 # Dialog
 # ============================================================
 class OneLensDesignDialog(QDialog):
-    """Auslegung des Ein-Linsen-Aufbaus auf eine Ziel-Beating-Periode.
+    """Auslegung des Ein-Linsen-Aufbaus auf eine target beating period.
 
     Der Dialog rechnet nur - uebernommen wird erst auf Knopfdruck, und dann
     genau die markierte Zeile.
     """
 
     # (Ueberschrift, Nachkommastellen; None = ganzzahlig)
-    COLS = [("Rang", None), ("N_x", None), ("N_y", None),
+    COLS = [("rank", None), ("N_x", None), ("N_y", None),
             ("width_x [MHz]", 4), ("width_y [MHz]", 4),
             ("df_x [kHz]", 1), ("df_y [kHz]", 1),
             ("pitch_x [um]", 3), ("pitch_y [um]", 3),
             ("pitch/waist x", 3), ("pitch/waist y", 3),
-            ("Feld [um]", 1), ("Toene", None), ("entartet", None),
+            ("field [um]", 1), ("tones", None), ("degenerate", None),
             ("Ripple [%]", 2)]
 
     def __init__(self, parent=None, state=None):
         super().__init__(parent)
-        self.setWindowTitle("Ein-Linsen-Aufbau - Parameter fuer eine Ziel-Beating-Periode")
+        self.setWindowTitle("Single-lens setup - parameters for a target beating period")
         self.resize(1180, 760)
         s = state or {}
         self.result_candidate = None
@@ -345,12 +342,12 @@ class OneLensDesignDialog(QDialog):
         root.addWidget(self.lbl_detail)
 
         row = QHBoxLayout()
-        self.btn_search = QPushButton("Vorschlaege berechnen")
+        self.btn_search = QPushButton("Compute proposals")
         self.btn_search.clicked.connect(self._on_search)
-        self.btn_apply = QPushButton("Markierten Satz uebernehmen")
+        self.btn_apply = QPushButton("Apply the selected set")
         self.btn_apply.clicked.connect(self._on_apply)
         self.btn_apply.setEnabled(False)
-        btn_close = QPushButton("Schliessen")
+        btn_close = QPushButton("Close")
         btn_close.clicked.connect(self.reject)
         row.addWidget(self.btn_search)
         row.addStretch(1)
@@ -374,7 +371,7 @@ class OneLensDesignDialog(QDialog):
         return w
 
     def _group_inputs(self, s):
-        g = QGroupBox("Aufbau und Ziel")
+        g = QGroupBox("Setup and target")
         lay = QGridLayout(g)
 
         # The waist in front of the lens is a property of the SINGLE LENS
@@ -393,35 +390,34 @@ class OneLensDesignDialog(QDialog):
                                    0.0, 100000.0, 3, 5.0, "us")
         self.sp_rho = self._dspin(1.0, 0.05, 5.0, 3, 0.05)
         self.sp_rho.setToolTip(
-            "Ziel fuer Spotabstand / Waist. 1.0 entspricht dem bisherigen\n"
-            "Arbeitspunkt (pitch 1.137 um bei waist 1.10 um). Kleinere Werte\n"
-            "sind kein Fehler: dichter gesetzte Spots geben ein glatteres\n"
-            "Flattop, nur ein kleineres Feld bei gleicher Tonzahl.")
+            "Target for spot spacing / waist. 1.0 matches the previous working\n"
+            "point. Smaller values are not a mistake: denser spots give a\n"
+            "SMOOTHER flat top, only a smaller field at the same tone count.")
         self.sp_nmax = QSpinBox()
         self.sp_nmax.setRange(2, 64)
         self.sp_nmax.setValue(int(s.get("n_max", 20)))
         self.sp_nx_fix = QSpinBox()
         self.sp_nx_fix.setRange(0, 64)
-        self.sp_nx_fix.setSpecialValueText("frei")
+        self.sp_nx_fix.setSpecialValueText("free")
         self.sp_ny_fix = QSpinBox()
         self.sp_ny_fix.setRange(0, 64)
-        self.sp_ny_fix.setSpecialValueText("frei")
-        self.cb_unequal = QCheckBox("ungleiche width_x / width_y zulassen")
+        self.sp_ny_fix.setSpecialValueText("free")
+        self.cb_unequal = QCheckBox("allow unequal width_x / width_y")
         self.cb_unequal.setToolTip(
-            "Aus. Dann wird width_x = width_y gesucht, wie in allen anderen\n"
-            "GUIs. Eingeschaltet duerfen die beiden Achsen verschiedene\n"
-            "Spannen haben - dieselbe Beating-Periode kommt dann mit sehr viel\n"
-            "weniger Toenen aus (3x4 statt 13x14), und die Frequenzentartung\n"
-            "faellt nebenbei weg. Der Spotabstand in y aendert sich dadurch.")
+            "Off: width_x = width_y is searched, as in all the other\n"
+            "GUIs. On, the two axes may have different spans - the same\n"
+            "beating period then needs far fewer tones (3x4 instead of\n"
+            "weniger tonesn aus (3x4 statt 13x14), und die Frequenzentartung\n"
+            "effect. The spot spacing in y changes accordingly.")
 
-        rows = [("Brennweite f", self.sp_f),
-                ("Waist vor der Linse", self.sp_win_in),
-                ("Ziel-Beating-Periode", self.sp_T),
-                ("Belichtungszeit Kamera", self.sp_texp),
-                ("Ziel pitch/waist", self.sp_rho),
+        rows = [("focal length f", self.sp_f),
+                ("waist before the lens", self.sp_win_in),
+                ("target beating period", self.sp_T),
+                ("camera exposure", self.sp_texp),
+                ("target pitch/waist", self.sp_rho),
                 ("N max", self.sp_nmax),
-                ("N_x festhalten", self.sp_nx_fix),
-                ("N_y festhalten", self.sp_ny_fix),
+                ("fix N_x", self.sp_nx_fix),
+                ("fix N_y", self.sp_ny_fix),
                 ("", self.cb_unequal)]
         for i, (name, w) in enumerate(rows):
             lay.addWidget(QLabel(name), i % 5, 2 * (i // 5))
@@ -429,7 +425,7 @@ class OneLensDesignDialog(QDialog):
         return g
 
     def _group_derived(self):
-        g = QGroupBox("Was daraus folgt")
+        g = QGroupBox("What follows from it")
         lay = QVBoxLayout(g)
         self.lbl_derived = QLabel("-")
         self.lbl_derived.setWordWrap(True)
@@ -459,13 +455,13 @@ class OneLensDesignDialog(QDialog):
         vis = camera_visibility(f0, p["t_exp"])
         zR = math.pi * w0 ** 2 / self.lam
         self.lbl_derived.setText(
-            "v_ac = {:.1f} m/s   |   Waist im Fokus w_0 = {:.3f} um   "
+            "v_ac = {:.1f} m/s   |   waist in the focus w_0 = {:.3f} um   "
             "(Rayleigh {:.1f} um)   |   dr/df = {:.4f} um/kHz\n"
-            "Tonabstand fuer pitch/waist = 1: {:.2f} kHz   ->   "
+            "tone spacing for pitch/waist = 1: {:.2f} kHz   ->   "
             "pitch = {:.3f} um\n"
-            "Ziel f_0 = {:.3f} kHz. Belichtung {:.1f} us laesst davon "
-            "{:.0f} % stehen und daempft {:.0f} kHz auf {:.0f} %; "
-            "{:.1f} Bilder pro Beating-Periode.".format(
+            "target f_0 = {:.3f} kHz. An exposure of {:.1f} us leaves "
+            "{:.0f} % of it standing and damps {:.0f} kHz to {:.0f} %; "
+            "{:.1f} frames per beating period.".format(
                 acoustic_velocity(self.lam), w0 * 1e6, zR * 1e6, drdf * 1e9,
                 df1 * 1e-3, w0 * 1e6, f0 * 1e-3, p["t_exp"] * 1e6, 100 * vis,
                 df1 * 1e-3, 100 * camera_visibility(df1, p["t_exp"]),
@@ -528,13 +524,13 @@ class OneLensDesignDialog(QDialog):
         supp = suppression_table(f0, p["t_exp"], np.arange(1, k_max + 1))
         n_survive = int(np.sum(supp > 0.5))
         self.lbl_detail.setText(
-            "{}x{} Toene, width_x = {:.4f} MHz, width_y = {:.4f} MHz.   "
-            "f_0 = {:.3f} kHz exakt, Periode {:.2f} us.\n"
-            "Feld zwischen den aeusseren Spots {:.1f} x {:.1f} um bei Waist "
-            "{:.2f} um; Ripple des Zeitmittels darauf {:.2f} %.   "
-            "Hoechste Beat-Frequenz {:.2f} MHz (Ordnung {}).\n"
-            "Von {} Ordnungen ueberstehen {} die Belichtung mit mehr als 50 %; "
-            "{} frequenzentartete Spotpaare.".format(
+            "{}x{} tones, width_x = {:.4f} MHz, width_y = {:.4f} MHz.   "
+            "f_0 = {:.3f} kHz exactly, period {:.2f} us.\n"
+            "Field between the outer spots {:.1f} x {:.1f} um at waist "
+            "{:.2f} um; ripple of the time average on it {:.2f} %.   "
+            "Highest beat frequency {:.2f} MHz (order {}).\n"
+            "Of {} orders, {} survive the exposure with more than 50 %; "
+            "{} frequenzdegeneratee Spotpaare.".format(
                 c.N_x, c.N_y, c.width_x * 1e-6, c.width_y * 1e-6,
                 f0 * 1e-3, p["T"] * 1e6,
                 c.span_x * 1e6, c.span_y * 1e6,
@@ -549,11 +545,10 @@ class OneLensDesignDialog(QDialog):
         p = self._inputs()
         if c.n_tones > 300:
             r = QMessageBox.question(
-                self, "Viele Toene",
-                "Dieser Satz hat {} Spots. Die kohaerente Zeitentwicklung "
-                "skaliert quadratisch damit - Gitteraufloesung und Bilder pro "
-                "Periode besser vorher heruntersetzen.\n\nTrotzdem "
-                "uebernehmen?".format(c.n_tones),
+                self, "Many tones",
+                "This set has {} spots. The coherent time evolution scales "
+                "quadratically with that - better lower the grid resolution and "
+                "the frames per period first.\n\nApply anyway?".format(c.n_tones),
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
             if r != QMessageBox.Yes:
                 return

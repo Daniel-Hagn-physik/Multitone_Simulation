@@ -475,6 +475,11 @@ class AmplitudeScanPlotter:
         return f"N{r['N_x']}x{r['N_y']}_{n_win}x{n_width}pts_{self._profile_tag()}{suffix}"
 
     def _finish_figure(self, fig, filename, show, save, dpi=150):
+        """Speichern und schliessen. Die Dateinamen enden auf .pdf: alle
+        Abbildungen dieses Projekts sind zum Einbinden in ein LaTeX-Dokument
+        gedacht, und eine Rastergrafik faellt darin gegen die Vektor-PDFs der
+        Auswertung sichtbar ab. `dpi` bleibt fuer die wenigen gerasterten
+        Bestandteile (Bilddaten) wirksam."""
         if save:
             out_file = resolve_save_path(self.out_dir, filename, confirm_overwrite=self.confirm_overwrite)
             fig.savefig(out_file, dpi=dpi, bbox_inches='tight')
@@ -790,7 +795,7 @@ class AmplitudeScanPlotter:
 
             tag = self._filetag()
             self._finish_figure(
-                fig, f"FlatMultiTone_AmpScan_{filename_suffix}_{tag}.png",
+                fig, f"FlatMultiTone_AmpScan_{filename_suffix}_{tag}.pdf",
                 show, save, dpi=self.SCAN2D_SAVE_DPI,
             )
 
@@ -822,7 +827,7 @@ class AmplitudeScanPlotter:
                                                      win_input_fixed_axis=win_input_fixed_axis)
             tag = self._filetag()
             out_file = resolve_save_path(
-                self.out_dir, f"FlatMultiTone_AmpScan_Combined_{tag}.png",
+                self.out_dir, f"FlatMultiTone_AmpScan_Combined_{tag}.pdf",
                 confirm_overwrite=self.confirm_overwrite,
             )
             fig_save.savefig(out_file, dpi=self.SCAN2D_SAVE_DPI, bbox_inches='tight')
@@ -1016,7 +1021,13 @@ class AmplitudeScanPlotter:
             )
         i_fixed, j_fixed, mark_label = mark
 
-        x_win, x_win_label, _ = self._win_axis_values(win_input_vals, win_axis)
+        # `_win_axis_values` sortiert die µm-Achse aufsteigend und dreht die
+        # Werte dabei um (der effektive Waist faellt mit steigendem
+        # win_input). Wird das UEBERSEHEN, stehen die Kurven spiegelverkehrt
+        # zur Achse - deshalb hier das Kurvenarray mitdrehen.
+        x_win, x_win_label, umgedreht = self._win_axis_values(win_input_vals, win_axis)
+        rx_win = RX[i_fixed, ::-1] if umgedreht else RX[i_fixed, :]
+        ry_win = RY[i_fixed, ::-1] if umgedreht else RY[i_fixed, :]
 
         legend_kwargs = {} if legend_fontsize is None else {"fontsize": legend_fontsize}
 
@@ -1027,8 +1038,8 @@ class AmplitudeScanPlotter:
             # ueberlappen konnte (siehe Chat "Amplituden Abhängigkeit").
             fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(14, 5.5), constrained_layout=True)
 
-            ax_left.plot(x_win, RX[i_fixed, :], 'o-', label=r"$r_x$ ($N_x$=%d)" % r['N_x'])
-            ax_left.plot(x_win, RY[i_fixed, :], 's-', label=r"$r_y$ ($N_y$=%d)" % r['N_y'])
+            ax_left.plot(x_win, rx_win, 'o-', label=r"$r_x$ ($N_x$=%d)" % r['N_x'])
+            ax_left.plot(x_win, ry_win, 's-', label=r"$r_y$ ($N_y$=%d)" % r['N_y'])
             ax_left.set_xlabel(x_win_label)
             ax_left.set_ylabel("outer/inner ratio")
             ax_left.set_title(f"width fixed = {width_vals[i_fixed]*1e-6:.4f} MHz")
@@ -1038,7 +1049,15 @@ class AmplitudeScanPlotter:
             ax_right.plot(width_vals * 1e-6, RY[:, j_fixed], 's-', label=r"$r_y$ ($N_y$=%d)" % r['N_y'])
             ax_right.set_xlabel("width (MHz)")
             ax_right.set_ylabel("outer/inner ratio")
-            ax_right.set_title(f"win_input fixed = {win_input_vals[j_fixed]*1e3:.4f} mm")
+            # Der feste Wert in DERSELBEN Konvention wie die Achse links: wer
+            # alles in µm anzeigen laesst, will hier nicht plotzlich mm lesen.
+            if win_axis == "before_lens":
+                ax_right.set_title(
+                    f"win_input fixed = {win_input_vals[j_fixed] * 1e3:.4f} mm")
+            else:
+                ax_right.set_title(
+                    "waist fixed = %.4f µm"
+                    % self._win_axis_single_value(win_input_vals[j_fixed], win_axis))
             ax_right.grid(True, alpha=0.3)
 
             if mark_best_point:
@@ -1061,7 +1080,7 @@ class AmplitudeScanPlotter:
                          fontsize=15, fontweight='bold')
 
             tag = self._filetag()
-            self._finish_figure(fig, f"FlatMultiTone_AmpScan_DependenceCuts_{tag}.png", show, save)
+            self._finish_figure(fig, f"FlatMultiTone_AmpScan_DependenceCuts_{tag}.pdf", show, save)
 
 
 # ======================================================================
@@ -1117,6 +1136,11 @@ class WeightedFixedScanPlotter:
         return f"N{r['N_x']}x{r['N_y']}_{n_win}x{n_width}pts_{self._profile_tag()}_Weighted"
 
     def _finish_figure(self, fig, filename, show, save, dpi=150):
+        """Speichern und schliessen. Die Dateinamen enden auf .pdf: alle
+        Abbildungen dieses Projekts sind zum Einbinden in ein LaTeX-Dokument
+        gedacht, und eine Rastergrafik faellt darin gegen die Vektor-PDFs der
+        Auswertung sichtbar ab. `dpi` bleibt fuer die wenigen gerasterten
+        Bestandteile (Bilddaten) wirksam."""
         if save:
             out_file = resolve_save_path(self.out_dir, filename, confirm_overwrite=self.confirm_overwrite)
             fig.savefig(out_file, dpi=dpi, bbox_inches='tight')
@@ -1173,7 +1197,7 @@ class WeightedFixedScanPlotter:
             ax.set_title(title)
 
         tag = self._filetag()
-        self._finish_figure(fig, f"FlatMultiTone_Scan_{filename_suffix}_{tag}.png", show, save,
+        self._finish_figure(fig, f"FlatMultiTone_Scan_{filename_suffix}_{tag}.pdf", show, save,
                              dpi=self.SCAN2D_SAVE_DPI)
         return fig
 
@@ -1234,7 +1258,7 @@ class WeightedFixedScanPlotter:
             fig.suptitle(suptitle)
 
         tag = self._filetag()
-        self._finish_figure(fig, f"FlatMultiTone_Scan_WeightedCombined_{tag}.png", show, save,
+        self._finish_figure(fig, f"FlatMultiTone_Scan_WeightedCombined_{tag}.pdf", show, save,
                              dpi=self.SCAN2D_SAVE_DPI)
         return fig
 

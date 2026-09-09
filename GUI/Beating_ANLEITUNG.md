@@ -1027,3 +1027,216 @@ Ortsmittel sind: Fläche über eine Grundperiode, Delay-Scan, räumliche Streuun
 Der Delay-Plot trägt den Hinweis „intensitätsgewichtetes Ortsmittel" direkt
 unter der Achse; die Anregungskurve ist aus dem Streuungsplot heraus (die Zahl
 steht weiterhin in der Infozeile).
+
+## Wo die Bilder landen
+
+`OUT_DIR_CANDIDATES` zeigt jetzt auf **`GUI/Bilder`** — unter Windows zuerst
+absolut auf `C:\Users\Legion\OneDrive\Desktop\Multitone_Simulation\GUI\Bilder`,
+sonst relativ zur Datei (`<Ordner der GUI>/../Bilder`), damit ein Klon woanders
+neben sich selbst schreibt statt auf einen fremden Desktop.
+
+Der Dateiname nennt Beating und Arbeitspunkt:
+
+```
+Beating_N3x4_w1.050um_width0.3700MHz_rx0.97_ry1.16_T0-16.22us
+        _frabi1.000MHz_tp1.000us_atom_2026-09-09_081823_*.pdf
+```
+
+Ein Speichervorgang im Pulsfenster legt ab:
+
+| Datei | Inhalt |
+|---|---|
+| `…_curves.pdf` | die drei Zeitplots, ohne Erklärungen |
+| `…_map.pdf` | die 2D-Karte allein, ohne Titel |
+| `…_report.md` | **alle physikalischen Parameter** (Markdown-Tabellen) |
+| `…_period.txt`, `…_delayscan.txt`, `…_intensity.txt` | die Kurven als Zahlenspalten |
+
+Der Report enthält Profil (N, widths, r_x/r_y, Waist, Aufbau, λ, Offset, f₀/T₀,
+Tonphasen), Auswertebereich (σ, T, ν_r, gewichtet oder harte Maske), Puls
+(Ω/2π, T_p, Gesetz, Pulsstart und -ende, ⟨θ⟩, σ_θ, Anregung, η, Toleranz),
+Leistung (Δ, C_rabi, I_ref, A_eff, P im Profil, pro Spot, pro RF-Ton), Optik
+und AOD (θ_max, f_band, v_ac, Profil, Gitter) sowie die Namen der erzeugten
+PDFs.
+
+**t₀ ist der Pulsanfang**, nicht die Mitte: der Puls läuft von t₀ bis t₀ + T_p.
+Das T_p/2 in der Boxcar-Formel ist nur die Phase des Fensterschwerpunkts in der
+Fourierdarstellung und verschiebt die aufgetragene Zeit nicht. Im obersten Plot
+markiert die senkrechte rote Linie t₀, die Schattierung die Pulsdauer.
+
+## Kitayoshi-Phasen
+
+Neben `0`, `Schroeder` und `randomise` gibt es jetzt den Preset **`Kitayoshi`**.
+Die Definition (Kitayoshi, Sumida, Shirakawa, Takeshita, *DSP Synthesized
+Signal Source for Analog Testing Stimulus and New Test Method*, IEEE Int. Test
+Conf. 1985, S. 825–834) ist eine kumulative Summe:
+
+```
+φ_k = φ₀ − (2π/N) · Σ_{j=1..k} j = π/2 − π·k(k+1)/N ,   k = 0 … N−1
+```
+
+φ₀ = π/2 ist der Startwert, N die Tonanzahl. Der Zuwachs von Ton zu Ton wächst
+linear (`Δφ_k = −2πk/N`), die Phase selbst also quadratisch — genau wie bei
+Schroeder, wo
+
+```
+φ_n = −π·n(n−1)/N ,   n = 0 … N−1
+```
+
+gilt. Beide sind dieselbe quadratische Familie, Kitayoshi nur um einen Index
+verschoben (`k(k+1)` statt `n(n−1)`) und um π/2 versetzt. Der Sinn ist in
+beiden Fällen derselbe: eine quadratische Phase entspricht einem linearen
+Frequenzsweep über die Periode, das Signal wird zum gestreckten Chirp und der
+Crest-Faktor fällt von √(2N) auf ≈ √2.
+
+Der **Crest-Faktor ist deshalb identisch** — für gleiche Amplituden liefert die
+Implementierung
+
+| N | 0 | Schroeder | Kitayoshi |
+|---|---|---|---|
+| 3 | 2.449 | 2.160 | 2.160 |
+| 4 | 2.828 | 2.000 | 2.000 |
+| 13 | 5.099 | 1.878 | 1.878 |
+| 14 | 5.292 | 1.943 | 1.943 |
+
+Was sich unterscheidet, ist die **Zuordnung** der Phasen zu den Tönen: Kitayoshi
+läuft in der anderen Richtung durch die Parabel und startet bei π/2. Im
+Multitone-Profil sind Töne aber nicht austauschbar — jeder gehört zu einem
+Beugungswinkel — also ergibt sich ein anderes räumliches Muster und ein anderes
+Beating, obwohl der zeitliche Crest-Faktor gleich bleibt. Genau dafür ist der
+Preset gedacht: eine zweite Variante mit gleich gutem Crest-Faktor, die man im
+Labor durchprobieren kann.
+
+## Normierung im Pulsfenster: Leistung → Ω statt Ω → Leistung
+
+Bisher war Ω/2π = 1 MHz gesetzt und die Leistung ergab sich daraus. Das ist
+umgedreht worden, weil in der Praxis die Leistung die Vorgabe ist und die
+Pulslänge (1 µs) feststeht. Die Combo **`normalise by`** hat drei Stellungen:
+
+| Modus | Eingabe | Ergebnis |
+|---|---|---|
+| `power in the profile -> Omega` (Standard) | P im Profil | Ω/2π, P pro Spot |
+| `power per spot (mean) -> Omega` | P pro Spot (Mittel) | Ω/2π, P im Profil |
+| `Omega given -> power` | Ω/2π | P im Profil und pro Spot |
+
+Alle drei Felder werden nach jeder Rechnung konsistent zurückgeschrieben; nur
+das zum Modus gehörende ist editierbar. Der Weg ist
+
+```
+I_ref = P / A_eff ,   A_eff = ∫I dA / ⟨I⟩_Bereich ,   Ω = C_rabi · I_ref
+```
+
+mit C_rabi aus `rb85_raman.py` bei der eingestellten Verstimmung. A_eff wird
+jetzt **vor** der Modus-Verzweigung berechnet, damit alle drei Richtungen
+dieselbe Fläche benutzen.
+
+### Neuer Arbeitspunkt: Δ = +50 GHz blau, P = 10 µW
+
+Als Standard steht jetzt eine **blaue Verstimmung von +50 GHz** und ein üblicher
+Wert von **10 µW im Profil** (3×4 Töne → 0.83 µW pro Spot im Mittel, 1.00 µW im
+hellsten). Damit:
+
+| Größe | Wert |
+|---|---|
+| C_rabi (+50 GHz) | 11.66 rad/s pro W/m² (bei −8 GHz: 71.98) |
+| η = (Ω_A−Ω_B)/(Ω_A+Ω_B) | −0.061 (bei −8 GHz: −0.179) |
+| Kontrastgrenze 1−η² | 0.9963 (bei −8 GHz: 0.8364) |
+| A_eff | 14.44 µm² |
+| I_ref | 69.3 W/cm² |
+| **Ω/2π** | **1.286 MHz** |
+| Streuung pro 1-µs-Puls | 0.087 % |
+| für einen π-Puls in 1 µs nötig | 3.89 µW |
+
+Die blaue Verstimmung ist der eigentliche Gewinn: Ω ∝ 1/Δ, die Streurate aber
+∝ 1/Δ², und die Ungleichheit der beiden Raman-Zweige (η) fällt ebenfalls,
+sodass die Kontrastobergrenze von 84 % auf 99.6 % steigt. Die Leistung bleibt
+dabei völlig unkritisch — 10 µW im Profil gegen ≈ 118 mW verfügbar.
+
+Mit 10 µW und 1 µs ergibt sich (atomgewichtet, 3×4-Arbeitspunkt):
+
+| Phasen | ⟨θ⟩ | σ_θ | Anregung | Abfall bei ±1 µs |
+|---|---|---|---|---|
+| 0 | 11.37 π | 0.77 % | 0.687 | 45.1 % |
+| Schroeder | 6.98 π | 18.7 % | 0.500 | 42.5 % |
+| Kitayoshi | 6.37 π | 22.0 % | 0.500 | 42.4 % |
+
+Die Flächen liegen deutlich über π, weil 10 µW ein runder Vorgabewert ist und
+kein π-Puls-Punkt; der π-Puls bei 1 µs bräuchte 3.89 µW. Für die
+Trigger-Diskussion ist das ohne Belang — der Delay-Scan ist in θ linear in der
+Leistung, die relative Empfindlichkeit ändert sich nicht.
+
+### Warum Δ vorher nichts geändert hat
+
+Zwei Fehler, beide behoben:
+
+1. **Kein Auto-Recompute.** Nur `layout` und `title inside the figure` waren mit
+   einem Signal verbunden; jede Zahl — auch Δ — wurde erst beim Druck auf
+   `Recompute` wirksam. Das Fenster zeigte dann eine Abbildung, die nicht mehr
+   zu den Zahlen darüber gehörte. Jetzt hängen alle physikalischen Eingaben an
+   einem entprellten Timer (250 ms), sodass eine Änderung von selbst
+   durchrechnet. Das Zurückschreiben von P/Ω in `recompute()` ist mit
+   `blockSignals` geschützt und kann keine Rückkopplung auslösen.
+2. **η kam aus dem Haupt-GUI.** Die Anregungskurve benutzte `state["eta_ls"]`
+   statt des zur eingestellten Verstimmung gehörenden η. Jetzt wird
+   `self._coef["eta"]` aus `rb85_raman` genommen; der Haupt-GUI-Wert ist nur
+   noch Notnagel, wenn das Modul nicht ladbar ist.
+
+Zusätzlich meldet die Notizzeile jetzt **rot und fett**, wenn `rb85_raman`
+(also `arc`) nicht importiert werden konnte — dann ist C_rabi auf seinem
+−8-GHz-Wert eingefroren und Δ ist tatsächlich wirkungslos. Sie zeigt außerdem
+η mit an.
+
+Zur Kontrolle (10 µW im Profil, 3×4, atomgewichtet, T_p = 1 µs):
+
+| Δ | C_rabi [rad/s pro W/m²] | η | Ω/2π | ⟨θ⟩ |
+|---|---|---|---|---|
+| −8 GHz | 71.98 | −0.442 | 7.93 MHz | 70.2 π |
+| +20 GHz | 29.05 | −0.155 | 3.20 MHz | 28.3 π |
+| +50 GHz | 11.66 | −0.061 | 1.28 MHz | 11.4 π |
+| +200 GHz | 2.98 | −0.015 | 0.33 MHz | 2.9 π |
+
+Bei fester Leistung ist Ω ∝ C_rabi ∝ 1/Δ, die Streurate ∝ 1/Δ² — deshalb wird
+weiter außen zwar die Fläche kleiner, das Verhältnis Fläche zu Streuung aber
+besser.
+
+### Warum sich der 2D-Plot mit Δ nicht ändern *kann*
+
+Das ist kein Fehler, sondern die Struktur der Rechnung:
+
+```
+θ(r) = Ω(r) · T_p = C_rabi(Δ) · I(r) · T_p
+```
+
+Bei **fester Leistung** ist Δ ein reiner skalarer Vorfaktor — jeder Pixel wird
+mit derselben Zahl multipliziert. `imshow` skaliert die Farbskala automatisch
+auf min/max, also ist das Bild danach **Pixel für Pixel identisch**; nur die
+Zahlen an der Farbleiste wandern (von ~62–71 π bei −8 GHz auf ~10.0–11.4 π bei
++50 GHz). Numerisch geprüft: das Verhältnis der beiden Karten ist auf 10⁻⁹
+konstant, der Kontrast (max−min)/mean bleibt exakt 0.127711.
+
+Sichtbar wird Δ erst in einer Größe, die **nichtlinear** in θ ist. Deshalb hat
+das Fenster jetzt die Combo **`map shows`**:
+
+| Einstellung | Dargestellt | Δ-Abhängigkeit |
+|---|---|---|
+| `pulse area theta(r)` | θ(r)/π, Farbskala autoskaliert | nur die Farbleiste |
+| `excitation p(r)` | p = sin²(√(1+η²)·θ/2)/(1+η²), Skala fest 0…1 | volle Musteränderung |
+
+Die Anregungskarte trägt beides: θ selbst *und* η(Δ), das die Kontrastobergrenze
+1/(1+η²) setzt. Bei 10 µW im Profil und T_p = 1 µs:
+
+| Δ | C_rabi | η | ⟨θ⟩ | p: min … max | ⟨p⟩ |
+|---|---|---|---|---|---|
+| −8 GHz | 71.98 | −0.442 | 70.2 π | 0.000 … 0.836 | 0.447 |
+| +20 GHz | 29.05 | −0.155 | 28.3 π | 0.000 … 0.977 | 0.465 |
+| +50 GHz | 11.66 | −0.061 | 11.4 π | 0.007 … 0.996 | 0.796 |
+| +200 GHz | 2.98 | −0.015 | 2.9 π | 0.597 … 0.985 | 0.907 |
+
+Bei −8 GHz laufen über die Atomwolke mehrere volle Rabi-Zyklen — die Karte ist
+ein Streifenmuster, das Atom sitzt auf mehreren Fransen gleichzeitig, und die
+Anregung mittelt sich zu ½ weg. Je weiter blau, desto weniger Zyklen passen in
+die Wolke und desto homogener wird p. Genau das ist die Aussage, die man aus
+der θ-Karte nicht ablesen kann.
+
+Die beiden Karten gehen jetzt auch unter verschiedenen Namen ins Bilderverzeichnis:
+`…_areamap.pdf` bzw. `…_excmap.pdf`, damit eine gespeicherte θ-Karte nicht von
+einer p-Karte überschrieben wird.

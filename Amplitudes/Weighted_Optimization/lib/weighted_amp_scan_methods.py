@@ -130,7 +130,10 @@ def scan_win_width_weighted_uniformity(self, win_input_range, width_range,
         checkpoint_path, win_input_range, width_range, n_win_input, n_width,
         self.N_x, self.N_y, extra_match=dict(amps=amps, alpha=alpha),
         airy_scale_factor=self.airy_scale_factor,
-        optics_match=dict(n_grid=self.n_grid, weighted_n_grid=self.weighted_n_grid,
+        # coherent gehoert zum Rechenmodell: ein fortgesetzter Scan darf
+        # nicht halb kohaerent, halb inkohaerent gerechnet sein.
+        optics_match=dict(coherent=bool(getattr(self, "coherent", True)),
+                          n_grid=self.n_grid, weighted_n_grid=self.weighted_n_grid,
                           atom_offset_x=self.atom_offset_x,
                           atom_offset_y=self.atom_offset_y), verbose=verbose,
     )
@@ -162,6 +165,11 @@ def scan_win_width_weighted_uniformity(self, win_input_range, width_range,
             lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
             profile=self.profile,
             airy_scale_factor=self.airy_scale_factor,
+            # Kohaerenz (statische Interferenz frequenzentarteter Spots,
+            # siehe coherence.py) - ohne diesen Schluessel gilt eine Datei
+            # als inkohaerent gerechnet.
+            coherent=bool(getattr(self, "coherent", True)),
+            n_degenerate_pairs=self.n_degenerate_pairs(),
             # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
             # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
             # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
@@ -256,6 +264,11 @@ def get_scan_weighted_results(self):
         lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
         profile=self.profile,
         airy_scale_factor=self.airy_scale_factor,
+        # Kohaerenz (statische Interferenz frequenzentarteter Spots,
+        # siehe coherence.py) - ohne diesen Schluessel gilt eine Datei
+        # als inkohaerent gerechnet.
+        coherent=bool(getattr(self, "coherent", True)),
+        n_degenerate_pairs=self.n_degenerate_pairs(),
         # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
         # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
         # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
@@ -376,7 +389,10 @@ def scan_win_width_amplitude_dependence_weighted(self, win_input_range, width_ra
         checkpoint_path, win_input_range, width_range, n_win_input, n_width,
         self.N_x, self.N_y, extra_match=dict(alpha=alpha, r_bounds=r_bounds),
         airy_scale_factor=self.airy_scale_factor,
-        optics_match=dict(n_grid=self.n_grid, weighted_n_grid=self.weighted_n_grid,
+        # coherent gehoert zum Rechenmodell: ein fortgesetzter Scan darf
+        # nicht halb kohaerent, halb inkohaerent gerechnet sein.
+        optics_match=dict(coherent=bool(getattr(self, "coherent", True)),
+                          n_grid=self.n_grid, weighted_n_grid=self.weighted_n_grid,
                           atom_offset_x=self.atom_offset_x,
                           atom_offset_y=self.atom_offset_y), verbose=verbose,
     )
@@ -407,6 +423,11 @@ def scan_win_width_amplitude_dependence_weighted(self, win_input_range, width_ra
             lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
             profile=self.profile,
             airy_scale_factor=self.airy_scale_factor,
+            # Kohaerenz (statische Interferenz frequenzentarteter Spots,
+            # siehe coherence.py) - ohne diesen Schluessel gilt eine Datei
+            # als inkohaerent gerechnet.
+            coherent=bool(getattr(self, "coherent", True)),
+            n_degenerate_pairs=self.n_degenerate_pairs(),
             # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
             # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
             # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
@@ -611,6 +632,11 @@ def get_scan_amp_results_weighted(self):
         lambda_opt=self.lambda_opt, theta_max=self.theta_max, f_band=self.f_band,
         profile=self.profile,
         airy_scale_factor=self.airy_scale_factor,
+        # Kohaerenz (statische Interferenz frequenzentarteter Spots,
+        # siehe coherence.py) - ohne diesen Schluessel gilt eine Datei
+        # als inkohaerent gerechnet.
+        coherent=bool(getattr(self, "coherent", True)),
+        n_degenerate_pairs=self.n_degenerate_pairs(),
         # n_grid/weighted_n_grid (und der Atom-Offset) bestimmen, WIE fein
         # ausgewertet wurde. Ein fortgesetzter Scan mit anderer Aufloesung
         # haette sonst zwei verschiedene Aufloesungen in einem Datensatz.
