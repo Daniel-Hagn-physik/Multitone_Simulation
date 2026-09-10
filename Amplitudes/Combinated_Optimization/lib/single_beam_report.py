@@ -104,12 +104,13 @@ TEXT_LABELS = {
 # ----------------------------------------------------------------------
 # Positions-Sweep: dieselben Groessen, einmal je Richtung
 # ----------------------------------------------------------------------
-# Symbol und Farbe bleiben, die Richtung kommt als Exponent dazu
-# (U_w^v / U_w^d) - dieselbe Schreibweise wie bei eta_h^circ/eta_h^box.
+# Symbol und Farbe bleiben, die Richtung kommt als Pfeil im Exponenten dazu
+# (eta_w mit Pfeil nach oben / nach rechts oben) - dieselbe Schreibweise wie
+# im Multitone-Atom-Versatz (atom_offset_report.py).
 # Die Richtung wird ZUSAETZLICH ueber den Linienstil kodiert (senkrecht
 # durchgezogen, diagonal gestrichelt): die beiden Kurven einer Groesse
 # laufen dicht beieinander, und Farbe allein traegt das nicht.
-RICHTUNG_EXPONENT = {"vertikal": r"\mathrm{v}", "diagonal": r"\mathrm{d}"}
+RICHTUNG_EXPONENT = {"vertikal": r"\uparrow", "diagonal": r"\nearrow"}
 RICHTUNG_STIL = {"vertikal": "-", "diagonal": "--"}
 RICHTUNG_TEXT = {"vertikal": "senkrecht", "diagonal": "diagonal"}
 
@@ -144,10 +145,17 @@ PENALTY_KEYS = ("uniformity_kombi", "crosstalk_kombi", "combined_score")
 
 def hard_keys(results):
     """Die harten Kurven dieses Datensatzes. Sind beide Regionen gerechnet,
-    sind es drei: die eine Uniformity und die zwei Crosstalks."""
+    sind es drei: die eine Uniformity und die zwei Crosstalks. Leer, wenn
+    die harten Metriken nicht gerechnet wurden (Vorgabe seit 2026-09-10)."""
     if "crosstalk_hart_kreis" in results:
-        return ("uniformity_hart", "crosstalk_hart_kreis", "crosstalk_hart_pitch")
-    return ("uniformity_hart", "crosstalk_hart")
+        keys = ("uniformity_hart", "crosstalk_hart_kreis", "crosstalk_hart_pitch")
+    else:
+        keys = ("uniformity_hart", "crosstalk_hart")
+    return tuple(k for k in keys if k in results)
+
+
+def _vorhanden(results, keys):
+    return tuple(k for k in keys if k in results)
 
 
 def kurven_keys(results):
@@ -814,21 +822,25 @@ def make_plots(results, out_dir=None, getrennt=True, achsen="auto",
     p = results["params"]
     pfade = []
 
-    if getrennt:
-        pfade.append(plot_curves(
-            results, hard_keys(results), f"{prefix}_hard.pdf",
-            hard_title(results) if titel else None, **gemeinsam))
+    # Basisfall: die atom-gewichteten Metriken. Harte und Penalty nur, wenn
+    # sie im Datensatz stehen (siehe single_beam.DEFAULTS hart/kombiniert).
+    harte = hard_keys(results)
+    if getrennt or not harte:
         pfade.append(plot_curves(
             results, WEIGHTED_KEYS, f"{prefix}_weighted.pdf",
             (r"Single beam, atom-weighted ($\sigma_\mathrm{atom} = %.0f\,\mathrm{nm}$)"
              % (results["sigma_atom"] * 1e9)) if titel else None, **gemeinsam))
+        if harte:
+            pfade.append(plot_curves(
+                results, harte, f"{prefix}_hard.pdf",
+                hard_title(results) if titel else None, **gemeinsam))
     else:
         pfade.append(plot_curves(
-            results, tuple(hard_keys(results)) + tuple(WEIGHTED_KEYS), f"{prefix}_metrics.pdf",
+            results, tuple(harte) + tuple(WEIGHTED_KEYS), f"{prefix}_metrics.pdf",
             "Single beam: hard region and atom-weighted" if titel else None,
             **gemeinsam))
 
-    if penalty_plot:
+    if penalty_plot and _vorhanden(results, PENALTY_KEYS):
         pfade.append(plot_curves(
             results, PENALTY_KEYS, f"{prefix}_penalty.pdf",
             (r"Penalty combination ($\alpha = %.2f$, $\lambda = %.2f$)"
@@ -886,6 +898,47 @@ def offset_prefix(results, tag=None):
             f"_r{radius_um:g}um{sb.crosstalk_region_tag(p)}{sb.airy_tag(p)}_{tag}")
 
 
+# Diese Groessen haengen beim EINZELstrahl nicht von der Richtung des
+# Versatzes ab: das Profil ist rotationssymmetrisch, die Uniformity sieht
+# nur den eigenen Strahl (Kreis bzw. Gauss-Gewicht um das Atom), und U_c ist
+# eine Funktion der beiden. Der Crosstalk dagegen haengt an der Richtung -
+# die Nachbar-Sites liegen auf einem Quadratgitter.
+RICHTUNGSFREI = ("uniformity_hart", "uniformity_weighted", "uniformity_kombi")
+
+
+def _richtungsfreie_uniformity(results, basis_keys):
+    """Kurvenschluessel fuer eine Figur des Positions-Sweeps - die
+    richtungsfreien Groessen nur EINMAL, ohne Richtungs-Pfeil.
+
+    Gibt (results_kopie, keys) zurueck. Die Kopie traegt fuer jede
+    zusammengelegte Groesse ihre Kurve unter dem Basisschluessel
+    ("uniformity_weighted"), als Mittel ueber die Richtungen. Zusammengelegt
+    wird nur, wenn die Richtungen wirklich dieselben Zahlen liefern (Pruefung,
+    keine Annahme); sonst bleiben beide Kurven stehen.
+
+    Toleranz 1e-3 relativ: gemessen (Waist 1.9 µm, Versatz bis 1.9 µm)
+    unterscheiden sich U_w zwischen senkrecht und diagonal um 5e-8 relativ,
+    U_h und U_c um bis zu 9e-5 (das Zellgitter des Kreises liegt achsparallel
+    und tastet in beiden Richtungen minimal anders ab) - der Crosstalk
+    dagegen um bis zu 25 %."""
+    lokal = dict(results)
+    keys = []
+    for basis in basis_keys:
+        rkeys = list(offset_keys(results, (basis,)))
+        if not rkeys:
+            continue
+        if basis in RICHTUNGSFREI:
+            kurven = [np.asarray(results[k], dtype=float) for k in rkeys]
+            gleich = all(np.allclose(k, kurven[0], rtol=1e-3, atol=1e-6, equal_nan=True)
+                         for k in kurven[1:])
+            if gleich:
+                lokal[basis] = np.mean(kurven, axis=0)
+                keys.append(basis)
+                continue
+        keys += rkeys
+    return lokal, tuple(keys)
+
+
 def make_offset_plots(results, out_dir=None, getrennt=True, achsen="auto",
                       penalty_plot=True, save=True, show=False,
                       confirm_overwrite=None, marker=False, prefix=None,
@@ -896,13 +949,14 @@ def make_offset_plots(results, out_dir=None, getrennt=True, achsen="auto",
     hart_basis = (("uniformity_hart", "crosstalk_hart_kreis", "crosstalk_hart_pitch")
                   if f"crosstalk_hart_kreis__{results['richtungen'][0]}" in results
                   else ("uniformity_hart", "crosstalk_hart"))
+    hart_da = bool(offset_keys(results, hart_basis))
 
     def figur(basis_keys, dateiname, titeltext):
-        keys = offset_keys(results, basis_keys)
+        lokal, keys = _richtungsfreie_uniformity(results, basis_keys)
         if not keys:
             return None
         return plot_curves(
-            results, keys, dateiname, titeltext if titel else None,
+            lokal, keys, dateiname, titeltext if titel else None,
             out_dir=out_dir, achsen=achsen, save=save, show=show,
             confirm_overwrite=confirm_overwrite, marker=marker,
             legende=legende, dichte=dichte, stile=offset_stile(keys),
@@ -910,16 +964,17 @@ def make_offset_plots(results, out_dir=None, getrennt=True, achsen="auto",
             zweite_achse=_zweite_x_achse_offset)
 
     pfade = []
-    if getrennt:
-        pfade.append(figur(hart_basis, f"{prefix}_hard.pdf",
-                           "Atom position sweep, hard region"))
+    if getrennt or not hart_da:
         pfade.append(figur(WEIGHTED_KEYS, f"{prefix}_weighted.pdf",
                            "Atom position sweep, atom-weighted"))
+        if hart_da:
+            pfade.append(figur(hart_basis, f"{prefix}_hard.pdf",
+                               "Atom position sweep, hard region"))
     else:
         pfade.append(figur(tuple(hart_basis) + tuple(WEIGHTED_KEYS),
                            f"{prefix}_metrics.pdf",
                            "Atom position sweep"))
-    if penalty_plot:
+    if penalty_plot and offset_keys(results, PENALTY_KEYS):
         pfade.append(figur(PENALTY_KEYS, f"{prefix}_penalty.pdf",
                            "Atom position sweep, penalty combination"))
     return [q for q in pfade if q is not None]
@@ -947,7 +1002,11 @@ def write_offset_report(results, out_dir=None, prefix=None, dateiname=None):
     r_um = np.asarray(results["offset_um"], dtype=float)
     folgt = results.get("hard_follows_atom", True)
 
+    hart_da = any(k.startswith(("uniformity_hart__", "crosstalk_hart"))
+                  for k in results.get("kurven", ()))
     hart_satz = (
+        "Harte Metriken wurden nicht gerechnet (Basisfall: atom-gewichtet)."
+        if not hart_da else
         "Die harte Region WANDERT MIT dem Atom: der Kreis (und, wenn "
         "gewaehlt, das Pitch-Quadrat) sitzt an der jeweiligen Atomposition. "
         "Das ist hier die sinnvolle Lesart - die Atomposition ist die "
@@ -957,6 +1016,12 @@ def write_offset_report(results, out_dir=None, prefix=None, dateiname=None):
         "Die harte Region BLEIBT AUF DER SITE. Die harten Kurven sind "
         "deshalb ueber dem Versatz konstant; sie stehen nur zum Vergleich "
         "daneben.")
+    hart_satz += (
+        "\n\nIm Plot steht die Uniformity (U_w, und falls gerechnet U_h und U_c) "
+        "nur EINMAL: beim Einzelstrahl haengt sie nicht von der Richtung ab "
+        "(rotationssymmetrisches Profil, die Region bzw. das Gewicht sitzt auf "
+        "dem Atom). Vor dem Zusammenlegen wird geprueft, dass die Richtungen "
+        "dieselben Zahlen liefern.")
 
     zeilen = []
     namen = zeilen_namen(results)
@@ -1164,6 +1229,11 @@ Uniformity-Region ist nicht definiert -, und ein Aussen/Innen-Verhaeltnis
 braucht mindestens zwei Toene je Achse.
 
 ## Was gerechnet wurde
+
+Basisfall sind die atom-gewichteten Metriken. In diesem Lauf: harte
+Metriken **{"ja" if hard_keys(results) else "nein"}**, Penalty-Kombination
+**{"ja" if "combined_score" in results else "nein"}**. Die Definitionen stehen
+unten fuer alle drei Familien.
 
 **Hart** - die Uniformity ueber einer Kreisregion mit Radius {radius_um:.2f} µm
 um die Site (Beam-Pointing-Region: das Atom kann irgendwo in diesem Kreis

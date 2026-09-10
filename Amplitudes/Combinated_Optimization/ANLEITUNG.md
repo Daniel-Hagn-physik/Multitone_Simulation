@@ -34,6 +34,7 @@ Root*.
 | zu einem vorhandenen **gewichteten** Scan den harten Fall nachrechnen | `run_hard_check.py` |
 | einen **vorhandenen Datensatz auswerten**, Plots und Bericht erzeugen | `run_plots.py` |
 | **einen einzelnen Parametersatz suchen**: ein paar Groessen vorgeben, den Rest optimieren lassen | `run_penalty_only.py` |
+| fuer **einen festen Parametersatz** das **Atom verschieben** und die zu erwartende Positionsschwankung abschaetzen | `run_atom_offset.py` |
 
 Die Dateien in `lib/` werden nur benutzt, nicht direkt ausgefuehrt.
 
@@ -523,6 +524,102 @@ Die ist der eigentliche Wert: liegen die besten Laeufe dicht beieinander,
 ist das Optimum belastbar; streuen sie, hat man eine von mehreren
 gleichwertigen Loesungen gefunden und sollte die letzten Nachkommastellen
 nicht ernst nehmen.
+
+---
+
+## 5c. `run_atom_offset.py` - Atom verschieben
+
+Starten, Dialog ausfuellen, "Rechnen". Mit den Voreinstellungen dauert es
+etwa eine halbe Minute; die grobe Zeit steht im Dialog unter der Gruppe
+"Versatz des Atoms".
+
+Drei Gruppen haben einen **Haken im Titel** und sind per Vorgabe AUS:
+"Harte Metriken U_h, eta_h", "Positionsschwankung des Atoms" und
+"Kombinierte Groessen U_c, eta_c, J". Ohne Haken sind ihre Felder
+ausgegraut, und es gibt nur Plot 1 mit den atom-gewichteten Metriken U_w,
+eta_w - gemittelt ueber die Richtung, eine Kurve je Groesse.
+
+### Arbeitspunkt
+
+Waist (µm, in der Atomebene), width (MHz), r_x, r_y. Darunter steht, wie
+viele µm die width in der Atomebene sind (`d`) - das ist auch die
+Seitenlaenge der harten Uniformity-Region. 3x4 Toene und f1/f2 = 75/750 mm
+sind fest.
+
+### Strahlprofil, Kohaerenz, Atom
+
+Wie in den anderen Dialogen. T und nu_r gelten doppelt: fuer die Gewichtung
+von U_w/eta_w und fuer die thermische Ortsbreite in der Abschaetzung.
+
+### Versatz des Atoms
+
+| Feld | Bedeutung |
+|---|---|
+| Richtung | **gemittelt** (Vorgabe, eine Kurve je Groesse) oder einzelne Richtungen |
+| Winkel im Halbkreis | nur gemittelt; Default 6 (alle 30 Grad) |
+| Spannweite als Band | nur gemittelt; Minimum bis Maximum ueber die Winkel als blasse Flaeche |
+| einzelne Richtungen | nur im Modus "einzeln": horizontal, vertikal, diagonal, antidiagonal |
+| Stuetzstellen in r | Default 41 |
+| Plot 1 | bis Anteil x width, Default 0.125; daneben steht der Wert in nm |
+
+### Harte Metriken (optional)
+
+Haken im Gruppentitel setzen: eigener Plot `_hard` (U_h, eta_h), beide im
+Bericht. Darin:
+
+| Feld | Bedeutung |
+|---|---|
+| harte Region: Zellen je Achse | Gitter auf der Region, wandert mit; 201 genuegt |
+| Abgleich | rechnet r = 0 zusaetzlich mit dem Optimierer (globales Gitter) und stellt beide Zahlen im Bericht nebeneinander - Plausibilitaetspruefung, einige Sekunden |
+
+### Positionsschwankung des Atoms (optional)
+
+Haken im Gruppentitel setzen. Jedes Feld ist 1 sigma je Achse. Das
+Ergebnis steht fett darunter und aendert sich beim Tippen. Der Tooltip
+jedes Feldes nennt Quelle bzw. Hebel. Darunter:
+
+| Feld | Bedeutung |
+|---|---|
+| sigma_pos aus | gesamt / nur technisch / nur thermisch |
+| Plot 2 | bis k x sigma_pos; daneben der Wert in nm und wieviel Prozent der Atome innerhalb liegen |
+| Statistik | Mittelwert und Streuung jeder Groesse ueber die Positionsverteilung |
+| Linien in Plot 1 | sigma_pos und sigma_atom als rote Linien - nur zusammen mit Plot 2; ohne Plot 2 ist das Feld ausgegraut und Plot 1 bleibt ohne Linien |
+
+- **Relativposition Falle - Raman (gesamt)**: ein gemessener Gesamtwert.
+  Default 47 nm ist eine Groessenordnung aus der Literatur, kein Wert
+  dieses Aufbaus. **Wer die Einzelbeitraege darunter eintraegt, setzt
+  dieses Feld auf 0.**
+- **Strahllage vor dem Objektiv**: der groesste Hebel - 1 µrad sind 53 nm.
+- **Strahllage vor dem AOD**: 1 µrad sind 5.3 nm (das Teleskop verkleinert).
+- **AOD-Schallgeschwindigkeit**: Temperaturkoeffizient x Temperaturschwankung
+  des Kristalls in ppm; 1 ppm sind 0.64 nm.
+- **Pitch-Unsicherheit x Site-Index**: wirkt nur fuer Sites abseits des
+  Justierpunkts.
+
+### Kombinierte Groessen (optional)
+
+Haken im Gruppentitel setzen: alpha und combo_lambda werden einstellbar,
+es gibt einen Plot `_penalty` (U_c, eta_c, J), und die drei Groessen
+stehen in den Tabellen des Berichts. Die harten Metriken werden dafuer
+automatisch mitgerechnet, geplottet aber nur mit eigenem Haken.
+
+### Was herauskommt
+
+Je Bereich in `Fit_Plots/<Datum>/`: `_weighted` (U_w, eta_w), nur mit
+harten Metriken `_hard` (U_h, eta_h), nur mit kombinierten Groessen
+`_penalty` (U_c, eta_c, J). Im Richtungsmittel steht je Groesse eine Kurve
+<U_w>_phi. Im Modus "einzeln" ist die Farbe die Groesse, der Linienstil und
+der Pfeil im Exponenten die Richtung (-> horizontal, ^ vertikal, Pfeil
+schraeg diagonal). Mit Plot 2
+markieren in Plot 1 rote Linien sigma_atom und sigma_pos; oben laeuft eine zweite Achse in
+r/d bzw. r/sigma_pos.
+
+Der Bericht `Fit_Results/AtomOffset_..._Report.md` enthaelt den
+Arbeitspunkt, je Bereich die Werte ueber r (im Richtungsmittel mit der
+Spannweite ueber die Richtungen) und die Symmetrie-Tabelle - mit harten
+Metriken den Abgleich bei r = 0, mit Positionsschwankung zusaetzlich die Abschaetzung mit
+allen Hebeln, die Werte bei 1/2/3 sigma_pos und die Statistik; U_c, eta_c
+und J nur mit kombinierten Groessen.
 
 ---
 

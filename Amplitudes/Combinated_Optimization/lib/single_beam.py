@@ -132,10 +132,40 @@ DEFAULTS = dict(
     # harten Kurven ueber dem Versatz konstant.
     offset_hard_follows_atom=True,
 
+    # --- Was gerechnet wird ---
+    # Basisfall sind die atom-gewichteten Metriken (immer). Die harten und
+    # die Penalty-Kombination sind optional; ohne beide wird hard_metrics()
+    # gar nicht aufgerufen (das ist der teure Teil). Die Kombination braucht
+    # die harten Metriken und rechnet sie deshalb mit - im Ergebnis stehen
+    # U_h/eta_h aber nur, wenn `hart` gesetzt ist.
+    hart=False,
+    kombiniert=False,
+
     # --- Penalty-Kombination (identisch zu run_penalty_scan.py) ---
     alpha=0.7,
     combo_lambda=0.75,
 )
+
+
+def hart_noetig(params):
+    """Muessen die harten Metriken gerechnet werden?"""
+    return bool(params.get("hart", True) or params.get("kombiniert", True))
+
+
+def _metriken_auswaehlen(werte, params):
+    """Aus allen Kurven die, die laut `hart`/`kombiniert` ins Ergebnis
+    gehoeren. Die gewichteten sind immer dabei."""
+    hart_keys = ("uniformity_hart", "crosstalk_hart",
+                 "crosstalk_hart_kreis", "crosstalk_hart_pitch")
+    kombi_keys = ("uniformity_kombi", "crosstalk_kombi", "combined_score")
+    aus = {}
+    for k, v in werte.items():
+        if k in hart_keys and not params.get("hart", True):
+            continue
+        if k in kombi_keys and not params.get("kombiniert", True):
+            continue
+        aus[k] = v
+    return aus
 
 # Die Groessen, die als Kurve ueber dem Waist herauskommen. Reihenfolge und
 # Schluessel werden von single_beam_report.py und vom Bericht benutzt.
@@ -571,10 +601,11 @@ def sweep(waist_vals, params, progress=None):
             break
         if waist <= 0:
             continue
-        hart = hard_metrics(waist, merged)
-        U_h[i] = hart["uniformity"]
-        C_kreis[i] = hart["kreis"]
-        C_pitch[i] = hart["pitch"]
+        if hart_noetig(merged):
+            hart = hard_metrics(waist, merged)
+            U_h[i] = hart["uniformity"]
+            C_kreis[i] = hart["kreis"]
+            C_pitch[i] = hart["pitch"]
         U_w[i], C_w[i] = weighted_metrics(waist, merged, sigma_atom=sigma_atom)
 
     # Die Kurve, die als "der" harte Crosstalk gilt: bei einer Region die
@@ -589,23 +620,27 @@ def sweep(waist_vals, params, progress=None):
     win_input = win_input_from_waist(
         waist_vals, merged["f1"], merged["f2"], merged["lambda_opt"], merged["fLO"])
 
+    kurven = dict(
+        uniformity_hart=U_h, crosstalk_hart=C_h,
+        uniformity_weighted=U_w, crosstalk_weighted=C_w,
+        uniformity_kombi=U_c, crosstalk_kombi=eta_c,
+        combined_score=J,
+    )
+    if beide_regionen(merged):
+        kurven["crosstalk_hart_kreis"] = C_kreis
+        kurven["crosstalk_hart_pitch"] = C_pitch
+
     results = dict(
         kind="single_beam",
         waist=waist_vals,
         waist_um=waist_vals * 1e6,
         win_input=win_input,
         win_input_mm=win_input * 1e3,
-        uniformity_hart=U_h, crosstalk_hart=C_h,
-        uniformity_weighted=U_w, crosstalk_weighted=C_w,
-        uniformity_kombi=U_c, crosstalk_kombi=eta_c,
-        combined_score=J,
         sigma_atom=float(sigma_atom),
         params=merged,
         abgebrochen=abgebrochen,
     )
-    if beide_regionen(merged):
-        results["crosstalk_hart_kreis"] = C_kreis
-        results["crosstalk_hart_pitch"] = C_pitch
+    results.update(_metriken_auswaehlen(kurven, merged))
 
     results["best"] = best_points(results)
     return results
@@ -735,10 +770,11 @@ def sweep_offset(waist, params, n=None, r_max=None,
                 break
             getan += 1
             dx, dy = offset_vektor(richtung, r)
-            hart = hard_metrics(waist, merged, zentrum=(dx, dy) if folgt else (0.0, 0.0))
-            U_h[i] = hart["uniformity"]
-            C_kreis[i] = hart["kreis"]
-            C_pitch[i] = hart["pitch"]
+            if hart_noetig(merged):
+                hart = hard_metrics(waist, merged, zentrum=(dx, dy) if folgt else (0.0, 0.0))
+                U_h[i] = hart["uniformity"]
+                C_kreis[i] = hart["kreis"]
+                C_pitch[i] = hart["pitch"]
             punkt = dict(merged, atom_offset_x=dx, atom_offset_y=dy)
             U_w[i], C_w[i] = weighted_metrics(waist, punkt, sigma_atom=sigma_atom)
 
@@ -756,6 +792,7 @@ def sweep_offset(waist, params, n=None, r_max=None,
         if beide_regionen(merged):
             werte["crosstalk_hart_kreis"] = C_kreis
             werte["crosstalk_hart_pitch"] = C_pitch
+        werte = _metriken_auswaehlen(werte, merged)
 
         for basis in METRIC_KEYS:
             if basis not in werte:

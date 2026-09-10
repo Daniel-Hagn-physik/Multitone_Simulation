@@ -26,14 +26,20 @@ Achse. Bei einem Ton ist es bedeutungslos und kommt deshalb nicht vor.
 
 Die drei Metrik-Familien
 ------------------------
-    hart            U_h, eta_h    ueber dem Kreis
     atom-gewichtet  U_w, eta_w    Definition unveraendert aus dem Optimierer
-    Penalty         U_c, eta_c, J   Formel unveraendert aus lib/combine.py
+                                  - der BASISFALL, immer gerechnet und geplottet
+    hart            U_h, eta_h    ueber dem Kreis             (optional)
+    Penalty         U_c, eta_c, J   Formel aus lib/combine.py   (optional,
+                                  rechnet die harten mit)
+
+Im Positions-Sweep steht die Uniformity nur einmal im Plot: beim
+Einzelstrahl haengt sie nicht von der Richtung des Versatzes ab. Der
+Crosstalk traegt die Richtung als Pfeil im Exponenten.
 
 Ergebnis:
-    Fit_Plots/<Datum>/SingleBeam_..._hard.pdf      (bzw. _metrics.pdf)
     Fit_Plots/<Datum>/SingleBeam_..._weighted.pdf
-    Fit_Plots/<Datum>/SingleBeam_..._penalty.pdf
+    Fit_Plots/<Datum>/SingleBeam_..._hard.pdf      (optional, bzw. _metrics.pdf)
+    Fit_Plots/<Datum>/SingleBeam_..._penalty.pdf   (optional)
     Fit_Results/SingleBeam_..._Report.md
     Results/single_beam_....pkl                    (optional)
 
@@ -216,7 +222,8 @@ class SingleBeamDialog(QDialog):
         # ------------------------------------------------------------------
         # Harte Region
         # ------------------------------------------------------------------
-        g_hart = QGroupBox("Harte Region")
+        g_hart = QGroupBox("Harte Region (nur mit harten Metriken oder Penalty)")
+        self.g_hart_region = g_hart
         f = QFormLayout()
         self.radius = self._spin(d["hard_radius"] * 1e6, (0.05, 20.0), 4)
         self.radius.setToolTip(
@@ -294,7 +301,8 @@ class SingleBeamDialog(QDialog):
         # ------------------------------------------------------------------
         # Penalty
         # ------------------------------------------------------------------
-        g_pen = QGroupBox("Penalty-Kombination")
+        g_pen = QGroupBox("Penalty-Kombination (nur wenn angehakt, siehe Plots)")
+        self.g_pen = g_pen
         f = QFormLayout()
         self.alpha = self._spin(d["alpha"], (0.0, 1.0), 3)
         self.combo_lambda = self._spin(d["combo_lambda"], (0.0, 10.0), 3)
@@ -311,6 +319,12 @@ class SingleBeamDialog(QDialog):
         # ------------------------------------------------------------------
         g_plot = QGroupBox("Plots")
         f = QFormLayout()
+        self.hart_an = QCheckBox("harte Metriken U_h, eta_h rechnen und plotten")
+        self.hart_an.setChecked(False)
+        self.hart_an.setToolTip(
+            "Basisfall sind die atom-gewichteten Metriken U_w, eta_w - die kommen\n"
+            "immer. Die harten (Kreisregion) nur mit Haken; ohne Haken und ohne\n"
+            "Penalty wird das Harte gar nicht gerechnet.")
         self.getrennt = QCheckBox("hart und atom-gewichtet in GETRENNTE Plots")
         self.getrennt.setChecked(True)
         self.getrennt.setToolTip(
@@ -318,8 +332,9 @@ class SingleBeamDialog(QDialog):
             "Nicht angehakt: alle vier Kurven in einer Figur (hart durchgezogen,\n"
             "gewichtet gestrichelt).\n\n"
             "Uniformity und Crosstalk bleiben in jedem Fall zusammen.")
-        self.penalty_plot = QCheckBox("eigener Plot fuer die Penalty-Kombination (U_c, eta_c, J)")
-        self.penalty_plot.setChecked(True)
+        self.penalty_plot = QCheckBox(
+            "Penalty-Kombination U_c, eta_c, J rechnen und plotten (rechnet die harten mit)")
+        self.penalty_plot.setChecked(False)
         self.achsen = QComboBox()
         for _key, text in sbr.ACHSEN_CHOICES:
             self.achsen.addItem(text)
@@ -351,6 +366,7 @@ class SingleBeamDialog(QDialog):
         self.marker = QCheckBox("Stuetzstellen als Marker zeichnen")
         self.zeigen = QCheckBox("Plots am Ende anzeigen")
         self.ueberschreiben = QCheckBox("vorhandene Dateien ohne Rueckfrage ueberschreiben")
+        f.addRow(self.hart_an)
         f.addRow(self.getrennt)
         f.addRow(self.penalty_plot)
         f.addRow("y-Achsen", self.achsen)
@@ -475,6 +491,10 @@ class SingleBeamDialog(QDialog):
         knoepfe.addWidget(starten)
         outer.addLayout(knoepfe)
 
+        self.hart_an.toggled.connect(self._metriken_umschalten)
+        self.penalty_plot.toggled.connect(self._metriken_umschalten)
+        self._metriken_umschalten()
+
         self.resize(640, 820)
 
     # ------------------------------------------------------------------
@@ -513,11 +533,24 @@ class SingleBeamDialog(QDialog):
             self.von.setValue(sb.WAIST_RANGE_DEFAULT_UM[0])
             self.bis.setValue(sb.WAIST_RANGE_DEFAULT_UM[1])
 
+    def _metriken_umschalten(self):
+        """Harte Region nur mit harten Metriken oder Penalty, Penalty-Parameter
+        nur mit Penalty, 'getrennt' nur mit harten Metriken."""
+        hart = self.hart_an.isChecked()
+        pen = self.penalty_plot.isChecked()
+        self.g_hart_region.setEnabled(hart or pen)
+        self.g_pen.setEnabled(pen)
+        self.getrennt.setEnabled(hart)
+        self._position_umschalten()
+
     def _position_umschalten(self):
         an = self.pos_an.isChecked()
         for widget in (self.pos_waist, self.pos_bis, self.pos_n,
-                       self.pos_vertikal, self.pos_diagonal, self.pos_folgt):
+                       self.pos_vertikal, self.pos_diagonal):
             widget.setEnabled(an)
+        hart = (getattr(self, "hart_an", None) is None or self.hart_an.isChecked()
+                or self.penalty_plot.isChecked())
+        self.pos_folgt.setEnabled(an and hart)
         self.pos_bis_wert.setEnabled(an and self.pos_bis.currentIndex() == 1)
 
     def _region_umschalten(self):
@@ -594,6 +627,8 @@ class SingleBeamDialog(QDialog):
             alpha=self.alpha.value(),
             combo_lambda=self.combo_lambda.value(),
             offset_hard_follows_atom=self.pos_folgt.isChecked(),
+            hart=self.hart_an.isChecked(),
+            kombiniert=self.penalty_plot.isChecked(),
         )
         return dict(
             params=params,

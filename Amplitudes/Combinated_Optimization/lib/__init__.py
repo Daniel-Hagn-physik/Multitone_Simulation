@@ -11,6 +11,8 @@ importiert:
     ../run_hard_check.py     ->  lib.paths, lib.combine, lib.hard_check,   lib.report
     ../run_plots.py          ->  lib.paths, lib.combine, lib.report
     ../run_single_beam.py    ->  lib.paths, lib.single_beam, lib.single_beam_report
+    ../run_atom_offset.py    ->  lib.paths, lib.atom_offset, lib.atom_offset_report,
+                                 lib.position_noise
 
 Inhalt:
 
@@ -41,4 +43,11 @@ Inhalt:
 - single_beam_report.py  Kurven ueber dem Waist als PDF (Stil, Farben und
                    Achsen-Buendelung aus report.py) und der zugehoerige
                    Markdown-Bericht.
+- atom_offset.py   Fester Multitone-Parametersatz, das ATOM wandert (horizontal,
+                   vertikal, diagonal); alle Regionen wandern mit. Harte
+                   Metriken auf einem Gitter, das auf der Region liegt.
+- atom_offset_report.py  Kurven ueber dem Versatz (Stil aus
+                   single_beam_report) und der Markdown-Bericht.
+- position_noise.py  Abschaetzung der Positionsschwankung des Atoms gegen
+                   das Raman-Profil (thermisch + technische Hebel der Optik).
 """

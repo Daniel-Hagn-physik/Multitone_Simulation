@@ -14,6 +14,7 @@ Vier Skripte zum Ausfuehren, ein Ordner `lib/` mit dem, was sie benutzen.
 | pruefen, **ob mein vorhandener Weighted-Datensatz auch im Hard Case gut ist** | `run_hard_check.py` |
 | **vorhandene Datensaetze plotten** und den Bericht (neu) erzeugen | `run_plots.py` |
 | **einen einzelnen Parametersatz suchen**: einen Teil der Groessen vorgeben, die uebrigen gegen die Penalty optimieren lassen (kein Gitter) | `run_penalty_only.py` |
+| fuer **einen festen Parametersatz** (waist, width, r_x, r_y) sehen, wie Uniformity und Crosstalk reagieren, wenn **das Atom nicht auf der Site-Mitte sitzt** - samt Abschaetzung der zu erwartenden Positionsschwankung | `run_atom_offset.py` |
 
 Alle vier oeffnen einen Dialog, in dem die Parameter stehen. Nichts muss
 im Code geaendert werden.
@@ -877,6 +878,93 @@ Ergebnis ueberhaupt sein kann.
 
 ---
 
+## 5. `run_atom_offset.py` - Atom gegen das Profil verschieben
+
+Beantwortet:
+
+> "Mein Parametersatz steht. Was passiert mit Uniformity und Crosstalk,
+> wenn das Atom nicht genau auf der Site-Mitte sitzt - und wie weit sitzt
+> es im Labor ueberhaupt daneben?"
+
+Eingetragen werden **waist** (µm, Atomebene), **width** (MHz), **r_x** und
+**r_y**. Fest wie ueberall hier: 3x4 Toene, f1 = 75 mm, f2 = 750 mm.
+
+**Was sich bewegt.** Das Atom wandert radial von der Site-Mitte nach
+aussen. Mit ihm wandern ALLE Regionen: das
+Ton-Quadrat der harten Uniformity, das Pitch-Quadrat des harten Crosstalks
+und die Gauss-Gewichtung von U_w/eta_w (`atom_offset_x/y` des Optimierers).
+Das Lichtfeld (12 Spots, 8 Nachbarkopien) steht. Das ist exakt dasselbe wie
+eine gemeinsame Drift des ganzen Raman-Profils um -r.
+
+**Richtung.** Die Metriken haengen von der Richtung des Versatzes ab (das
+3x4-Array ist nicht rotationssymmetrisch, die Nachbarn liegen auf einem
+Quadratgitter). Vorgabe ist deshalb das **Richtungsmittel**: an jedem r wird
+an 6 Winkeln im Halbkreis gerechnet und gemittelt - eine Kurve je Groesse,
+der Erwartungswert fuer einen Versatz um r in zufaelliger Richtung. Der
+Halbkreis genuegt, weil die Anordnung punktsymmetrisch ist (+r = -r bis auf
+3e-6 pp); spiegelsymmetrisch ist sie mit Kohaerenz nicht (0.25 pp). 6 Winkel
+weichen von 16 um < 0.002 pp ab. Die kombinierten Groessen werden je Winkel
+gebildet und dann gemittelt. Optional: Spannweite ueber die Richtungen als
+blasses Band, oder statt des Mittels einzelne Richtungen (horizontal =
+3-Ton-Achse, vertikal = 4-Ton-Achse, diagonal, antidiagonal).
+
+**Warum eigene harte Metriken.** Auf dem globalen Gitter des Optimierers
+sind die Regionen Masken; verschiebt man sie um Bruchteile eines Pixels,
+springt ihr Rand um ganze Pixel. Bei Versaetzen von einigen 10 nm waere
+dieses Rauschen groesser als der Effekt. `lib/atom_offset.py` legt deshalb
+ein Gitter aus Zellmitten direkt AUF die Region, das mit dem Atom wandert.
+Bei r = 0 stimmt es mit dem Optimierer ueberein (U_h +0.002 pp, eta_h
+-0.02 pp - der Pixelrand), der Bericht zeigt den Abgleich bei jedem Lauf.
+
+**Was immer kommt und was optional ist.**
+
+- Immer (Basisfall): Plot 1, r = 0 .. 0.125 x width (width ueber die Optik
+  in µm umgerechnet, = Spannweite des Tonarrays `d`; bei 0.45 MHz 2.842 µm),
+  mit den **atom-gewichteten** Metriken U_w, eta_w.
+- Optional, Gruppe **"Harte Metriken"** (Vorgabe aus): eigener Plot fuer
+  U_h, eta_h, beide im Bericht, dazu der Abgleich. Ohne harte und ohne
+  kombinierte Groessen wird das Harte gar nicht gerechnet (etwa doppelt so
+  schnell).
+- Optional, Gruppe **"Kombinierte Groessen"** (Vorgabe aus): eigener Plot
+  fuer U_c, eta_c, J und die drei Groessen im Bericht. Rechnet die harten
+  Metriken automatisch mit (geplottet werden sie nur mit eigenem Haken).
+- Optional, Gruppe **"Positionsschwankung des Atoms"** (Vorgabe aus): die
+  Abschaetzung unten, darin Plot 2 (r = 0 .. k x sigma_pos), die Statistik
+  und die sigma-Linien in Plot 1 (die nur zusammen mit Plot 2).
+
+**Die Abschaetzung** (`lib/position_noise.py`), alles 1 sigma je Achse,
+unabhaengige Beitraege quadratisch addiert:
+
+| Beitrag | Umrechnung in die Atomebene |
+|---|---|
+| thermische Ortsbreite im Fallenpotential | sigma^2 = hbar/(2 m omega) coth(hbar omega/2kT), unguenstiger Rand (T + dT, nu_r - dnu) |
+| Raman-Strahllage vor dem AOD | f1 fLO / f2 = 5.29 nm/µrad |
+| Raman-Strahllage vor dem Objektiv | fLO = 52.9 nm/µrad |
+| AOD-Schallgeschwindigkeit dv/v | f1 fLO/f2 tan(theta_c) = 0.64 nm/ppm |
+| RF-Frequenzfehler | 6.3 pm/Hz |
+| Fallenposition, Pitch-Unsicherheit x Site-Index | direkt |
+| gemessene Relativposition (gesamt) | direkt, Default 47 nm (Groessenordnung aus arXiv:2502.13560) |
+
+Defaults: T = 17(2) µK, nu_r = 60.4(-2.2) kHz -> thermisch 118 nm; technisch
+nur die 47 nm; zusammen **127 nm**. Nicht gemessene technische Groessen
+stehen auf 0 - der Hebel daneben sagt, was sie ausmachen wuerden.
+
+**Statistik.** Sitzt das Atom mit sigma_pos gaussverteilt, wie gross sind
+Mittelwert und Schuss-zu-Schuss-Streuung jeder Groesse? Gauss-Hermite-
+Quadratur, 7 x 7 Positionen.
+
+**Symmetrie.** +r und -r sind je Achse gleich. Diagonale und Antidiagonale
+sind es mit Kohaerenz NICHT: die frequenzentarteten Eckspots interferieren
+statisch (am Standard-Arbeitspunkt bei r = 0.355 µm: U_w 2.41 % diagonal,
+2.98 % antidiagonal). Die Tabelle steht in jedem Bericht.
+
+- Plots: `Fit_Plots/<Datum>/AtomOffset_N3x4_Airy_w..um_width..MHz_rx.._ry.._k.._bis0.125width_<Datum>_weighted.pdf`, `_hard.pdf` nur mit harten, `_penalty.pdf` nur mit kombinierten Groessen, dasselbe mit `bis1sigma` nur mit Positionsschwankung
+- Bericht: `Fit_Results/AtomOffset_..._<Datum>_Report.md`
+- Datensatz: `Results/atom_offset_....pkl` (optional)
+- Rechenzeit mit den Defaults (nur gewichtet, Richtungsmittel) etwa eine halbe Minute; mit harten Metriken etwa doppelt so lang, mit Positionsschwankung (Plot 2 + Statistik) noch einmal mehr
+
+---
+
 ## Ordner
 
 ```
@@ -885,6 +973,7 @@ Combinated_Optimization/
     run_penalty_only.py     <- ausfuehren: ein Parametersatz, kein Gitter
     run_hard_check.py       <- ausfuehren: Hard Case zu vorhandenem Weighted
     run_plots.py            <- ausfuehren: plotten/auswerten
+    run_atom_offset.py      <- ausfuehren: Atom gegen das Profil verschieben
     lib/                    <- wird von den drei Skripten benutzt,
                                nicht direkt ausfuehren
         paths.py            Ordner-Konstanten, Anbindung an Weighted_Optimization
@@ -893,6 +982,9 @@ Combinated_Optimization/
         penalty_opt.py      dieselbe Zielfunktion ohne Gitter (freie Parameter)
         hard_check.py       harte Nachrechnung + Konsistenz-Analyse
         report.py           Plots und Markdown-Berichte
+        atom_offset.py      Atom-Versatz: Metriken mit mitwandernden Regionen
+        atom_offset_report.py  Plots und Bericht dazu
+        position_noise.py   Abschaetzung der Positionsschwankung
     Results/                gespeicherte Datensaetze (.pkl)
     Fit_Plots/              Vektor-PDFs der Auswertung
     Fit_Results/            Markdown-Berichte
