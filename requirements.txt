@@ -1,0 +1,19 @@
+# Multitone_Simulation - Pakete fuer das venv (Python 3.9)
+# Installieren im PyCharm-Terminal (venv aktiv):
+#   python -m pip install -r requirements.txt
+
+# Kern - von fast allen Skripten und GUIs gebraucht
+PyQt5>=5.15            # ACHTUNG: nicht "python-qt5" (veraltet, fuer Python 2.7)
+numpy
+scipy
+matplotlib
+
+# Nur fuer einzelne Skripte
+scikit-learn           # Amplitudes/Weighted_Optimization/lib/fit_central_amplitudes.py
+ARC-Alkali-Rydberg-Calculator   # GUI/Beating Analyse/kern/rb85_raman.py (Rb-85-Koeffizienten)
+Pillow                 # GUI/AODSpacing.py
+imageio                # GUI/AODSpacing.py
+
+# Optional, nicht automatisch installiert:
+#   torch    - GPU-Beschleunigung (lib/use_torch.py), faellt sonst auf CPU zurueck
+#   PySide6  - nur GUI/GaussGUI_2 (eigene requirements.txt dort)

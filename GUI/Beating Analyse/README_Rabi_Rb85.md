@@ -20,6 +20,7 @@ Beating Analyse/
 ├── README_Rabi_Rb85.md
 ├── kern/                     ← Hilfsmodule, NICHT starten
 │   ├── rb85_raman.py             die Physik (ARC, Raman-Koeffizienten)
+│   ├── beating_physik.py         Physik des Beating-GUI (Felder, Beating, Pulsfläche)
 │   └── beating_profil.py         Brücke zum Beating-GUI
 └── beispiele/                ← optionale Rechenbeispiele
     ├── beispiel_profil.py        eigenes I(t) einspeisen
@@ -94,7 +95,8 @@ Im GUI: Strahl → Vorgabe → **"Multiton-Profil (Leistung je Profil)"**. Dann
 wird die Gruppe *Multiton-Profil* aktiv, mit denselben Parameternamen wie im
 Beating GUI (N_x, N_y, waist, width, r_x, r_y, f1, f2, fLO, Offset, Tonphasen)
 plus **Leistung je Profil** und **Pulsstart t₀**. Voraussetzung: `beating_profil.py`
-und `Beating_Multitone_GUI.py` liegen im selben Ordner.
+und `beating_physik.py` liegen zusammen in `kern/` (das Beating-GUI selbst wird
+dafür nicht gebraucht).
 
 Zwei Dinge, die dort anders sind als beim Gaußstrahl:
 

@@ -1,11 +1,11 @@
 """beating_profil.py - ein Profil aus dem Beating GUI in die Rabi-Rechnung.
 
-Verbindet Beating_Multitone_GUI.py mit rb85_raman.py.
+Verbindet die Physik des Beating GUI (kern/beating_physik.py) mit
+rb85_raman.py.
 
-Es wird NICHTS kopiert: das Beating GUI wird ganz normal importiert. Beim
-Import oeffnet es kein Fenster (das passiert erst in seiner main()), und alle
-Physik-Funktionen sind danach direkt benutzbar. Aenderst du das GUI, aendert
-sich diese Rechnung automatisch mit.
+Es wird NICHTS kopiert: beating_physik.py ist dieselbe Datei, aus der auch
+Beating_Multitone_GUI.py rechnet. Aenderst du dort etwas, aendert sich diese
+Rechnung automatisch mit. Qt wird dafuer nicht gebraucht.
 
 Der eine Punkt, den man verstehen muss
 --------------------------------------
@@ -40,26 +40,9 @@ Als Modul:
     P     = BP.rabi_kurve(prof, t0=6e-6, t_p=8e-6)
 """
 
-import sys
-from pathlib import Path as _Pfad
-
 import numpy as np
-import matplotlib
 
-# Diese Datei liegt in kern/, Beating_Multitone_GUI.py eine Ebene darueber.
-sys.path.insert(0, str(_Pfad(__file__).resolve().parent.parent))
-
-# Beating_Multitone_GUI.py schaltet beim Import auf "Qt5Agg". Mit Display ist
-# das harmlos, ohne (Server, CI, Konsole ohne X) wirft es beim Import. Wir
-# brauchen hier gar kein interaktives Backend, also wird der Umschalter fuer
-# die Dauer des Imports stillgelegt und danach zurueckgegeben.
-_use = matplotlib.use
-try:
-    matplotlib.use = lambda *a, **k: None
-    import Beating_Multitone_GUI as B   # oeffnet kein Fenster
-finally:
-    matplotlib.use = _use
-
+import beating_physik as phys       # liegt hier in kern/, neben dieser Datei
 import rb85_raman as R
 
 # np.trapezoid heisst erst ab numpy 2.0 so; davor np.trapz. Euer PyCharm laeuft
@@ -69,10 +52,10 @@ _trapz = getattr(np, "trapezoid", None) or np.trapz
 # ---- Arbeitspunkt: identisch mit den Startwerten des Beating GUI ----
 WP = dict(
     N_x=3, N_y=4,
-    use_airy=True, airy_factor=B.AIRY_SCALE_DEFAULT,
-    waist=1.10e-6,                 # m, Waist nach den Linsen
-    width_x=0.45e6, width_y=0.45e6,  # Hz
-    r_x=1.0, r_y=1.2,
+    use_airy=True, airy_factor=phys.AIRY_FACTOR,
+    waist=1.04e-6,                 # m, Waist nach den Linsen
+    width_x=0.37e6, width_y=0.37e6,  # Hz
+    r_x=0.97, r_y=1.16,
     offset=100e6, f1=75e-3, f2=750e-3, fLO=52.88e-3,
     theta_max=43e-3, f_band=36e6,
     grid_n=200,
@@ -80,8 +63,8 @@ WP = dict(
     radius=1.0e-6,                 # m, Auswertekreis um die Mitte
     max_pixel=800,                 # Pixel, auf die ausgeduennt wird
     # Raman
-    delta=-8.0e9,                  # Hz von der D1-Zentroide
-    f_rabi=0.2e6,                  # Hz, Kalibrierung der mittleren Rabifrequenz
+    delta=+50.0e9,                 # Hz von der D1-Zentroide, + = blau
+    f_rabi=1.0e6,                  # Hz, Kalibrierung der mittleren Rabifrequenz
     m=0, B_gauss=0.0,
 )
 
@@ -89,47 +72,37 @@ WP = dict(
 def profil(wp=WP):
     """Feldstack, Spot-Frequenzen, Grundperiode und Auswertemaske.
 
-    fLO, theta_max und f_band haelt das Beating GUI als MODULKONSTANTEN, nicht
-    als Argumente - compute_centers_and_freqs() greift direkt darauf zu. Damit
-    sie hier trotzdem einstellbar sind, werden sie vor der Rechnung im Modul
-    gesetzt und danach zurueckgegeben. Sauberer waere ein Argument im GUI;
-    solange es das nicht gibt, ist das die Stelle, an der es haengt."""
-    alt = (B.fLO, B.theta_max, B.f_band)
-    B.fLO, B.theta_max, B.f_band = wp["fLO"], wp["theta_max"], wp["f_band"]
-    try:
-        return _profil(wp)
-    finally:
-        B.fLO, B.theta_max, B.f_band = alt
-
-
-def _profil(wp):
-    cx, cy, f_spots, rcx, rcy, fx, fy = B.compute_centers_and_freqs(
+    fLO, theta_max und f_band gehen als Argumente an
+    compute_centers_and_freqs(); die Modulkonstanten in beating_physik.py
+    bleiben unberuehrt."""
+    cx, cy, f_spots, rcx, rcy, fx, fy = phys.compute_centers_and_freqs(
         wp["N_x"], wp["N_y"], wp["width_x"], wp["width_y"],
-        wp["f1"], wp["f2"], wp["offset"])
-    amp = B.amp_spots_from_ratios(wp["r_x"], wp["r_y"], wp["N_x"], wp["N_y"])
+        wp["f1"], wp["f2"], wp["offset"],
+        fLO_=wp["fLO"], theta_max_=wp["theta_max"], f_band_=wp["f_band"])
+    amp = phys.amp_spots_from_ratios(wp["r_x"], wp["r_y"], wp["N_x"], wp["N_y"])
     win_eff = wp["waist"] * (wp["airy_factor"] if wp["use_airy"] else 1.0)
-    x, y, X, Y = B.compute_grid(cx, cy, win_eff, wp["grid_n"])
-    F = B.build_field_stack(X, Y, cx, cy, amp, wp["waist"],
-                            wp["use_airy"], wp["airy_factor"])
+    x, y, X, Y = phys.compute_grid(cx, cy, win_eff, wp["grid_n"])
+    F = phys.build_field_stack(X, Y, cx, cy, amp, wp["waist"],
+                               wp["use_airy"], wp["airy_factor"])
     px = np.zeros(wp["N_x"]) if wp["phase_x"] is None else np.asarray(wp["phase_x"])
     py = np.zeros(wp["N_y"]) if wp["phase_y"] is None else np.asarray(wp["phase_y"])
-    phases = B.spot_phases_from_tones(px, py, wp["N_x"], wp["N_y"])
-    f0 = B.fundamental_beat_frequency(f_spots)
+    phases = phys.spot_phases_from_tones(px, py, wp["N_x"], wp["N_y"])
+    f0 = phys.fundamental_beat_frequency(f_spots)
     # Ein einziger Ton (1x1) hat keine Differenzfrequenz: f0 = 0, kein Beating,
     # keine Grundperiode. Damit alles Weitere trotzdem eine Zeitskala hat, wird
     # eine Referenzperiode gesetzt - sie beeinflusst nichts ausser der Laenge
     # der Mittelungsfenster, denn I(t) ist dann konstant.
-    beats = B.unique_beat_frequencies(f_spots)
+    beats = phys.unique_beat_frequencies(f_spots)
     periodisch = f0 > 0 and beats.size > 0
     T0 = 1.0 / f0 if periodisch else 10e-6
     maske = ((X - rcx) ** 2 + (Y - rcy) ** 2) <= wp["radius"] ** 2
     idx = np.flatnonzero(maske.ravel())
     if idx.size > wp["max_pixel"]:
         idx = idx[np.linspace(0, idx.size - 1, wp["max_pixel"]).astype(int)]
-    return dict(wp=wp, X=X, Y=Y, x=x, y=y, F=F, f_spots=f_spots, phases=phases,
+    return dict(wp=wp, X=X, Y=Y, x=x, y=y, F=F, amp=amp, f_spots=f_spots, phases=phases,
                 f0=f0, T0=T0, periodisch=periodisch, maske=maske, idx=idx,
                 centers_x=cx, centers_y=cy, rcx=rcx, rcy=rcy, beats=beats,
-                degen=B.degenerate_groups(f_spots, f0) if periodisch else [])
+                degen=phys.degenerate_groups(f_spots, f0) if periodisch else [])
 
 
 def _I_roh(prof, t, idx=None):
@@ -151,12 +124,19 @@ def kalibrieren_auf_rabi(prof, raman, f_rabi=None):
 
 
 def kalibrieren_auf_leistung(prof, P_gesamt):
-    """Skalenfaktor, so dass durch das ganze Bild P_gesamt Watt laufen."""
-    t = np.linspace(0, prof["T0"], 401)
-    alle = np.arange(prof["F"][0].size)
-    I_mit = _I_roh(prof, t, alle).mean(0).reshape(prof["X"].shape)
-    dA = (prof["x"][1] - prof["x"][0]) * (prof["y"][1] - prof["y"][0])
-    return P_gesamt / (I_mit.sum() * dA)
+    """Skalenfaktor, so dass durch das ganze Bild P_gesamt Watt laufen.
+
+    Das Flaechenintegral des Zeitmittels kommt ANALYTISCH aus
+    profile_total_power(), inklusive des statischen Kreuzterms
+    frequenzentarteter Spots. Frueher wurde ueber das Rechengitter summiert;
+    das schneidet die Airy-Ringe ab, es fehlten rund 5 % der Leistung und die
+    Intensitaet kam entsprechend zu hoch heraus."""
+    wp = prof["wp"]
+    P_sim = phys.profile_total_power(prof["amp"], wp["waist"], wp["use_airy"],
+                                     wp["airy_factor"], prof["centers_x"],
+                                     prof["centers_y"], prof["phases"],
+                                     prof["degen"])
+    return P_gesamt / P_sim
 
 
 def intensitaet(prof, t0, t_p, n_t=4001, skala=None, raman=None):
@@ -184,7 +164,7 @@ def rabi_kurve(prof, t0, t_p, n_t=4001, skala=None, raman=None, **kw):
 def phasen(art, N, seed=0):
     """Tonphasen-Vorgaben, wie im Beating GUI: 'null', 'schroeder', 'zufall'."""
     if art == "schroeder":
-        return B.schroeder_phases(N)
+        return phys.schroeder_phases(N)
     if art == "zufall":
         return np.random.default_rng(seed).uniform(0, 2 * np.pi, N)
     return np.zeros(N)

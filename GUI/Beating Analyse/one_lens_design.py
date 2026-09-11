@@ -59,7 +59,6 @@ import math
 from math import gcd
 
 import numpy as np
-from scipy.special import j1
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QDoubleSpinBox,
@@ -68,12 +67,15 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 
+# The physics: kern/beating_physik.py (kern is a package next to this file).
+from kern import beating_physik as phys
+
 
 # ============================================================
 # AOD - unveraendert gegenueber dem bisherigen Aufbau
 # ============================================================
-THETA_MAX = 43e-3       # rad, maximaler Ablenkwinkel
-F_BAND = 36e6           # Hz, AOD-Bandbreite
+THETA_MAX = phys.theta_max   # rad, maximaler Ablenkwinkel
+F_BAND = phys.f_band         # Hz, AOD-Bandbreite
 
 
 def acoustic_velocity(lam, theta_max=THETA_MAX, f_band=F_BAND):
@@ -100,28 +102,15 @@ def df_unit_ratio(lam, f_lens, w_in, theta_max=THETA_MAX, f_band=F_BAND):
 
 
 # ============================================================
-# Profil (identisch zum GUI, nur als Intensitaet)
+# Profil: dasselbe Feld wie im GUI (kern/beating_physik.py), als Intensitaet
 # ============================================================
 def _profile_intensity(r2, waist, use_airy, airy_factor):
-    if not use_airy:
-        return np.exp(-2.0 * r2 / waist ** 2)
-    first_zero = airy_factor * waist
-    k = 3.83170597 / first_zero
-    u = k * np.sqrt(r2)
-    out = np.ones_like(u)
-    m = u > 1e-12
-    out[m] = 2.0 * j1(u[m]) / u[m]
-    return out ** 2
+    r = np.sqrt(r2)
+    return phys.spot_field(r, np.zeros_like(r), 0.0, 0.0, waist,
+                           use_airy, airy_factor) ** 2
 
 
-def _amps_from_ratio(r, N):
-    a = np.ones(N, dtype=float)
-    if N >= 2:
-        a[0] = r
-        a[-1] = r
-    elif N == 1:
-        a[0] = r
-    return a
+_amps_from_ratio = phys.amps_from_ratio
 
 
 def plateau_ripple(N_x, N_y, pitch_x, pitch_y, waist, use_airy, airy_factor,
@@ -147,8 +136,9 @@ def plateau_ripple(N_x, N_y, pitch_x, pitch_y, waist, use_airy, airy_factor,
     I = np.zeros_like(X)
     for i in range(N_x):
         for j in range(N_y):
-            a2 = (ax[i] * ay[j]) ** 2
-            I += a2 * _profile_intensity((X - cx[i]) ** 2 + (Y - cy[j]) ** 2,
+            # ax, ay are intensity weights (RF power ratios): I ~ a, not a^2
+            a_ij = ax[i] * ay[j]
+            I += a_ij * _profile_intensity((X - cx[i]) ** 2 + (Y - cy[j]) ** 2,
                                          waist, use_airy, airy_factor)
     lo, hi = float(I.min()), float(I.max())
     if hi + lo <= 0:
@@ -190,7 +180,7 @@ class Candidate:
 
 def search_candidates(target_period, lam, f_lens, w_in, waist,
                       rho_target=1.0, n_max=20, fix_nx=0, fix_ny=0,
-                      equal_width=True, use_airy=True, airy_factor=1.483,
+                      equal_width=True, use_airy=True, airy_factor=phys.AIRY_FACTOR,
                       r_x=1.0, r_y=1.0, theta_max=THETA_MAX, f_band=F_BAND,
                       n_keep=25, tone_penalty=0.12):
     """Parametersaetze, die EXAKT die geforderte Beating-Periode liefern.
@@ -317,7 +307,7 @@ class OneLensDesignDialog(QDialog):
 
         self.lam = float(s.get("lambda_opt", 795e-9))
         self.use_airy = bool(s.get("use_airy", True))
-        self.airy_factor = float(s.get("airy_factor", 1.483))
+        self.airy_factor = float(s.get("airy_factor", phys.AIRY_FACTOR))
         self.r_x = float(s.get("r_x", 1.0))
         self.r_y = float(s.get("r_y", 1.0))
 

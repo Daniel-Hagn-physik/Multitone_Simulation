@@ -54,6 +54,9 @@ from PyQt5.QtWidgets import (
     QCheckBox, QPushButton, QComboBox, QGroupBox, QGridLayout, QMessageBox
 )
 
+# The physics: kern/beating_physik.py (kern is a package next to this file).
+from kern import beating_physik as phys
+
 try:
     from power_budget import _load_raman
 except Exception:                                    # sibling module missing
@@ -68,12 +71,11 @@ C_RABI_FALLBACK = 71.985                             # rad/s per W/m^2 at -8 GHz
 class PulseTimingDialog(QDialog):
     """Modeless window; the main GUI stays usable."""
 
-    def __init__(self, parent, fns):
+    def __init__(self, parent):
         super().__init__(parent)
         self.setWindowTitle("Pulse area and trigger jitter")
         self.resize(1180, 900)
         self.parent_win = parent
-        self.fns = fns
         self._last = None
         self._raman_mod, _ = _load_raman()
 
@@ -229,7 +231,10 @@ class PulseTimingDialog(QDialog):
             "bar numbers move. The excitation\n\n"
             "    p = sin^2(sqrt(1+eta^2) theta / 2) / (1 + eta^2)\n\n"
             "is non-linear in theta and also carries eta(Delta), so it is the\n"
-            "map that actually changes shape when you tune Delta.")
+            "map that actually changes shape when you tune Delta.\n\n"
+            "That closed form holds for Omega ~ I. For Omega ~ sqrt(I) the\n"
+            "shift follows I and the Rabi frequency sqrt(I); the excitation\n"
+            "is then propagated numerically.")
         self.cmb_map.currentIndexChanged.connect(lambda _: self._redraw_only())
 
         self.cmb_layout = QComboBox()
@@ -282,8 +287,8 @@ class PulseTimingDialog(QDialog):
 
     # ------------------------------------------------------- regions
     def _atom_sigma(self):
-        return self.fns["sigma_thermal"](self.sp_nu.value() * 1e3,
-                                         self.sp_T.value() * 1e-6)
+        return phys.sigma_thermal(self.sp_nu.value() * 1e3,
+                                  self.sp_T.value() * 1e-6)
 
     def _mask(self, c):
         idx = self.cmb_region.currentIndex()
@@ -309,7 +314,7 @@ class PulseTimingDialog(QDialog):
             return c["F_stack"], mask, None, c["x"], c["y"], name, None
         s = self.parent_win.state
         sig = self._atom_sigma()
-        xs, ys, Xs, Ys, F, W = self.fns["atom_local_stack"](
+        xs, ys, Xs, Ys, F, W = phys.atom_local_stack(
             c["centers_x"], c["centers_y"], c["amp_spots"], s["win"],
             s["use_airy"], s["airy_factor"], sig)
         return F, None, W, xs, ys, "atom, sigma = %.1f nm" % (sig * 1e9), sig
@@ -358,16 +363,16 @@ class PulseTimingDialog(QDialog):
         n_scan = int(max(2000, min(40000, 40 * T0 / max(t_p, 1e-12))))
         t_scan = np.arange(n_scan) / n_scan * T0
         if law == "I":
-            coef, orders = self.fns["beat_coeffs_mean"](F, k, ph, mask, W)
-            area = lambda tt: self.fns["pulse_area_curve"](coef, orders, f0, t_p, tt)
+            coef, orders = phys.beat_coeffs_mean(F, k, ph, mask, W)
+            area = lambda tt: phys.pulse_area_curve(coef, orders, f0, t_p, tt)
             g_ref = float(np.real(coef[0]))
             # instantaneous weighted mean intensity, from the same coefficients
             g_of_t = lambda tt: np.real(
                 np.exp(2j * np.pi * f0 * np.outer(np.atleast_1d(tt), orders)) @ coef)
         else:
-            wser, dt = self.fns["sqrt_mean_series"](F, k, ph, f0, mask, W,
-                                                    oversample=10)
-            area = lambda tt: self.fns["sqrt_area_curve"](wser, dt, t_p, tt)
+            wser, dt = phys.sqrt_mean_series(F, k, ph, f0, mask, W,
+                                             oversample=10)
+            area = lambda tt: phys.sqrt_area_curve(wser, dt, t_p, tt)
             g_ref = float(np.mean(wser))
             g_of_t = lambda tt: np.interp(
                 np.mod(np.atleast_1d(tt), wser.size * dt),
@@ -380,10 +385,21 @@ class PulseTimingDialog(QDialog):
         s = self.parent_win.state
         C_rabi, c_src = self._c_rabi()
         amp = c["amp_spots"]
-        P_sim = self.fns["profile_total_power"](amp, s["win"], s["use_airy"],
-                                                s["airy_factor"])
+        P_sim = phys.profile_total_power(amp, s["win"], s["use_airy"],
+                                         s["airy_factor"], c["centers_x"],
+                                         c["centers_y"], ph, c.get("degen", []))
         A_eff = P_sim / max(g_ref, 1e-300) if law == "I" else float("nan")
         mode = self.cmb_norm.currentIndex()
+        if law != "I" and mode != 2:
+            # For Omega ~ sqrt(I) the Rabi frequency also depends on the clean
+            # leg, which this window does not know: a power in the profile
+            # does not fix Omega (A_eff is undefined, everything became NaN).
+            # Only 'Omega given' is defined.
+            self.cmb_norm.blockSignals(True)
+            self.cmb_norm.setCurrentIndex(2)
+            self.cmb_norm.blockSignals(False)
+            self._sync_norm()
+            mode = 2
         if mode == 2:
             f_rabi = self.sp_frabi.value() * 1e6
             I_ref = 2 * np.pi * f_rabi / C_rabi
@@ -446,14 +462,14 @@ class PulseTimingDialog(QDialog):
             wpix = np.ones(idx.size)
         wpix = wpix / wpix.sum()
         if law == "I":
-            th_pix = self.fns["camera_frames_exact"](Fm, k, ph, f0, t_p,
-                                                     t_opt + d_u) * t_p
+            th_pix = phys.camera_frames_exact(Fm, k, ph, f0, t_p,
+                                              t_opt + d_u) * t_p
         else:
             # 41 samples across the window alias badly once the pulse spans
             # more than a beat period - the sampling has to follow T_p.
             n_sub = int(np.clip(41 * max(1.0, n_beat), 41, 2001))
-            th_pix = np.stack([self.fns["sqrt_area_map"](Fm, k, ph, f0, t_p, tt,
-                                                         n_sub=n_sub)
+            th_pix = np.stack([phys.sqrt_area_map(Fm, k, ph, f0, t_p, tt,
+                                                  n_sub=n_sub)
                                for tt in (t_opt + d_u)])
         mu = th_pix @ wpix
         var = ((th_pix - mu[:, None]) ** 2) @ wpix
@@ -466,10 +482,23 @@ class PulseTimingDialog(QDialog):
                else float(self.parent_win.state.get("eta_ls", 0.0) or 0.0))
         gsh = np.sqrt(1.0 + eta ** 2)
         p_of = lambda th: np.sin(gsh * th * scale / 2.0) ** 2 / (1.0 + eta ** 2)
-        exc_delay = p_of(th_pix) @ wpix
+        # The closed form needs delta/Omega = const. For Omega ~ sqrt(I) the
+        # shift still follows I, so there the excitation is propagated.
+        sqrt_prop = law != "I" and eta != 0.0
+        # rb85_raman's eta is the TOTAL of both legs at beta = 0.5; for
+        # Omega ~ sqrt(I) only the multitone leg's half varies with I, the
+        # clean leg's half is constant and taken as compensated.
+        eta_mt = (0.5 * eta if getattr(self, "_coef", None) else eta)
+        if sqrt_prop:
+            H_m, _ = phys.order_amplitudes(Fm, k, ph)
+            exc_pix = np.stack([phys.sqrt_law_excitation(
+                H_m, f0, tt, [t_p], scale, eta_mt, g_ref)[0] for tt in (t_opt + d_u)])
+            exc_delay = exc_pix @ wpix
+        else:
+            exc_delay = p_of(th_pix) @ wpix
 
         if mask is None:
-            me_map, _ = self.fns["time_stats_exact"](F, k, ph)
+            me_map, _ = phys.time_stats_exact(F, k, ph)
             me = me_map.ravel()
             mu_a = float(me @ wpix)
             u_avg = float(np.sqrt(((me - mu_a) ** 2) @ wpix) / mu_a) if mu_a > 0 \
@@ -480,27 +509,35 @@ class PulseTimingDialog(QDialog):
 
         # --- map, point by point ---
         if law == "I":
-            th_map = self.fns["pulse_area_map"](F, k, ph, f0, t_p, t_opt) * scale
+            th_map = phys.pulse_area_map(F, k, ph, f0, t_p, t_opt) * scale
         else:
             n_sub = int(np.clip(41 * max(1.0, n_beat), 41, 2001))
-            th_map = self.fns["sqrt_area_map"](F, k, ph, f0, t_p, t_opt,
-                                               n_sub=n_sub) * scale
+            th_map = phys.sqrt_area_map(F, k, ph, f0, t_p, t_opt,
+                                        n_sub=n_sub) * scale
+        exc_map = None
+        if sqrt_prop:
+            H_f, _ = phys.order_amplitudes(F, k, ph)
+            exc_map = phys.sqrt_law_excitation(H_f, f0, t_opt, [t_p], scale,
+                                               eta_mt, g_ref)[0]
         if mask is None:
             th_map = th_map.reshape(len(gy), len(gx))
+            if exc_map is not None:
+                exc_map = exc_map.reshape(len(gy), len(gx))
+        elif exc_map is not None:
+            exc_map = exc_map.reshape(th_map.shape)
 
         # --- how the power splits over spots and RF tones ---
-        w2 = amp ** 2
-        P_spot = P_tot * w2 / w2.sum()
-        ax_ = self.fns["amps_from_ratio"](s["r_x"], s["N_x"]) ** 2
-        ay_ = self.fns["amps_from_ratio"](s["r_y"], s["N_y"]) ** 2
-        P_tx = P_tot * ax_ / ax_.sum()
-        P_ty = P_tot * ay_ / ay_.sum()
+        # a is an intensity weight = RF power ratio: power ~ a, not a^2
+        P_spot = P_tot * phys.spot_power_shares(amp)
+        P_tx = P_tot * phys.tone_power_shares(s["r_x"], s["N_x"])
+        P_ty = P_tot * phys.tone_power_shares(s["r_y"], s["N_y"])
 
         self._last = dict(
             t_scan=t_scan, th_scan=th_scan, delays=delays, th_delay=th_delay,
             th0=th0, t_opt=t_opt, T0=T0, f0=f0, t_p=t_p, f_rabi=f_rabi,
             d_u=d_u, u_delay=u_delay, exc_delay=exc_delay, eta=eta,
-            th_map=th_map, mask=mask, region=region, law=law, half=half,
+            th_map=th_map, exc_map=exc_map, mask=mask, region=region, law=law,
+            half=half,
             u_avg=u_avg, th_ref=2 * f_rabi * t_p, gx=gx, gy=gy,
             sig_atom=sig_atom, t_trace=t_trace, g_trace=g_trace,
             n_beat=n_beat, trace_cut=trace_cut,
@@ -633,8 +670,11 @@ class PulseTimingDialog(QDialog):
         # cannot change - only the numbers on the bar. The excitation is the
         # non-linear function of it and is where Delta becomes visible.
         if self.cmb_map.currentIndex() == 1:
-            gsh = np.sqrt(1.0 + L["eta"] ** 2)
-            dat = np.sin(gsh * L["th_map"] / 2.0) ** 2 / (1.0 + L["eta"] ** 2)
+            if L.get("exc_map") is not None:        # Omega ~ sqrt(I), propagated
+                dat = L["exc_map"]
+            else:
+                gsh = np.sqrt(1.0 + L["eta"] ** 2)
+                dat = np.sin(gsh * L["th_map"] / 2.0) ** 2 / (1.0 + L["eta"] ** 2)
             kw = dict(vmin=0.0, vmax=1.0)
             cb_lab = r"$p_\uparrow(r)$"
             ttl = "Excitation point by point"
@@ -916,8 +956,9 @@ class PulseTimingDialog(QDialog):
             ("build", build),
             ("lambda / RF offset", "%.2f nm / %.4f MHz"
              % (s["lambda_opt"] * 1e9, s["offset"] * 1e-6)),
-            ("AOD", "theta_max = 43.0 mrad, f_band = 36.0 MHz, "
-                    "v_ac = %.1f m/s" % (s["lambda_opt"] * 36e6 / 43e-3)),
+            ("AOD", "theta_max = %.1f mrad, f_band = %.1f MHz, v_ac = %.1f m/s"
+                    % (phys.theta_max * 1e3, phys.f_band * 1e-6,
+                       s["lambda_opt"] * phys.f_band / phys.theta_max)),
             ("f_0 / T_0", "%.6f kHz / %.4f us" % (L["f0"] * 1e-3, L["T0"] * 1e6)),
             ("grid / frames / periods", "%d^2 / %d / %d"
              % (s["grid_n"], s["frames_per_period"], s["n_periods"])),

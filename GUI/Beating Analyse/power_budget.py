@@ -31,14 +31,18 @@ THE CHAIN
 
        P = I_ref * A_eff ,      A_eff = (integral I dA) / <I>_region .
 
-   The area integral comes analytically from the sum of the single spots
-   (profile_total_power in the main GUI), not from the computation grid - that
-   one truncates the Airy rings and comes out half a percent low.
+   The area integral comes analytically (profile_total_power in
+   kern/beating_physik.py), not from the computation grid - that one truncates
+   the Airy rings and misses about 5 % of the power. It includes the static
+   cross term of frequency degenerate spots (+1.1 % for 3x4, Airy, phases 0).
+   Each spot carries its intensity weight a, so the sum runs over a, not a^2.
 
-4. Splitting. The power of spot (n,m) goes as a_x(n)^2 * a_y(m)^2, that of RF
-   TONE n of the x axis as a_x(n)^2 / sum a_x^2 - the tone feeds all spots of
-   its column. At r_x = r_y = 1 all tones are equal, at r != 1 they are not,
-   and that is the number the AWG channel has to survive.
+4. Splitting. a_x, a_y are RF POWER ratios: the diffraction efficiency goes as
+   the RF power, the diffracted field as the RF voltage. The power of spot
+   (n,m) therefore goes as a_x(n) * a_y(m), that of RF TONE n of the x axis as
+   a_x(n) / sum a_x - the tone feeds all spots of its column. The RF voltage
+   of a tone is sqrt(a_x(n)); that is what an AWG with voltage amplitudes
+   needs. At r_x = r_y = 1 all tones are equal, at r != 1 they are not.
 
 5. Power chain. Before the AOD, times the diffraction efficiency of BOTH AODs
    (the spot is diffracted twice) times the optics transmission. What comes
@@ -60,18 +64,23 @@ from PyQt5.QtWidgets import (
     QPushButton, QComboBox, QGroupBox, QGridLayout, QMessageBox, QTextEdit
 )
 
+# The physics: kern/beating_physik.py (kern is a package next to this file).
+from kern import beating_physik as phys
+
 
 def _load_raman():
     """Load kern/rb85_raman.py without breaking the GUI when arc is missing.
 
-    The copy in kern/ is the maintained one; the older sibling next to it is
-    only a fallback."""
+    kern.rb85_raman is the normal case; the plain name only helps when kern/
+    itself is on sys.path. The error reported is the one of the first attempt
+    - that is the informative one (typically: arc is not installed)."""
+    first = None
     for mod in ("kern.rb85_raman", "rb85_raman"):
         try:
             return __import__(mod, fromlist=["RamanRb85"]), None
         except Exception as exc:                     # arc fehlt, Pfad falsch, ...
-            last = exc
-    return None, last
+            first = first or exc
+    return None, first
 
 
 class PowerBudgetDialog(QDialog):
@@ -81,12 +90,11 @@ class PowerBudgetDialog(QDialog):
     # Fallback only, used when rb85_raman cannot be imported.
     C_RABI_FALLBACK = 71.985
 
-    def __init__(self, parent, fns):
+    def __init__(self, parent):
         super().__init__(parent)
         self.setWindowTitle("Power and intensity of the profile")
         self.resize(980, 760)
         self.parent_win = parent
-        self.fns = fns
         self._raman_mod, self._raman_err = _load_raman()
         self._text = ""
 
@@ -136,7 +144,7 @@ class PowerBudgetDialog(QDialog):
         self.sp_frabi = self._dspin((s.get("f_rabi") or 1e6) * 1e-6,
                                     0.0001, 1000.0, 4, 0.1, "MHz")
         self.sp_power = self._dspin(1.0, 1e-6, 1e6, 5, 0.1, "mW")
-        self.sp_delta = self._dspin(-8.0, -2000.0, 2000.0, 3, 1.0, "GHz")
+        self.sp_delta = self._dspin(50.0, -2000.0, 2000.0, 3, 1.0, "GHz")
         self.sp_delta.setToolTip("Raman detuning from the 5P_1/2 centroid.\n"
                                  "Negative = red. Omega goes as I/Delta, the\n"
                                  "scattering rate as I/Delta^2 - more detuning\n"
@@ -218,12 +226,12 @@ class PowerBudgetDialog(QDialog):
                 return float("nan"), name
             return float(np.mean(c["mean_exact"][mask])), name
         s = self.parent_win.state
-        sig = self.fns["sigma_thermal"](self.sp_nu.value() * 1e3,
-                                        self.sp_T.value() * 1e-6)
-        _, _, _, _, F, W = self.fns["atom_local_stack"](
+        sig = phys.sigma_thermal(self.sp_nu.value() * 1e3,
+                                 self.sp_T.value() * 1e-6)
+        _, _, _, _, F, W = phys.atom_local_stack(
             c["centers_x"], c["centers_y"], c["amp_spots"], s["win"],
             s["use_airy"], s["airy_factor"], sig)
-        me, _ = self.fns["time_stats_exact"](F, c["k_orders"], c["phases"])
+        me, _ = phys.time_stats_exact(F, c["k_orders"], c["phases"])
         wv = W.ravel() / W.sum()
         return float(me.ravel() @ wv), "Atom (sigma = %.1f nm)" % (sig * 1e9)
 
@@ -277,8 +285,10 @@ class PowerBudgetDialog(QDialog):
 
         # --- Profilgeometrie in Simulationseinheiten ---
         amp = c["amp_spots"]
-        P_sim = self.fns["profile_total_power"](amp, s["win"], s["use_airy"],
-                                                s["airy_factor"])
+        P_sim = phys.profile_total_power(amp, s["win"], s["use_airy"],
+                                         s["airy_factor"], c["centers_x"],
+                                         c["centers_y"], c["phases"],
+                                         c.get("degen", []))
         A_eff = P_sim / I_ref_sim                      # m^2
         I_peak_sim = float(np.max(c["mean_exact"]))
 
@@ -302,12 +312,10 @@ class PowerBudgetDialog(QDialog):
         scale = I_ref / I_ref_sim                      # W/m^2 pro Simulationseinheit
 
         # --- split over spots and RF tones ---
-        w_spot = amp ** 2
-        P_spot = P_tot * w_spot / w_spot.sum()
-        ax = self.fns["amps_from_ratio"](s["r_x"], s["N_x"]) ** 2
-        ay = self.fns["amps_from_ratio"](s["r_y"], s["N_y"]) ** 2
-        P_tx = P_tot * ax / ax.sum()
-        P_ty = P_tot * ay / ay.sum()
+        # a is an intensity weight = RF power ratio: power ~ a, not a^2
+        P_spot = P_tot * phys.spot_power_shares(amp)
+        P_tx = P_tot * phys.tone_power_shares(s["r_x"], s["N_x"])
+        P_ty = P_tot * phys.tone_power_shares(s["r_y"], s["N_y"])
 
         I_peak_avg = I_peak_sim * scale
         I_peak_inst = float(c.get("cube_max", np.nan)) * scale
@@ -335,8 +343,8 @@ class PowerBudgetDialog(QDialog):
                  % (s["N_x"], s["N_y"], len(amp)))
         L.append("  waist                     %12.4f %sm" % (s["win"] * 1e6, u))
         L.append("  area of one spot          %12.4f %sm^2"
-                 % (self.fns["single_spot_power"](s["win"], s["use_airy"],
-                                                  s["airy_factor"]) * 1e12, u))
+                 % (phys.single_spot_power(s["win"], s["use_airy"],
+                                           s["airy_factor"]) * 1e12, u))
         L.append("  effective area A_eff     %12.1f %sm^2   (= integral I dA / <I>)"
                  % (A_eff * 1e12, u))
         L.append("")
@@ -364,8 +372,12 @@ class PowerBudgetDialog(QDialog):
         if abs(s["r_x"] - 1) < 1e-9 and abs(s["r_y"] - 1) < 1e-9:
             L.append("     (r_x = r_y = 1: all tones equal)")
         else:
-            L.append("     (r_x = %.4f, r_y = %.4f: the outer tones carry r^2 of the inner "
-                     "ones)" % (s["r_x"], s["r_y"]))
+            L.append("     (r_x = %.4f, r_y = %.4f: the outer tones carry r times the "
+                     "optical and RF power of the inner ones)" % (s["r_x"], s["r_y"]))
+            L.append("     RF VOLTAGE outer/inner: x %.4f (%+.2f dB), y %.4f (%+.2f dB)"
+                     "  - for an AWG with voltage amplitudes"
+                     % (np.sqrt(s["r_x"]), 10 * np.log10(max(s["r_x"], 1e-30)),
+                        np.sqrt(s["r_y"]), 10 * np.log10(max(s["r_y"], 1e-30))))
         L.append("")
         L.append("PULSE   T_p = %.4f %ss" % (t_p * 1e6, u))
         L.append("  area at the reference   %12.4f pi        (pi pulse at %.4f %ss)"
@@ -406,7 +418,7 @@ class PowerBudgetDialog(QDialog):
                 cap = abs(abs(dd) - 3000.0) < 1e-6
                 L.append("    Delta = %.1f GHz -> %.1f GHz  at the same Rabi "
                          "frequency%s" % (self.sp_delta.value(), dd,
-                                              "  (edge of the search!)" if cap else ""))
+                                          "  (edge of the search!)" if cap else ""))
                 if cap:
                     L.append("    So the power is enough beyond 3 THz - but there the "
                              "assumption 'far from D1,")

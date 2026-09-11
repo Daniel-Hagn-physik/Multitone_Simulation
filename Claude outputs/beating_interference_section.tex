@@ -1,0 +1,275 @@
+\subsection{Time-dependent interference of multiple spots}
+
+Both AODs shift the optical frequency. A spot $s=(i,j)$, produced by tone $i$
+of the $x$-AOD and tone $j$ of the $y$-AOD, therefore carries the frequency
+\begin{equation}
+f_s = f_{x,i}+f_{y,j},
+\qquad
+f_{x,i}=f_\mathrm{off}+w_x\frac{i}{N_x-1},\quad
+f_{y,j}=f_\mathrm{off}+w_y\frac{j}{N_y-1},
+\end{equation}
+and the same tones fix its position $\mathbf c_s$ in the focal plane. The
+spots do not add as intensities but as fields.
+
+For each spot $s$ the spatial field amplitude is
+\begin{equation}
+g_s(\mathbf r) = A_s\,\psi(\mathbf r-\mathbf c_s),
+\qquad
+A_s=\sqrt{a_{x,i}\,a_{y,j}},
+\end{equation}
+where $\psi$ is the real mode in the focal plane, normalised to
+$\psi(\mathbf 0)=1$ (Gaussian $e^{-r^2/w^2}$ or Airy $2J_1(kr)/(kr)$, whose
+rings keep their sign), and $a_{x,i}$, $a_{y,j}$ are intensity weights. In the
+linear regime of the AOD the diffraction efficiency is proportional to the RF
+power, so $a$ is an RF power ratio and $\sqrt a$ the corresponding RF voltage
+ratio. The spot phase is the sum of the two tone phases,
+\begin{equation}
+\phi_s=\phi_{x,i}+\phi_{y,j},
+\end{equation}
+so only $N_x+N_y$ of the $S=N_xN_y$ spot phases are free.
+
+\paragraph{Frequency orders.}
+Only differences of spot frequencies enter the intensity. If all differences
+are integer multiples of a fundamental frequency $f_0$ (their greatest common
+divisor), every spot frequency can be written as
+\begin{equation}
+f_s=f_{\min}+k_s f_0,
+\qquad
+k_s=\frac{f_s-f_{\min}}{f_0}\in\mathbb N_0 .
+\end{equation}
+For equal width $w_x=w_y=w$ this gives
+\begin{equation}
+f_0=\frac{w}{\operatorname{lcm}(N_x-1,\,N_y-1)},
+\qquad
+T_0=\frac{1}{f_0},
+\end{equation}
+e.g.\ $f_0=w/6$ for a $3\times4$ grid. The index $s$ labels a spot, $k_s$ its
+frequency order. Spots with the same order form the group
+\begin{equation}
+\mathcal S_m=\{\,s : k_s=m\,\},
+\end{equation}
+with the group field
+\begin{equation}
+H_m(\mathbf r)=\sum_{s\in\mathcal S_m} g_s(\mathbf r)\,e^{i\phi_s}.
+\end{equation}
+
+\paragraph{Intensity as a Fourier series.}
+Relative to the optical carrier, and dropping the common factor
+$e^{i2\pi f_{\min}t}$, the field is
+\begin{equation}
+E(\mathbf r,t)=\sum_m H_m(\mathbf r)\,e^{i2\pi m f_0 t},
+\end{equation}
+and the intensity
+\begin{equation}
+I(\mathbf r,t)=\left|E(\mathbf r,t)\right|^2
+=\sum_d D_d(\mathbf r)\,e^{i2\pi d f_0 t},
+\qquad
+D_d(\mathbf r)=\sum_{m-n=d}H_m(\mathbf r)H_n^*(\mathbf r),
+\end{equation}
+is a trigonometric polynomial with beat frequencies $f_\mathrm{beat}=d f_0$.
+Since the $g_s$ are real, the coefficients read in terms of the spots
+\begin{equation}
+D_d(\mathbf r)=\sum_{k_s-k_{s'}=d} g_s(\mathbf r)\,g_{s'}(\mathbf r)\,
+e^{i(\phi_s-\phi_{s'})},
+\qquad
+D_{-d}=D_d^{*}.
+\end{equation}
+
+\paragraph{Time average and frequency degeneracy.}
+Averaged over one period $T_0$ only $d=0$ survives:
+\begin{equation}
+\begin{split}
+\langle I(\mathbf r)\rangle_t
+&=D_0(\mathbf r)
+=\sum_m\left|H_m(\mathbf r)\right|^2\\
+&=\underbrace{\sum_s g_s^2(\mathbf r)}_{\text{incoherent sum}}
++\,2\!\!\sum_{\substack{s<s'\\ k_s=k_{s'}}}\!\! g_s(\mathbf r)\,g_{s'}(\mathbf r)
+\cos(\phi_s-\phi_{s'}).
+\end{split}
+\end{equation}
+The time average equals the incoherent intensity sum only if every group
+contains a single spot. Spots with the same frequency order interfere
+statically. With $f_s=f_{x,i}+f_{y,j}$ this happens whenever
+$k_{x,i}+k_{y,j}=k_{x,i'}+k_{y,j'}$. For a $3\times4$ grid with equal width,
+$k_{x,i}=3i$ and $k_{y,j}=2j$, and exactly one pair is degenerate,
+\begin{equation}
+k_{(0,3)}=k_{(2,0)}=6,
+\qquad
+H_6=g_{(0,3)}e^{i\phi_{(0,3)}}+g_{(2,0)}e^{i\phi_{(2,0)}},
+\end{equation}
+the two diagonally opposite corner spots. For $N_x=N_y$ every anti-diagonal
+$i+j=\mathrm{const}$ is degenerate. For a single degenerate pair the static
+term vanishes when the two spots are in quadrature, $\phi_s-\phi_{s'}=\pm\pi/2$.
+
+\paragraph{Temporal fluctuation.}
+By Parseval, $\langle I^2\rangle_t=\sum_d|D_d|^2$, hence
+\begin{equation}
+\operatorname{Var}_t[I(\mathbf r)]
+=\sum_{d\neq0}\left|D_d(\mathbf r)\right|^2
+=2\sum_{d>0}\left|D_d(\mathbf r)\right|^2,
+\qquad
+\frac{\sigma_I(\mathbf r)}{\langle I(\mathbf r)\rangle_t}
+=\frac{\sqrt{\operatorname{Var}_t[I(\mathbf r)]}}{D_0(\mathbf r)} .
+\end{equation}
+The phases enter only through $D_d$. A single pair can never be damped by a
+phase; only pairs sharing the same beat order $d$ can partially cancel. The
+highest order $d=k_{\max}-k_{\min}$ is produced by the two outermost corner
+spots alone, so the fluctuation can be reduced by the tone phases but never
+removed.
+
+\paragraph{Summary of the indices.}
+\begin{gather}
+s=(i,j)\;\longrightarrow\;k_s\;\longrightarrow\;H_m\;\longrightarrow\;
+E(\mathbf r,t)\;\longrightarrow\;I(\mathbf r,t)\;\longrightarrow\;D_d,
+\\
+s\in\mathcal S_m,\qquad d=m-n,\qquad f_\mathrm{beat}=d f_0 .
+\end{gather}
+The description assumes a scalar field of common polarisation, phase-locked
+AODs diffracting into the same order, the focal plane (real modes), and
+commensurate tone frequencies; otherwise $I(\mathbf r,t)$ is not periodic.
+
+\subsubsection{Example: a $3\times4$ grid}
+
+\paragraph{Tones and fundamental frequency.}
+The working point uses $N_x=3$, $N_y=4$, equal width $w=0.37$\,MHz and an
+offset of 100\,MHz on both axes. The tones are
+\begin{gather}
+f_{x,i}\in\{100.000,\ 100.185,\ 100.370\}\,\mathrm{MHz},\\
+f_{y,j}\in\{100.000,\ 100.123,\ 100.247,\ 100.370\}\,\mathrm{MHz},
+\end{gather}
+with spacings
+\begin{equation}
+\Delta f_x=\frac{w}{2}=185\,\mathrm{kHz},
+\qquad
+\Delta f_y=\frac{w}{3}=123.3\,\mathrm{kHz}.
+\end{equation}
+Their greatest common divisor is
+\begin{equation}
+f_0=\frac{w}{\operatorname{lcm}(2,3)}=\frac{w}{6}=61.67\,\mathrm{kHz},
+\qquad
+T_0=16.22\,\mu\mathrm{s},
+\end{equation}
+so that $\Delta f_x=3f_0$ and $\Delta f_y=2f_0$. With
+$\mathrm{d}r/\mathrm{d}f=6.316\,\mathrm{nm/kHz}$ the spots sit on a
+rectangular lattice with pitches $p_x=1.169\,\mu$m and $p_y=0.779\,\mu$m;
+equal width means equal extent ($2.337\,\mu$m on both axes), not equal pitch.
+
+\paragraph{Frequency orders and groups.}
+The order of spot $(i,j)$ is
+\begin{equation}
+k_{i,j}=3i+2j,
+\qquad
+f_{i,j}=200\,\mathrm{MHz}+k_{i,j}\,f_0 ,
+\end{equation}
+which gives
+\begin{center}
+\begin{tabular}{c|cccc}
+ & $j=0$ & $j=1$ & $j=2$ & $j=3$\\ \hline
+$i=0$ & 0 & 2 & 4 & \textbf{6}\\
+$i=1$ & 3 & 5 & 7 & 9\\
+$i=2$ & \textbf{6} & 8 & 10 & 12
+\end{tabular}
+\end{center}
+The twelve spots fall into eleven groups. With $z_{i,j}=g_{i,j}\,e^{i\phi_{i,j}}$,
+\begin{equation}
+\begin{aligned}
+H_0&=z_{0,0}, & H_2&=z_{0,1}, & H_3&=z_{1,0}, & H_4&=z_{0,2},\\
+H_5&=z_{1,1}, & H_6&=z_{0,3}+z_{2,0}, & H_7&=z_{1,2}, & H_8&=z_{2,1},\\
+H_9&=z_{1,3}, & H_{10}&=z_{2,2}, & H_{12}&=z_{2,3}, & H_1&=H_{11}=0.
+\end{aligned}
+\end{equation}
+Only $H_6$ contains two spots: the diagonally opposite corners $(0,3)$ and
+$(2,0)$, $3.305\,\mu$m apart. The orders $k=1$ and $k=11$ are not occupied.
+
+\paragraph{Static interference of the corner pair.}
+The time average contains, in addition to the incoherent sum,
+\begin{equation}
+\langle I\rangle_t-\sum_s g_s^2
+=2\,g_{0,3}\,g_{2,0}\cos\!\left(\phi_{x,0}+\phi_{y,3}-\phi_{x,2}-\phi_{y,0}\right),
+\end{equation}
+where the tone phases have been inserted. Both corner spots carry the weight
+$A^2=r_xr_y=0.97\times1.16$. For all phases zero the deviation from the
+incoherent profile reaches $7.16\,\%$ of its maximum and adds $1.1\,\%$ to the
+total power; for Schroeder phases the phase difference is $-5\pi/6$ and the
+deviation is $6.2\,\%$. It vanishes for
+$\phi_{x,0}+\phi_{y,3}-\phi_{x,2}-\phi_{y,0}=\pm\pi/2$.
+
+\paragraph{Beat orders.}
+A pair of spots separated by $(\Delta i,\Delta j)$ beats at
+\begin{equation}
+d=3\,\Delta i+2\,\Delta j ,
+\qquad
+|\Delta i|\le2,\quad|\Delta j|\le3 ,
+\end{equation}
+and its distance in the focal plane is
+$\sqrt{(\Delta i\,p_x)^2+(\Delta j\,p_y)^2}$. The cross term is weighted by the
+spatial overlap $g_s(\mathbf r)g_{s'}(\mathbf r)$, so close pairs dominate.
+Table~\ref{tab:beat34} lists all orders. The last two columns give the
+contribution $\sigma_d/\langle I\rangle_t=\sqrt{2|D_d|^2}/D_0$ of each order,
+as an rms over the plateau ($\langle I\rangle_t>0.5\max$), for the working
+point (Airy, waist $1.04\,\mu$m, $r_x=0.97$, $r_y=1.16$).
+\begin{table}[h]
+\centering
+\caption{Beat orders of the $3\times4$ grid, $f_0=61.67$\,kHz.}
+\label{tab:beat34}
+\small
+\begin{tabular}{rrrlrrr}
+\hline
+$d$ & $f_\mathrm{beat}$ [kHz] & pairs & $(\Delta i,\Delta j)$ & distance [$\mu$m]
+ & \multicolumn{2}{c}{$\sigma_d/\langle I\rangle_t$ [\%]}\\
+ & & & & & $\phi=0$ & Schroeder\\ \hline
+0  & 0     & 1  & $(2,-3)$                & 3.31       & -- & --\\
+1  & 61.7  & 10 & $(1,-1)$, $(-1,2)$      & 1.40, 1.95 & 23.6 & 24.6\\
+2  & 123.3 & 11 & $(0,1)$, $(2,-2)$       & 0.78, 2.81 & 74.9 & 62.0\\
+3  & 185.0 & 10 & $(1,0)$, $(-1,3)$       & 1.17, 2.61 & 40.7 & 49.1\\
+4  & 246.7 & 9  & $(0,2)$, $(2,-1)$       & 1.56, 2.46 & 19.0 & 22.4\\
+5  & 308.3 & 6  & $(1,1)$                 & 1.40       & 21.3 & 25.8\\
+6  & 370.0 & 7  & $(2,0)$, $(0,3)$        & 2.34, 2.34 & 17.5 & 11.7\\
+7  & 431.7 & 4  & $(1,2)$                 & 1.95       & 9.3  & 10.5\\
+8  & 493.3 & 3  & $(2,1)$                 & 2.46       & 8.0  & 6.2\\
+9  & 555.0 & 2  & $(1,3)$                 & 2.61       & 5.2  & 5.1\\
+10 & 616.7 & 2  & $(2,2)$                 & 2.81       & 4.7  & 3.6\\
+11 & 678.3 & 0  & --                      & --         & --   & --\\
+12 & 740.0 & 1  & $(2,3)$                 & 3.31       & 2.7  & 2.7\\
+\hline
+\end{tabular}
+\end{table}
+
+All $\binom{12}{2}=66$ pairs are accounted for. The strongest beating is at
+$d=2$, produced by the nearest neighbours along $y$, followed by $d=3$ (nearest
+neighbours along $x$) and $d=1$ (diagonal neighbours). The squares of the
+components add up to the total fluctuation, as an rms over the plateau,
+\begin{equation}
+\left\langle\frac{\sigma_I^2}{\langle I\rangle_t^2}\right\rangle_{\!\mathbf r}^{1/2}
+=\Bigl(\sum_{d>0}\Bigl\langle\frac{\sigma_d^2}{\langle I\rangle_t^2}\Bigr\rangle_{\!\mathbf r}\Bigr)^{1/2}
+=95.7\,\%\ (\phi=0),\qquad 91.4\,\%\ (\text{Schroeder}).
+\end{equation}
+
+\paragraph{Where phases help and where they cannot.}
+Many pairs share the low orders. In terms of the group fields,
+\begin{equation}
+\begin{split}
+D_1&=H_3H_2^*+H_4H_3^*+H_5H_4^*+H_6H_5^*+H_7H_6^*+H_8H_7^*+H_9H_8^*+H_{10}H_9^*\\
+&=z_{1,0}z_{0,1}^*+z_{0,2}z_{1,0}^*+z_{1,1}z_{0,2}^*
++\left(z_{0,3}+z_{2,0}\right)z_{1,1}^*
++z_{1,2}\left(z_{0,3}+z_{2,0}\right)^*\\
+&\quad+z_{2,1}z_{1,2}^*+z_{1,3}z_{2,1}^*+z_{2,2}z_{1,3}^*,
+\end{split}
+\end{equation}
+ten phasors that suitable tone phases can partially cancel. The highest order,
+by contrast, is a single pair,
+\begin{equation}
+D_{12}=g_{2,3}\,g_{0,0}\,e^{i(\phi_{2,3}-\phi_{0,0})},
+\end{equation}
+whose magnitude no phase can change. Even with completely free pair phases,
+which two AODs cannot realise, the plateau fluctuation stays above $29\,\%$;
+the seven physical tone phases cannot go below this bound.
+
+\paragraph{Consequences for the working point.}
+The intensity is a trigonometric polynomial of degree 12 in $e^{i2\pi f_0t}$;
+$2\cdot12+1=25$ samples per period reproduce it exactly. Two lines lie next
+to the trap resonances: the dominant $d=2$ at $123.3$\,kHz is $2.5$\,kHz from
+$2\nu_r=120.8$\,kHz, and $d=1$ at $61.7$\,kHz is $1.3$\,kHz from
+$\nu_r=60.4$\,kHz. This matters for illumination lasting many trap periods;
+a single $\pi$ pulse of $0.5\,\mu$s is shorter than one trap period and
+spectrally about $2$\,MHz wide.

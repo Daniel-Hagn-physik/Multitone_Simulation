@@ -85,7 +85,7 @@ from PyQt5.QtCore import Qt
 
 import rb85_raman as R
 
-# beating_profil zieht Beating_Multitone_GUI.py herein. Fehlt das (weil dieses
+# beating_profil zieht kern/beating_physik.py herein. Fehlt das (weil dieses
 # Skript irgendwo ohne das Beating GUI liegt), soll das Fenster trotzdem
 # starten - nur der Profil-Modus ist dann nicht waehlbar.
 try:
@@ -371,7 +371,8 @@ class RabiRb85Window(QMainWindow):
         self.sp_pf1 = zeile("f1", self._dspin(st["p_f1"] * 1e3, 1.0, 5000.0, 3, 5.0, "mm"))
         self.sp_pf2 = zeile("f2", self._dspin(st["p_f2"] * 1e3, 1.0, 5000.0, 3, 5.0, "mm"))
         self.sp_pflo = zeile("fLO", self._dspin(st["p_fLO"] * 1e3, 1.0, 5000.0, 3, 1.0, "mm"),
-                             "Fokussierlinse. Im Beating GUI eine Modulkonstante;\n"
+                             "Fokussierlinse. Im Beating GUI eine Konstante\n"
+                             "(fLO in kern/beating_physik.py);\n"
                              "hier einstellbar, weil sie die Spotgroesse und den\n"
                              "Ablenkbereich zugleich setzt.")
         self.sp_poff = zeile("Offset", self._dspin(st["p_offset"] / 1e6, 0.0, 1000.0,
@@ -418,7 +419,7 @@ class RabiRb85Window(QMainWindow):
         self.lbl_profil.setStyleSheet("color: #555; font-size: 10px;")
         lay.addWidget(self.lbl_profil, r, 0, 1, 2)
         if not HAT_PROFIL:
-            self.lbl_profil.setText("Beating_Multitone_GUI.py nicht gefunden:\n"
+            self.lbl_profil.setText("kern/beating_physik.py nicht ladbar:\n"
                                     + PROFIL_FEHLER)
         g.setEnabled(False)
         return g

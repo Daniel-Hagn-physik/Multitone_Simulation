@@ -41,18 +41,20 @@ from PyQt5.QtWidgets import (
     QCheckBox, QPushButton, QComboBox, QGroupBox, QGridLayout, QMessageBox
 )
 
+# The physics: kern/beating_physik.py (kern is a package next to this file).
+from kern import beating_physik as phys
+
 A4_LANDSCAPE = (11.69, 8.27)          # inch - a frame series is wide by nature
 
 
 class CameraSeriesDialog(QDialog):
     """Modeless window; the main GUI stays usable."""
 
-    def __init__(self, parent, frame_fn):
+    def __init__(self, parent):
         super().__init__(parent)
         self.setWindowTitle("Camera frame series over one beat period")
         self.resize(1500, 800)
         self.parent_win = parent
-        self.frame_fn = frame_fn          # camera_frames_exact() of the main GUI
         self._last = None
         self._T0_seen = None              # period the times were set up for
 
@@ -201,8 +203,8 @@ class CameraSeriesDialog(QDialog):
         n = self.sp_n.value()
         t0 = np.arange(n) * step
 
-        frames = self.frame_fn(c["F_stack"], c["k_orders"], c["phases"],
-                               f0, t_exp, t0)
+        frames = phys.camera_frames_exact(c["F_stack"], c["k_orders"], c["phases"],
+                                          f0, t_exp, t0)
         self._last = dict(frames=frames, mean=c["mean_exact"],
                           plateau=c["plateau"], t0=t0, t_exp=t_exp, step=step,
                           f0=f0, T0=T0, x=c["x"], y=c["y"])

@@ -26,6 +26,146 @@ Differenzfrequenz Δf von Null verschieden ist**. Genau das ist die
 Voraussetzung, unter der das bisherige inkohärente Bild gilt, und genau die
 ist bei gleicher `width` auf beiden Achsen verletzt (siehe unten).
 
+## Dateien
+
+Stand 2026-09-11. Seit dem Umbau liegt die gesamte Physik in einer eigenen
+Datei; das GUI selbst enthält nur noch Eingaben, Ablauf und Zeichnen.
+
+| Datei | Inhalt |
+|---|---|
+| `Beating_Multitone_GUI.py` | **starten.** Fenster: Eingaben, `recompute()`, Zeichnen, Speichern |
+| `kern/beating_physik.py` | **die ganze Physik und Numerik** — Frequenzen, Geometrie, Felder, Beat-Ordnungen, exakte Zeitstatistik, Pulsfläche, Atomgewichtung. Kein Qt, nur numpy/scipy. Oben in der Datei stehen die Formeln, was das Modell *nicht* enthält, und ein Inhaltsverzeichnis der Abschnitte 0–11. |
+| `kern/rb85_raman.py` | Raman-Koeffizienten für Rb-85 (ARC) |
+| `kern/beating_profil.py` | Brücke zur Rabi-Rechnung (`Rabi_Rb85_GUI.py`); importiert `beating_physik.py`, nicht mehr das GUI |
+| `one_lens_design.py` | Fenster *Design for a target beating period …* |
+| `camera_series.py` | Fenster *Camera frame series …* |
+| `pulse_timing.py` | Fenster *Pulse area / trigger jitter …* |
+| `power_budget.py` | Fenster *Power / intensity …* |
+
+Die vier Fenster-Dateien müssen neben dem GUI liegen; die Physik holen sie
+sich selbst aus `kern/`. Alle Funktionsnamen, die in dieser Anleitung
+auftauchen (`time_stats_exact()`, `crest_factor()`, `camera_frames_exact()`,
+`profile_total_power()`, …), stehen in `kern/beating_physik.py`.
+
+## Startwerte
+
+Das GUI öffnet immer mit diesem Arbeitspunkt:
+
+| | |
+|---|---|
+| Töne | 3 × 4 |
+| Profil | **Airy**, Faktor **1.4830 (fest)** → erster Nullring 1.542 µm |
+| waist | **1.04 µm** nach den Linsen (entspricht 1.287 mm davor) |
+| width | **0.37 MHz**, x und y gekoppelt |
+| Amplituden | r_x = **0.97**, r_y = **1.16** → amp_x = [0.97, 1, 0.97], amp_y = [1.16, 1, 1, 1.16] |
+| Optik | f1 = **75 mm**, f2 = 750 mm, fLO = 52.88 mm, λ = 795 nm, Offset 100 MHz |
+| Puls | f_Rabi = 1 MHz, Ω ~ I, η = 0, t₀ = 0 |
+| Zeitachse | 3 Perioden, 60 Frames/Periode, Gitter 200² |
+| Pulsfenster | Δ = **+50 GHz** (blau), 10 µW im Profil, T_p = 1 µs, atomgewichtet (17 µK, ν_r = 60.4 kHz) |
+| Leistungsfenster | Δ = **+50 GHz** |
+
+Daraus folgt, bei allen Tonphasen 0:
+
+| | |
+|---|---|
+| f₀ = width/6 | 61.67 kHz → T₀ = 16.22 µs |
+| Spotabstand | 1.169 µm in x, 0.779 µm in y |
+| Frequenzentartung | eine Eck-Paarung, statischer Anteil 7.16 % |
+| σ_t/⟨I⟩ im Plateau | 95.7 % (Schroeder: 91.4 %) |
+| Spitze der Rephasierung | 4.25 × max⟨I⟩ |
+| Crest-Faktor RF x / y | 2.45 / 2.83 (Schroeder: 2.16 / 2.00), RF-Spannungen √r |
+| **nächste Beat-Linie zu ν_r = 60.4 kHz** | **1.3 kHz** (zu 2ν_r: 2.5 kHz) — das GUI meldet das rot, siehe *Die daraus folgende Entwurfsregel* |
+
+**Der Airy-Faktor ist nicht mehr einstellbar.** Er sollte früher aus
+`airy_scale.py` kommen; diese Datei liegt aber in `Flattop GUI/`, der Import
+schlug stillschweigend fehl, und benutzt wurde ohnehin immer der Ersatzwert
+1.4830. Jetzt steht er als `AIRY_FACTOR` in `kern/beating_physik.py`, und das
+GUI zeigt ihn nur an.
+
+## Bedienung
+
+Alles wird eingetippt; Slider gibt es nur für die Zeitachse und die
+Abspielgeschwindigkeit. Gerechnet wird mit **Recompute** oder, mit dem Haken
+**Recompute automatically**, bei jeder Änderung. Ein Klick in die 2D-Karte
+setzt das Fadenkreuz; Orts-Zeit-Karte, Schnitt und I(t) beziehen sich danach
+auf diesen Punkt.
+
+| Gruppe | Feld | Bedeutung |
+|---|---|---|
+| Tones | N_x, N_y | Tonzahl je Achse |
+| Beam profile | Profile | Gauss oder Airy. Beim Airy tragen die Ringe ein **negatives** Vorzeichen — für die kohärente Summe wesentlich. |
+| | Airy factor | fest 1.4830, `first_zero_radius = Faktor · waist` (nur Anzeige) |
+| Beam / optics | Use one lens, f (single lens), *Design for a target beating period …* | Ein-Linsen-Aufbau, siehe unten |
+| | Mode, waist, waist_in | waist nach der Linse (µm) oder davor (mm); die jeweils andere Größe wird nachgezogen |
+| | width x / width y, `width_y = width_x` | Frequenzspanne je Achse; der Haken koppelt beide |
+| | Wavelength, Offset f0 | gehen in die Geometrie ein, **nicht** in die Beat-Frequenzen |
+| | f1, f2 | Teleskop (ignoriert bei *Use one lens*) |
+| Amplitudes | r_x, r_y | Außen/Innen-Verhältnis `amp_x = [r_x, 1, …, 1, r_x]`. Das sind **Intensitäts**-Gewichte, das Feld trägt die Wurzel. |
+| Pulsed operation | f_Rabi, Pulse start t_0, Coupling, light shift eta | siehe *Gepulster Betrieb* |
+| | *Move t_0 to a flat point …*, *Optimise phases and t_0 …* | siehe *Flacher Punkt statt bestem Punkt* |
+| Tone phases | 0 / Schroeder / Kitayoshi / randomise | Presets für alle Tonphasen |
+| | Target region + Radius | Zielgebiet des Puls-Optimierers: Plateau, Spot centres oder Circle around the centre (Standard, 2 µm) |
+| | keep degenerate pairs in quadrature | hält frequenzentartete Paare bei 90° (Standard: an) |
+| | φ_x, φ_y je Ton (Grad) | eintippbar |
+| Time axis | Periods, Frames/period, Grid resolution | Fensterlänge, Abtastung, Gitter. Frames/period **muss > 2·(höchste Beat-Frequenz / f₀)** sein, sonst Aliasing — das GUI warnt und nennt die nötige Zahl. |
+| | Camera exposure | Boxcar-Belichtung, siehe *Belichtungszeit der Kamera* |
+| | t, Play, fps | Zeitpunkt bzw. Animation |
+| | Trap frequency nu_r | nur für die Prüfung, ob eine Beat-Linie auf ν_r oder 2ν_r fällt |
+| Actions | Recompute automatically, Recompute | |
+| | Panel top right | Auswahl des Plots oben rechts, siehe *Die Plots* |
+| | Fast drawing during playback, pulse / spectrum also at many spots, record U(t) live | Zeichen- und Rechenoptionen |
+| | Colour scale | siehe *Farbskala* |
+| | *Power / intensity …*, *Pulse area / trigger jitter …*, *Camera frame series …* | Nebenfenster, siehe unten |
+| | Save view as PDF | PDF nach `GUI/Bilder`, Parameter als `.txt` daneben |
+
+## Die Plots
+
+Links groß **I(x,y,t)**, die Momentaufnahme; Kreise markieren
+frequenzentartete Spots. Rechts untereinander:
+
+1. **Panel oben rechts**, wählbar unter *Panel top right*:
+
+   | Auswahl | zeigt |
+   |---|---|
+   | Space-time map I(x, t) | Orts-Zeit-Karte entlang des x-Schnitts — die Schwebungsstreifen ohne Animation lesbar |
+   | Enhancement n_eff = I_max / ⟨I⟩ | Zahl der am Ort wirksam überlappenden Töne |
+   | Modulation depth | (I_max − I_min)/(I_max + I_min) |
+   | temporal variation σ_t/⟨I⟩ | exakt aus den Beat-Ordnungen, ohne Zeitraster |
+   | Spectrum of the beating | σ_d/⟨I⟩ je Beat-Ordnung, mit ν_r und 2ν_r |
+   | Uniformity U(t) of the three regions | siehe *Uniformity im Zeitverlauf* |
+   | Pulse area: U over the pulse start | U(θ) über t₀ |
+   | Pulse area A(t_0) and flat points | mittlere Fläche über t₀, flache Stellen markiert |
+   | Rabi oscillation | Anregung über der Pulslänge, siehe *Was man am Ende misst* |
+
+2. **x cut** bei t, mit Min/Max-Hüllkurve über die Zeit und dem Zeitmittel
+   als gestrichelter Referenz — das Zeitmittel ist das, was die inkohärenten
+   GUIs zeigen.
+3. **I(t) am Fadenkreuz** über dieselbe Zeitspanne, mit Modulationstiefe.
+
+## Farbskala
+
+Stehen alle Tonphasen auf 0, rephasieren die Töne einmal pro Grundperiode zu
+einem kurzen Puls — am Startpunkt mit **4.25× dem Maximum des Zeitmittels**
+(bei r_x = r_y = 1 und width 0.35 MHz waren es 7.5×). Eine feste Skala auf
+dieses Maximum lässt alle übrigen Frames fast schwarz, deshalb ist das
+99.5-Perzentil voreingestellt. Der Spitzenwert steht im Titel. Weitere
+Stellungen: Maximum über die Zeit, Maximum des Zeitmittels, je Frame.
+
+## Zum Vergleich mit den anderen GUIs
+
+Die Statuszeile prüft bei jedem Lauf, ob das Zeitmittel des Würfels mit der
+inkohärenten Summe `Σ_s a_s |u_s|²` übereinstimmt — also mit genau dem, was
+`Multitone_Lens_GUI.py` rechnet. Ohne entartete Spots stimmt es auf ~1e-6
+genau. Weicht es ab, steht der Betrag dort und kommt von der statischen
+Interferenz, nicht von der Numerik.
+
+> **Zu den Zahlen in den folgenden Abschnitten.** Sie sind Befunde aus dem
+> jeweiligen Stand der Untersuchung und nicht auf die aktuellen Startwerte
+> umgerechnet. Meist gilt 3×4 Airy mit waist 1.05–1.1 µm und width
+> 0.35–0.45 MHz (T₀ = 17.14 bzw. 13.33 µs); wo ein anderer Satz gerechnet
+> wurde (13×14, Ein-Linsen-Aufbau), steht es dabei. Die Aussagen selbst gelten
+> unverändert.
+
 ## Frequenzen
 
 ```
@@ -89,7 +229,7 @@ Vorbehalt: das alles setzt voraus, dass die beiden AODs phasenstarr vom selben
 Takt laufen und das Licht beide Beugungen kohärent durchläuft. Ist das der
 Fall, ist die relative Phase Δφ der entarteten Paare fest, aber **beliebig**
 und driftet langsam mit Weglänge und Temperatur — die statische Verzerrung
-wandert dann. Mit dem Würfel-Knopf in der Phasengruppe lässt sich dieser Fall durchspielen.
+wandert dann. Mit dem Preset *randomise* in der Gruppe *Tone phases* lässt sich dieser Fall durchspielen.
 
 ## Tonphasen — was sie können und was nicht
 
@@ -120,14 +260,17 @@ maßgebliche Größe. Ebenfalls entfernt: der Modus *frei je Spot* (er zeigte, d
 auch volle Freiheit nur auf 55 % kommt — Punkt gemacht, Knopf weg) und das
 Newman-Preset (lieferte auf drei Stellen dasselbe wie Schroeder).
 
-**Geblieben** sind die Presets 0 / Schroeder / würfeln, der Quadratur-Haken und
-der Puls-Optimierer.
+**Geblieben** sind die Presets 0 / Schroeder / Kitayoshi / randomise, der
+Quadratur-Haken und der Puls-Optimierer (*Optimise phases and t_0 for the pulse
+area*). Die Abschnitte *Ruhefenster* und *Phasen auf Uniformity optimieren*
+weiter unten beschreiben die entfernten Optimierer; ihre Zahlen bleiben als
+Befund stehen.
 
 ## Wo die Unruhe sitzt: das Spektrum
 
 I(r,t) ist eine Fourierreihe in f₀, und `Var_t(I) = Σ_{d≠0} |D_d|²` zerfällt in
-Beiträge einzelner Schwebungsfrequenzen d·f₀. Das Panel **Spektrum der
-Schwebung** zeigt sie, mit ν_r und 2ν_r eingezeichnet.
+Beiträge einzelner Schwebungsfrequenzen d·f₀. Das Panel **Spectrum of the
+beating** zeigt sie, mit ν_r und 2ν_r eingezeichnet.
 
 Bei 3×4, alle Phasen 0, als σ_d/⟨I⟩ im Plateau:
 
@@ -156,8 +299,8 @@ Tonphasen auf 70 %.
 Was Phasen dagegen sehr wohl können: die Unruhe **umverteilen**. Die Falle
 reagiert nicht auf jede Frequenz gleich — weit oberhalb ν_r mittelt das Atom
 weg, gefährlich sind ν_r (Aufheizen) und 2ν_r (parametrische Resonanz). Die
-Optimierung lässt sich deshalb auf ein Frequenzfenster richten
-(*Ziel: nur nahe ν_r und 2·ν_r*):
+Optimierung ließ sich deshalb auf ein Frequenzfenster richten (*Ziel: nur nahe
+ν_r und 2·ν_r*; diese Zielwahl ist inzwischen entfernt, der Befund gilt):
 
 | Ziel | erreicht | breitbandig danach | d=1 | d=2 |
 |---|---|---|---|---|
@@ -183,7 +326,10 @@ Global stabil geht nicht (siehe oben). **Auf einem begrenzten Zeitfenster
 schon** — und das ist meist das, was zählt, wenn der Puls ohnehin nur ein paar
 Mikrosekunden dauert.
 
-Der Knopf **Ruhefenster optimieren** sucht die Tonphasen, bei denen das Profil
+> **Entfernt.** Den Knopf *Ruhefenster optimieren* gibt es nicht mehr (siehe
+> *Tonphasen*). Der Abschnitt bleibt als Befund stehen.
+
+Der Knopf **Ruhefenster optimieren** suchte die Tonphasen, bei denen das Profil
 während eines Fensters der Länge T_win dem Zeitmittel ⟨I⟩ möglichst nahe kommt.
 
 > **Referenz ist ⟨I⟩, nicht der Mittelwert im Fenster.** Das ist keine
@@ -226,7 +372,7 @@ Wer den Rest der Periode nicht braucht, tauscht hier richtig.
 
 ## Uniformity im Zeitverlauf
 
-Das Panel **Uniformity U(t) der drei Gebiete** zeigt U = std/mean — dieselbe
+Das Panel **Uniformity U(t) of the three regions** zeigt U = std/mean — dieselbe
 Definition wie im Rest des Projekts — zu jedem Zeitpunkt einzeln, für alle drei
 Auswerte-Gebiete: Plateau, die Spot-Zentren (also die Fallentiefen
 untereinander) und den Kreis mit dem eingestellten Radius. Gepunktet liegt
@@ -249,7 +395,7 @@ es das.
 
 ### Live mitverfolgen
 
-Mit dem Haken **U(t) live mitschreiben** (Gruppe *Aktionen*) wächst die Kurve
+Mit dem Haken **record U(t) live** (Gruppe *Actions*) wächst die Kurve
 während der Animation mit: durchgezogen bis zum aktuellen Zeitpunkt, der
 restliche Verlauf blass dahinter, ein Punkt auf dem Momentanwert. Im Titel
 stehen die drei Momentanwerte als Zahlen — das ist die Anzeige, die man beim
@@ -261,8 +407,8 @@ schnelle Pfad liefert pixelgleiche Ausgabe wie der vollständige Aufbau (auf
 allen sechs Panels per Hash geprüft) und greift nur, solange Panel, Datenform
 und Fadenkreuz unverändert sind — sonst wird automatisch vollständig gezeichnet.
 
-Falls die Anzeige sich merkwürdig verhält, schaltet der Haken **Schnellzeichnen
-beim Abspielen** in der Gruppe *Aktionen* auf den vollständigen Neuaufbau
+Falls die Anzeige sich merkwürdig verhält, schaltet der Haken **Fast drawing
+during playback** in der Gruppe *Actions* auf den vollständigen Neuaufbau
 zurück.
 
 > Hier stand einmal ein Absatz über *Blitting* — einen eingefrorenen
@@ -277,7 +423,10 @@ zurück.
 
 ### Phasen auf Uniformity optimieren
 
-Die Zielgröße im Optimierer ist umschaltbar. Die drei Ziele führen auf
+> **Entfernt.** Diese Zielwahl gibt es nicht mehr; übrig ist nur der
+> Puls-Optimierer. Die Tabelle bleibt als Befund stehen.
+
+Die Zielgröße im Optimierer war umschaltbar. Die drei Ziele führen auf
 verschiedene Phasen und auf einen echten Zielkonflikt (3-µs-Fenster,
 Zielgebiet Spot-Zentren):
 
@@ -333,9 +482,9 @@ Am Arbeitspunkt genügt dafür eine einzige Zahl:
 | **90° (oder 270°)** | **0.0000 %** |
 
 Und es kostet fast nichts: mit erzwungener Quadratur geht die optimierte
-Uniformity an den Spot-Zentren von 23.7 % auf 24.3 %. Der Haken **entartete
-Paare in Quadratur halten** ist deshalb voreingestellt und wirkt in allen drei
-Optimierern.
+Uniformity an den Spot-Zentren von 23.7 % auf 24.3 %. Der Haken **keep
+degenerate pairs in quadrature** ist deshalb voreingestellt und wirkt im
+Puls-Optimierer.
 
 ### Warum echte Inkohärenz *schlechter* wäre
 
@@ -373,10 +522,21 @@ den Abstand der nächsten Linie:
 
 | width | f₀ | Abstand zu ν_r | Abstand zu 2ν_r | |
 |---|---|---|---|---|
-| 0.35 MHz (alt) | 58.3 kHz | **2.1 kHz** | **4.1 kHz** | kritisch |
-| 0.45 MHz (jetzt) | 75.0 kHz | 14.6 kHz | 29.2 kHz | unkritisch |
+| 0.35 MHz | 58.3 kHz | **2.1 kHz** | **4.1 kHz** | kritisch |
+| **0.37 MHz (Startwert)** | **61.67 kHz** | **1.3 kHz** | **2.5 kHz** | **kritisch** |
+| 0.45 MHz | 75.0 kHz | 14.6 kHz | 29.2 kHz | unkritisch |
 
-Der Wechsel auf width = 0.45 MHz hat also nebenbei genau das Richtige getan.
+Der Wechsel auf width = 0.45 MHz hatte also nebenbei genau das Richtige getan.
+**Die aktuellen Startwerte (0.37 MHz) liegen wieder fast genau auf ν_r** — das
+GUI meldet es rot in der Gruppe *Time axis*. Nach dem Kriterium des GUI
+(nächste Linie näher als 6 % an ν_r bzw. 2ν_r, ν_r = 60.4 kHz) sind bei 3×4
+die widths 0.23–0.25, 0.35–0.38 und 0.69–0.76 MHz kritisch; 0.39–0.68 MHz ist
+frei.
+
+> Gilt für Beleuchtung über **viele Fallenperioden** (Dauerlicht, lange
+> Belichtung, dichte Pulsfolgen). Ein einzelner Puls, der kürzer ist als 1/ν_r
+> (π-Puls 0.5 µs gegen 16.6 µs Fallenperiode), ist spektral ~1/T_p breit; dort
+> spielt die Lage der Linien keine Rolle, sondern nur der Stoß des Pulses.
 
 ## Gepulster Betrieb: die Pulsfläche ist die relevante Größe
 
@@ -465,6 +625,17 @@ numerisch bestätigt. Die Lichtverschiebung **deckelt also den Kontrast, erzeugt
 aber keine zusätzliche räumliche Ungleichmäßigkeit** — alle Uniformity-Zahlen
 dieses GUIs bleiben davon unberührt. Kompensiert man den Mittelwert durch
 Verstimmen des Raman, holt man das meiste zurück (bei η = 0.5: 0.77 → 0.93).
+Eine feste Verstimmung ist allerdings nicht mehr ∝ Ω; mit Beating schwankt der
+Rest zeitlich, und die geschlossene Form gilt dann nicht mehr exakt.
+
+**Das gilt nur für Ω ~ I.** Bei Ω ~ √I folgt die Verschiebung des Multiton-Asts
+weiter I, die Rabi-Frequenz aber √I — das Verhältnis ist nicht konstant, die
+Formel oben ist dort falsch. Seit 2026-09-11 wird in diesem Fall numerisch
+propagiert (`sqrt_law_excitation()`); η bedeutet dort den Anteil von δ/Ω, den
+der Multiton-Ast bei der Kalibrierintensität verursacht (bei gleich starken
+Ästen die Hälfte des Gesamt-η, die andere Hälfte vom sauberen Ast gilt als
+kompensiert). Größenordnung des Gesamt-η: ω_HF/Δ, also ≈ 0.06 bei +50 GHz und
+≈ 0.44 bei −8 GHz.
 
 **Nicht im Modell**, und beim Vergleich mit der Messung zu bedenken: statische
 Zweiphotonen-Verstimmung und Magnetfeldshifts; spontane Emission über den
@@ -530,27 +701,28 @@ Die Kurven werden erst berechnet, wenn das Panel gewählt ist (etwa eine
 Sekunde), und danach zwischengespeichert.
 
 ### Bedienung
-### Bedienung
 
-Die Gruppe **Gepulster Betrieb** hat drei Eingaben und einen Knopf:
+Die Gruppe **Pulsed operation** hat vier Eingaben und zwei Knöpfe:
 
 | Feld | Bedeutung |
 |---|---|
 | f_Rabi | Ω/2π; daraus folgt T_π = 1/(2 f_Rabi) |
-| Pulsbeginn t₀ | Lage des Pulses im Schwebungszyklus |
-| Kopplung | Ω ~ I (Zweiphotonen-Raman, beide Äste aus diesem Profil) oder Ω ~ √I (dieses Profil ist nur ein Ast) |
+| Pulse start t_0 | Lage des Pulses im Schwebungszyklus |
+| Coupling | Ω ~ I (Zweiphotonen-Raman, beide Äste aus diesem Profil) oder Ω ~ √I (dieses Profil ist nur ein Ast) |
+| light shift eta | δ/Ω, deckelt den Kontrast, siehe *Welche Physik im Anregungsmodell steckt* |
 | *Move t_0 to a flat point* | setzt t₀ auf eine jitter-tolerante Stelle |
 | *Optimise phases and t_0* | minimiert U(θ) im Zielgebiet, etwa 30 s |
 
-Das Panel **Pulsfläche: U über den Pulsbeginn** zeigt U(θ) als Funktion von t₀
+Das Panel **Pulse area: U over the pulse start** zeigt U(θ) als Funktion von t₀
 über einen ganzen Schwebungszyklus, mit dem besten t₀ markiert und der
 Zeitmittel-Referenz als gepunkteter Linie.
 
 Die Kopplung macht einen spürbaren Unterschied: mit Ω ~ √I liegt das beste t₀
 bei 11.1 % statt 20.3 %, weil die Wurzel den Dynamikbereich staucht.
 
-**Zielgebiet ist jetzt der 2-µm-Kreis** um die MusterMitte — Voreinstellung im
-Feld *Zielgebiet*, Radius im Feld daneben.
+**Zielgebiet ist der 2-µm-Kreis** um die Mustermitte — Voreinstellung
+*Circle around the centre* im Feld *Target region* (Gruppe *Tone phases*),
+Radius im Feld daneben.
 
 ## Was die Modulation tatsächlich reduziert
 
@@ -584,69 +756,6 @@ mittelt es sie weg, und dann — und erst dann — ist das inkohärente Bild der
 bestehenden GUIs die richtige Beschreibung. Der Preis ist ein zehnfach
 kleinerer Strahl auf dem AOD; die Zahl der auflösbaren Spots (τ·Δf) bleibt
 dabei unverändert, weil Apertur und Bandbreite gegenläufig skalieren.
-
-## Bedienung
-
-Alles wird eingetippt, es gibt keine Slider außer für die Zeitachse.
-
-**Voreingestellt ist der Arbeitspunkt**, das GUI startet immer damit:
-
-| | |
-|---|---|
-| Töne | 3 × 4 |
-| Profil | **Airy**, Faktor 1.4830 → erster Nullring 1.631 µm |
-| waist | **1.10 µm** (entspricht 0.973 mm vor der Linse) |
-| width | **0.45 MHz** (x und y gekoppelt) |
-| Amplituden | r_x = 1.0, r_y = **1.2** → amp_y = [1.2, 1, 1, 1.2] |
-| Optik | f1 = **60 mm**, f2 = 750 mm, λ = 795 nm, Offset 100 MHz |
-
-Daraus folgt: Spot-Abstand 1.137 µm in x und 0.758 µm in y, Grundperiode
-T₀ = 13.33 µs (f₀ = width/6 = 75.0 kHz, also 1.24 · ν_r), eine
-frequenzentartete Eck-Paarung mit 7.1 % statischem Anteil, und ohne
-Phasenoptimierung σ_t/⟨I⟩ = 107 % im Plateau (mit Optimierung 73 %).
-
-| Gruppe | Feld | Bedeutung |
-|---|---|---|
-| Töne | N_x, N_y | Tonzahl je Achse |
-| Strahlprofil | Gauß / Airy | Feldprofil eines Spots. Beim Airy tragen die Ringe ein **negatives** Vorzeichen — für die kohärente Summe wesentlich. |
-| | Airy-Faktor | `first_zero_radius = Faktor · waist`, Voreinstellung 1.4830 aus `airy_scale.py` |
-| Strahl / Optik | Modus | waist nach der Linse (µm) oder davor (mm); die jeweils andere Größe wird nachgezogen |
-| | width x / width y | Frequenzspanne je Achse; Häkchen koppelt beide |
-| | Wellenlänge, Offset | gehen in die Geometrie ein, **nicht** in die Beat-Frequenzen |
-| | f1, f2 | Teleskop |
-| Amplituden | r_x, r_y | Außen/Innen-Verhältnis wie in `amps_from_ratio()`: `amp_x = [r_x, 1, …, 1, r_x]`. Das sind **Intensitäts**-Gewichte, das Feld trägt die Wurzel. |
-| Zeitachse | Perioden | Fensterlänge in Grundperioden |
-| | Frames/Periode | Abtastung. **Muss > 2·(höchste Beat-Frequenz / f_0) sein**, sonst Aliasing — das GUI warnt und nennt die nötige Zahl. |
-| Tonphasen | φ_x, φ_y je Ton (Grad) | eintippbar; Knöpfe für 0 / Schroeder / Newman / würfeln / Spitze minimieren |
-| | Play / fps / t | Animation bzw. manuelles Durchfahren |
-
-Ein Klick in die 2D-Karte setzt das Fadenkreuz; Orts-Zeit-Karte, Schnitt und
-I(t) beziehen sich danach auf diesen Punkt.
-
-## Die vier Plots
-
-1. **I(x,y,t)** — Momentaufnahme. Kreise markieren frequenzentartete Spots.
-2. **Orts-Zeit-Karte I(x,t)** entlang des x-Schnitts über das ganze Fenster —
-   hier stehen die Schwebungsstreifen als Muster, ohne Animation lesbar.
-3. **x-Schnitt** bei t, mit Min/Max-Hüllkurve über die Zeit und dem Zeitmittel
-   als gestrichelter Referenz — das Zeitmittel ist das, was die bisherigen
-   GUIs zeigen.
-4. **I(t) am Fadenkreuz** über dieselbe Zeitspanne, mit Modulationstiefe.
-
-## Farbskala
-
-Stehen alle Tonphasen auf 0, rephasieren die Töne einmal pro Grundperiode zu
-einem kurzen Puls — bei 3×4 mit **7.5× dem Maximum des Zeitmittels**. Eine
-feste Skala auf dieses Maximum lässt alle übrigen Frames fast schwarz, deshalb
-ist das 99.5-Perzentil voreingestellt. Der Spitzenwert steht im Titel.
-
-## Zum Vergleich mit den anderen GUIs
-
-Die Statuszeile prüft bei jedem Lauf, ob das Zeitmittel des Würfels mit der
-inkohärenten Summe `Σ_s a_s |u_s|²` übereinstimmt — also mit genau dem, was
-`Multitone_Lens_GUI.py` rechnet. Ohne entartete Spots stimmt es auf ~1e-6
-genau. Weicht es ab, steht der Betrag dort und kommt von der statischen
-Interferenz, nicht von der Numerik.
 
 ## Ein-Linsen-Aufbau (Labor, Messbild)
 
@@ -689,7 +798,7 @@ f₀ = width / kgV(N_x−1, N_y−1)     ⇔     width = kgV(N_x−1, N_y−1) /
 Damit steht die width fest, sobald das Gitter steht — der Knopf **Design for a
 target beating period …** sucht die Gitter ab und listet die Sätze, die die
 geforderte Periode *exakt* treffen, sortiert nach Abweichung von einem
-Ziel-`pitch/waist`. Doppelklick oder *Markierten Satz übernehmen* setzt N_x,
+Ziel-`pitch/waist`. Doppelklick oder *Apply the selected set* setzt N_x,
 N_y, width_x, width_y, Brennweite, Eingangswaist und Belichtungszeit im
 Haupt-GUI und rechnet neu; Bilder pro Periode, Periodenzahl und
 Gitterauflösung werden dabei auf etwas Bezahlbares gesetzt.
@@ -729,7 +838,7 @@ Puls- und Rabi-Analyse: das Atom integriert nicht.
 
 ### Rechenzeit bei vielen Tönen
 
-`time_stats_exact()` läuft nicht mehr über alle Spotpaare (O(S²)), sondern
+`time_stats_exact()` (in `kern/beating_physik.py`) läuft nicht mehr über alle Spotpaare (O(S²)), sondern
 komprimiert die Spots auf ihre **Beat-Ordnungen** und wertet I(t) mit einer FFT
 an 2K+1 Stützstellen exakt aus. 182 Spots auf einem 140²-Gitter mit 625 Bildern
 brauchen damit rund 3 s statt Minuten. Die alte Fassung steht als
@@ -752,7 +861,7 @@ die Bildzahl. Voreinstellung: lückenlos über genau eine Periode.
 
 Das Fenster ist **nicht modal** und bleibt offen. Der Ablauf zum Ausprobieren
 von Phasen ist: Phasen im Haupt-GUI setzen → *Recompute* → im Serienfenster
-*Neu zeichnen*. Die Kennzahlzeile darunter nennt den Hub pro Pixel im Plateau
+*Redraw*. Die Kennzahlzeile darunter nennt den Hub pro Pixel im Plateau
 (Median und p90) und ob das Gesamtlicht im Plateau mitschwankt oder ob es eine
 reine Umverteilung ist — Letzteres ist der bessere Fall, weil es dann nicht mit
 einer Laserleistungsdrift verwechselt werden kann.
@@ -792,7 +901,9 @@ ist die Spanne das Zwölffache des Abstands, das Fenster liegt dann komplett
 innerhalb der Rephasierungsspitze und der Effektivwert kommt viel zu groß
 heraus: 2.19 statt der korrekten 5.10 = √(2N) bei Phasen 0. Der Fehler wächst
 mit der Tonzahl, also genau dort, wo die Zahl gebraucht wird. Probe: Phasen 0
-muss exakt √(2N) geben. Die RF-Amplituden (r_x, r_y) gehen jetzt mit ein.
+muss exakt √(2N) geben. Die RF-Amplituden gehen mit ein, und zwar als
+**Spannungen** √r_x, √r_y (r ist ein Leistungsverhältnis; bis 2026-09-11 stand
+dort fälschlich r).
 
 Die Bilder werden nicht aus dem Würfel gemittelt, sondern exakt gerechnet
 (`camera_frames_exact()`): I(t) ist ein trigonometrisches Polynom in
@@ -893,7 +1004,8 @@ Der differentielle Lichtshift η aus dem Haupt-GUI geht mit ein:
 `P = 1/(1+η²)·sin²(√(1+η²)·θ/2)`. Bei η = 0.442 (Δ = −8 GHz) sinkt die Anregung
 weiter von 0.48 auf 0.41. η ist orts- und zeitunabhängig, weil Ω und δ_LS
 denselben Faktor I tragen — der Lichtshift deckelt den Kontrast, fügt aber keine
-zusätzliche räumliche Struktur hinzu.
+zusätzliche räumliche Struktur hinzu. (Für Ω ~ I; bei Ω ~ √I wird propagiert,
+siehe *Welche Physik im Anregungsmodell steckt*.)
 
 ## Leistung und Intensität
 
@@ -906,16 +1018,22 @@ Die Kette:
 1. **Atomphysik** aus `kern/rb85_raman.py`: adiabatische Elimination der
    5P-Zustände mit voller, vorzeichenrichtiger Summe über D1 *und* D2 samt
    Hyperfeinstruktur. Ergebnis `Ω = C_rabi·I`, `δ_LS = C_shift·I`,
-   `Γ = C_scatter·I`, alle linear in I. Für Δ = −8 GHz, σ⁺/σ⁺ kopropagierend,
+   `Γ = C_scatter·I`, alle linear in I. Für Δ = −8 GHz (damalige Voreinstellung,
+   jetzt +50 GHz: C_rabi = 11.66, η = −0.061), σ⁺/σ⁺ kopropagierend,
    β = 0.5, m_F = 0: **C_rabi = 71.98 rad/s pro W/m²**, η = −0.442.
 2. **Bezug**: Ω/2π gilt für das *Zeitmittel* der Intensität im gewählten Bereich
    — dieselbe Konvention wie im Pulsfenster.
 3. **Fläche**: `P = I_ref·A_eff` mit `A_eff = ∫I dA / ⟨I⟩_Bereich`. Das
-   Flächenintegral kommt **analytisch** aus der Summe der Einzelspots
-   (`profile_total_power()`), nicht aus dem Rechengitter — beim Airy-Profil
-   fehlen dort 0.55 % der Leistung in den abgeschnittenen Ringen.
-4. **Aufteilung**: Spot (n,m) ∝ a_x(n)²·a_y(m)²; RF-Ton n der x-Achse ∝
-   a_x(n)²/Σa_x², weil er alle Spots seiner Spalte speist.
+   Flächenintegral kommt **analytisch** aus `profile_total_power()`, nicht aus
+   dem Rechengitter — beim Airy-Profil fehlen dort je nach Rand bis ~5 % der
+   Leistung in den abgeschnittenen Ringen. Jeder Spot trägt sein
+   Intensitätsgewicht a (Summe über a, **nicht a²**), dazu kommt der statische
+   Kreuzterm frequenzentarteter Spots (3×4, Airy, Phasen 0: +1.1 %).
+4. **Aufteilung**: a_x, a_y sind RF-**Leistungs**verhältnisse (Beugungseffizienz
+   ∝ RF-Leistung, gebeugtes Feld ∝ RF-Spannung). Spot (n,m) ∝ a_x(n)·a_y(m);
+   RF-Ton n der x-Achse ∝ a_x(n)/Σa_x, weil er alle Spots seiner Spalte speist.
+   Die RF-**Spannung** eines Tons ist √a_x(n) — das braucht ein AWG mit
+   Spannungsamplituden (r = 1.16 → 1.077, +0.64 dB).
 
 Für den Ein-Linsen-Satz 13×14 bei Ω/2π = 1 MHz:
 
@@ -931,11 +1049,20 @@ Für den Ein-Linsen-Satz 13×14 bei Ω/2π = 1 MHz:
 Zum Vergleich der Standard-Arbeitspunkt 3×4 mit 1.1 µm Waist: A_eff = 15 µm²,
 also 1.3 µW — der Faktor 600 ist reine Fläche.
 
+> Die Zahlen dieses Abschnitts und von *Leistungskette* stammen von **vor der
+> Korrektur 2026-09-11**: A_eff, Leistungen und Aufteilung rechneten mit a²
+> statt a. Bei r ≠ 1 waren A_eff und die nötige Leistung um Σa²/Σa zu groß
+> (3×4 mit r_x/r_y = 0.97/1.16: 6.4 %, abzüglich +1.1 % statischer Kreuzterm
+> bei Phasen 0 → neu A_eff × 0.95), und die Spots/Töne am Rand bekamen r² statt
+> r. Bei r_x = r_y = 1 ändert sich nur der statische Kreuzterm.
+
 **Nicht enthalten**: Beugungseffizienz des AOD, Transmission der Optik,
 Intermodulation. Angegeben ist die Leistung *im Profil*, also nach dem AOD.
 
 Fehlt `arc` (das `rb85_raman` braucht), bleibt der Dialog benutzbar: C_rabi wird
-dann als Eingabefeld freigeschaltet, voreingestellt auf 71.985.
+dann als Eingabefeld freigeschaltet, voreingestellt auf 71.985 — das ist der
+Wert bei −8 GHz, bei der Voreinstellung +50 GHz also von Hand auf 11.66 zu
+setzen.
 
 ### Atomgewichtet — die einzige Auswertung, die eine Atom-Größe liefert
 
@@ -982,13 +1109,6 @@ Physik am Atom.
 Die Karte oben in der Mitte zeigt im atomgewichteten Fall den lokalen Ausschnitt
 in Nanometern mit den 1σ- und 2σ-Ringen des Atoms.
 
-## Startwerte
-
-Das GUI öffnet jetzt mit dem aktuellen Arbeitspunkt: **3×4 Töne, f1 = 75 mm,
-f2 = 750 mm, width = 0.37 MHz, Waist 1.05 µm, r_x = 0.97, r_y = 1.16**, Airy,
-795 nm, 100 MHz Offset, Ω/2π = 1 MHz. Daraus folgt f₀ = 61.67 kHz und
-T₀ = 16.22 µs.
-
 ## Leistungskette: was wo gebraucht wird
 
 Das Leistungsfenster rechnet die ganze Kette durch. Eingaben: Leistung vor dem
@@ -997,7 +1117,8 @@ multiplizieren sich), Transmission der Optik. Der Bezugsbereich hat jetzt
 ebenfalls die atomgewichtete Option — sonst kalibriert man f_rabi auf eine
 Fläche und rechnet die Pulsfläche am Atom.
 
-Für den Arbeitspunkt bei Ω/2π = 1 MHz am Atom, Δ = −8 GHz:
+Für den damaligen Arbeitspunkt (waist 1.05 µm) bei Ω/2π = 1 MHz am Atom,
+Δ = −8 GHz (Voreinstellung jetzt +50 GHz):
 
 | | |
 |---|---|
@@ -1138,13 +1259,21 @@ hellsten). Damit:
 | Größe | Wert |
 |---|---|
 | C_rabi (+50 GHz) | 11.66 rad/s pro W/m² (bei −8 GHz: 71.98) |
-| η = (Ω_A−Ω_B)/(Ω_A+Ω_B) | −0.061 (bei −8 GHz: −0.179) |
-| Kontrastgrenze 1−η² | 0.9963 (bei −8 GHz: 0.8364) |
+| η = δ_LS/Ω | −0.061 (bei −8 GHz: −0.442) |
+| Kontrastgrenze 1/(1+η²) | 0.9963 (bei −8 GHz: 0.8365) |
 | A_eff | 14.44 µm² |
 | I_ref | 69.3 W/cm² |
 | **Ω/2π** | **1.286 MHz** |
 | Streuung pro 1-µs-Puls | 0.087 % |
 | für einen π-Puls in 1 µs nötig | 3.89 µW |
+
+> Vor der Korrektur 2026-09-11 gerechnet. Mit Leistung ∝ a statt a² (und dem
+> statischen Kreuzterm) bei denselben 10 µW, headless nachgerechnet: A_eff
+> 14.39 → 13.67 µm² (Phasen 0) bzw. 14.40 → 13.40 µm² (Schroeder), I_ref und
+> Ω/2π entsprechend +5.3 % bzw. +7.5 %, π-Puls-Leistung 3.88 → 3.68 µW,
+> hellster Spot 1.00 → 0.91 µW. Auch ⟨θ⟩ in der folgenden Tabelle steigt um
+> diese Faktoren; σ_θ und der Abfall bei ±1 µs bleiben gleich. Die Anregung bei
+> θ ≈ 11 π reagiert auf 5 % in θ empfindlich und ist neu im GUI abzulesen.
 
 Die blaue Verstimmung ist der eigentliche Gewinn: Ω ∝ 1/Δ, die Streurate aber
 ∝ 1/Δ², und die Ungleichheit der beiden Raman-Zweige (η) fällt ebenfalls,
@@ -1240,3 +1369,78 @@ der θ-Karte nicht ablesen kann.
 Die beiden Karten gehen jetzt auch unter verschiedenen Namen ins Bilderverzeichnis:
 `…_areamap.pdf` bzw. `…_excmap.pdf`, damit eine gespeicherte θ-Karte nicht von
 einer p-Karte überschrieben wird.
+
+## Umbau 2026-09-11: Physik in `kern/beating_physik.py`
+
+* **Alles Physikalische** aus `Beating_Multitone_GUI.py` — Konstanten,
+  Frequenzen und Geometrie, Felder, Beat-Frequenzen und Entartung, Tonphasen,
+  Zeitreihe, exakte Zeitstatistik, Gütemaße, Leistung, Atomgewichtung,
+  Pulsfläche — steht jetzt in `kern/beating_physik.py`, nach Themen in
+  Abschnitte 0–11 sortiert. Die Funktionen sind unverändert übernommen (per
+  Syntaxbaum-Vergleich geprüft); das GUI schrumpft von 3313 auf gut 2050
+  Zeilen.
+* Die Nebenfenster bekommen die Funktionen nicht mehr als Dictionary `fns` vom
+  GUI gereicht, sondern importieren `beating_physik` selbst.
+* `kern/` ist ein Paket (`kern/__init__.py`). GUI und Nebenfenster importieren
+  `from kern.beating_physik import …` bzw. `from kern import beating_physik` —
+  ohne Umweg über `sys.path`, damit PyCharm den Import auflöst und nicht rot
+  markiert. `kern/beating_profil.py` und `Rabi_Rb85_GUI.py` bleiben beim
+  bisherigen Weg (`kern/` im `sys.path`).
+  `one_lens_design.py` nimmt θ_max, f_band, `amps_from_ratio()` und das
+  Spotprofil ebenfalls von dort, statt eigene Kopien zu halten.
+* `kern/beating_profil.py` importiert nicht mehr das ganze GUI (und damit Qt),
+  sondern nur `beating_physik.py`. fLO, θ_max und f_band gehen jetzt als
+  Argumente an `compute_centers_and_freqs()`, statt vorübergehend die
+  Modulkonstanten zu überschreiben. Sein Arbeitspunkt `WP` entspricht den
+  Startwerten des GUI (waist 1.04 µm, width 0.37 MHz, r_x/r_y = 0.97/1.16,
+  f_Rabi = 1 MHz) mit Δ = +50 GHz.
+* Airy-Faktor fest 1.4830, waist-Startwert 1.04 µm, Δ-Voreinstellung im
+  Leistungsfenster +50 GHz (wie im Pulsfenster).
+* `np.trapezoid` fällt unter numpy < 2 automatisch auf `np.trapz` zurück.
+
+Kontrolle: altes und neues GUI mit identischen Eingaben headless durchgerechnet
+(Startpunkt, Schroeder, Kitayoshi, Ω ~ √I, ungleiche widths, Gauß, Ein-Linse
+mit Belichtung, flacher Punkt, Puls-Optimierer, alle 9 Panels, alle drei
+Nebenfenster, Kandidatensuche des Ein-Linsen-Dialogs, `beating_profil.profil()`)
+— alle Arrays und Anzeigetexte **bitgleich**.
+
+## Physik-Korrekturen 2026-09-11
+
+Beim Durchgehen der Physik gefunden und behoben, in beiden Repos gleich:
+
+* **Leistung ∝ a, nicht a².** `amps` sind Intensitätsgewichte, das Feld trägt
+  √a (`build_field_stack()`). `profile_total_power()`, die Aufteilung in
+  `power_budget.py` und `pulse_timing.py` und `plateau_ripple()` in
+  `one_lens_design.py` rechneten mit a². Neu in `kern/beating_physik.py`:
+  `spot_power_shares()`, `tone_power_shares()`, `rf_voltage_ratios()`.
+  Bestätigt gegen ein Gitterintegral des Zeitmittels (Gauß exakt, Airy bis auf
+  0.12 % Abschneiden bei 200 µm).
+* **Statischer Kreuzterm in der Gesamtleistung.** Frequenzentartete Spots
+  tragen `2·√(a_s a_s')·cos Δφ·∫u_s u_s' dA` bei. Das Überlappintegral ist
+  analytisch (`spot_overlap_integral()`: Gauß `πw²/2·exp(−d²/2w²)`, Airy
+  `P_Spot·u(d)`). 3×4, Airy, Phasen 0: +1.1 % — nicht „weit unter einem
+  Promille“, wie es vorher hieß (die alte Aussage bezog sich auf 13×14).
+* **`kalibrieren_auf_leistung()`** in `kern/beating_profil.py` summierte über das
+  abgeschnittene Rechengitter (Airy: −4.7 %, Intensität also ~5 % zu hoch).
+  Jetzt analytisch über `profile_total_power()`. Betrifft `Rabi_Rb85_GUI.py`
+  und `beispiele/rabi_pro_atom.py`.
+* **Lichtverschiebung bei Ω ~ √I.** Die geschlossene Form mit η setzt δ/Ω =
+  const voraus und wurde trotzdem angewandt (Rabi-Panel, Pulsfenster). Jetzt
+  numerische Propagation (`sqrt_law_excitation()`), geprüft gegen
+  `solve_ivp` (Abweichung < 10⁻⁵) und gegen die geschlossene Form bei η = 0.
+  Bei η = 0.3 wichen die Rabi-Kurven vorher um bis zu 5 Prozentpunkte ab.
+* **Pulsfenster bei Ω ~ √I** stürzte mit Normierung über die Leistung ab (A_eff
+  ist dort nicht definiert, alles NaN). Es schaltet jetzt auf *Omega given*.
+* **Crest-Faktor** mit RF-Spannungen √r statt r (3×4 Startwert: y 2.82 → 2.83).
+* **Texte:** Resonanzprüfung gilt nur für Beleuchtung über viele
+  Fallenperioden; `compute_grid()` nennt „keine Nachbar-Sites“ jetzt als
+  Annahme (kohärent getriebene Nachbarn würden linear im Nachbarfeld
+  interferieren); η-Tooltip: Größenordnung ω_HF/Δ statt ω_HF/(2Δ), η = 0 heißt
+  „vernachlässigt“, nicht „kompensiert“.
+
+Unverändert und weiter offen: C_rabi-Ersatzwert ohne `arc` ist der −8-GHz-Wert;
+`Rabi_Rb85_GUI.py` steht noch auf dem alten Arbeitspunkt.
+
+Kontrolle: altes und neues GUI headless mit identischen Eingaben. Unverändert
+(bitgleich): f₀, Zeitmittel, Varianz, σ_t/⟨I⟩, Pulsflächen-Uniformity,
+Rabi-Kurven für Ω ~ I. Geändert nur die oben genannten Größen.
