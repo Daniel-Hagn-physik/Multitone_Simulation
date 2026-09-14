@@ -104,7 +104,10 @@ auf diesen Punkt.
 | Pulsed operation | f_Rabi, Pulse start t_0, Coupling, light shift eta | siehe *Gepulster Betrieb* |
 | | *Move t_0 to a flat point …*, *Optimise phases and t_0 …* | siehe *Flacher Punkt statt bestem Punkt* |
 | Tone phases | 0 / Schroeder / Kitayoshi / randomise | Presets für alle Tonphasen |
-| | Target region + Radius | Zielgebiet des Puls-Optimierers: Plateau, Spot centres oder Circle around the centre (Standard, 2 µm) |
+| | Optimise | **was** minimiert wird: *beating at the atom* (Standard) oder *pulse area, spatial spread over a region*. Siehe *Phasen für das Atom optimieren* |
+| | Pulse length T_p, *= pi pulse* | Pulslänge, mit der der Optimierer rechnet (Standard 1 µs). Unabhängig von f_Rabi — das Experiment legt den Puls fest, nicht die π-Bedingung |
+| | atom T, trap frequency nu_r | Atomtemperatur und radiale Fallenfrequenz → σ (angezeigt). Nur beim atomgewichteten Ziel |
+| | Target region + Radius | Zielgebiet nur des **Regions**-Ziels: Plateau, Spot centres oder Circle around the centre (Standard, 2 µm) |
 | | keep degenerate pairs in quadrature | hält frequenzentartete Paare bei 90° (Standard: an) |
 | | φ_x, φ_y je Ton (Grad) | eintippbar |
 | Time axis | Periods, Frames/period, Grid resolution | Fensterlänge, Abtastung, Gitter. Frames/period **muss > 2·(höchste Beat-Frequenz / f₀)** sein, sonst Aliasing — das GUI warnt und nennt die nötige Zahl. |
@@ -261,10 +264,168 @@ auch volle Freiheit nur auf 55 % kommt — Punkt gemacht, Knopf weg) und das
 Newman-Preset (lieferte auf drei Stellen dasselbe wie Schroeder).
 
 **Geblieben** sind die Presets 0 / Schroeder / Kitayoshi / randomise, der
-Quadratur-Haken und der Puls-Optimierer (*Optimise phases and t_0 for the pulse
-area*). Die Abschnitte *Ruhefenster* und *Phasen auf Uniformity optimieren*
-weiter unten beschreiben die entfernten Optimierer; ihre Zahlen bleiben als
-Befund stehen.
+Quadratur-Haken und der Puls-Optimierer. Die Abschnitte *Ruhefenster* und
+*Phasen auf Uniformity optimieren* weiter unten beschreiben die entfernten
+Optimierer; ihre Zahlen bleiben als Befund stehen.
+
+Alle Zahlen dieser Tabelle gelten für das **Plateau**, also für eine Kamera.
+Was ein einzelnes **Atom** sieht, ist eine andere Frage und steht in
+*Phasen für das Atom optimieren* — dort ist die Zielgröße nicht σ_t/⟨I⟩ über
+eine Fläche, sondern der Hub der **Pulsfläche am Atomort** über den
+Trigger-Zeitpunkt.
+
+## Phasen für das Atom optimieren
+
+Alle bisherigen Zielgrößen mitteln über eine **Fläche** — ein Plateau, einen
+Kreis, die Spotzentren. Auf keiner davon sitzt ein einzelnes Atom. Ein Atom
+sitzt an **einem** Ort und ist dort um σ_thermal unscharf (108 nm bei 17 µK und
+ν_r = 60.4 kHz); was es sieht, ist die mit seiner Aufenthaltswahrscheinlichkeit
+W(r) gewichtete Intensität — dieselbe Gewichtung, die
+`Weighted_Multitone_Lens_GUI.py` und das Pulsfenster benutzen.
+
+Und weil das Atom an einem Ort sitzt, ist auch die *Zeit*frage eine andere:
+bei perfektem Trigger friert jeder Schuss auf denselben Wert ein. Was von
+Schuss zu Schuss variiert, ist **wann** der Puls im Schwebungszyklus landet.
+Genau das ist die Zielgröße.
+
+### Die Struktur wird dadurch einfacher, nicht komplizierter
+
+Das Ortsmittel vertauscht mit allem Weiteren, darf also ganz nach vorne:
+
+```
+I_W(t) = Σ_r W(r) I(r,t) / Σ_r W(r) = Σ_d C_d e^{2πi d f₀ t}
+C_d    = Σ_{k_s − k_s' = d}  ⟨g_s g_s'⟩_W · e^{i(φ_s − φ_s')}
+```
+
+Aus einem Feld über tausenden Pixeln wird **ein** komplexer Vektor mit so
+vielen Einträgen, wie es Beat-Ordnungen gibt — bei 3×4 zwölf. Die
+Paarprodukte ⟨g_s g_s'⟩_W hängen nicht von den Phasen ab und werden einmal
+vorberechnet. Eine Auswertung kostet danach rund 13 µs statt einer
+Matrixrechnung pro Pixel; deshalb sind 300 Startpunkte praktisch gratis, und
+die braucht man auch — die Zielfunktion steckt voller lokaler Minima.
+
+Ein Rechteckpuls der Länge T_p ab t₀ ist derselbe Boxcar wie eine Belichtung,
+also ein sinc auf jeder Ordnung:
+
+```
+A(t₀) = (1/T_p) ∫_{t₀}^{t₀+T_p} I_W(t) dt
+      = Σ_d C_d · sinc(d f₀ T_p) · e^{2πi d f₀ (t₀ + T_p/2)}
+```
+
+Bei T_p = 1 µs und f₀ = 61.67 kHz ist sinc(0.0617) = 0.994 auf der Grundordnung
+und immer noch 0.30 bei d = 12: **der Puls mittelt die Schwebung nicht weg, er
+tastet sie ab.** Erst bei T_p = T₀ wird jedes sinc(d) = 0 und der Hub exakt
+null — der Puls deckt dann genau eine volle Periode ab. (Das ist zugleich der
+Testfall, an dem die Implementierung geprüft ist: R kommt dort auf 5·10⁻¹⁷
+heraus.)
+
+Wegen Parseval ist der Effektivwert über eine ganze Grundperiode geschlossen
+angebbar, ganz ohne Zeitraster:
+
+```
+R = sqrt( 2 · Σ_{d>0} |C_d · sinc(d f₀ T_p)|² ) / C_0
+```
+
+**R ist die Zielgröße**: die relative Schwankung der Pulsfläche am Atomort über
+den Trigger-Zeitpunkt. R = 0 hieße, der Puls liefert bei *jedem* Trigger
+dieselbe Rabi-Fläche.
+
+### Was dabei herauskommt
+
+Arbeitspunkt, T_p = 1 µs, σ = 108 nm:
+
+| Phasen | R | A(t₀)/⟨A⟩ | Crest x / y |
+|---|---|---|---|
+| alle 0 | 115 % | 4.25 | 2.45 / 2.83 |
+| Schroeder | 72 % | 2.70 | 2.16 / 2.00 |
+| Kitayoshi | 72 % | — | 2.16 / 2.00 |
+| **optimiert** | **41 %** | 1.47 | **1.82 / 2.20** |
+| mit Quadratur-Haken | 41.1 % | 1.47 | 1.82 / 2.21 |
+| ohne Quadratur | 40.1 % | 1.40 | 1.82 / 2.20 |
+| freie Spotphasen (nicht fahrbar) | 24.9 % | — | — |
+
+Die Quadratur kostet also 1 Prozentpunkt — sie kann anbleiben.
+
+Am Pegel ⟨A⟩ ist mit Phasen nichts zu holen: 1.9128 gegen 1.9119 zwischen dem
+schlechtesten und dem besten Satz. ⟨A⟩ hängt nur über die frequenzentarteten
+Paare überhaupt von den Phasen ab. Zu gewinnen ist ausschließlich die
+Schwebung.
+
+Nach der Suche wird t₀ auf das **Maximum** von A(t₀) gelegt. Dort ist
+dA/dt₀ = 0, Jitter geht also nur quadratisch ein, und das Atom bekommt mehr
+als den Zeitmittelwert statt weniger.
+
+### Abhängigkeit von der Pulslänge
+
+| T_p | 0.2 µs | 0.5 µs | 1 µs | 2 µs | 5 µs | 16.22 µs = T₀ |
+|---|---|---|---|---|---|---|
+| R optimiert | 44 % | 43 % | 41 % | 33 % | 15 % | 0 % |
+| Crest x / y | 1.82/2.20 | 1.82/2.20 | 1.82/2.21 | 1.82/2.21 | 1.82/2.22 | 1.84/2.18 |
+
+Bemerkenswert: der Crestfaktor am Optimum ist über den ganzen Bereich
+derselbe. Der Optimierer landet unabhängig von T_p in derselben
+RF-freundlichen Ecke.
+
+### Warum es keine Crest-Nebenbedingung gibt
+
+Eine Pareto-Rechnung (R minimieren unter der Auflage A(t₀)/⟨A⟩ ≥ Ziel) ergibt:
+
+| A(t₀)/⟨A⟩ | 1.40 | 2.00 | 2.50 | 3.00 | 3.50 | 4.00 | 4.25 |
+|---|---|---|---|---|---|---|---|
+| R | 0.40 | 0.46 | 0.56 | 0.70 | 0.84 | 1.02 | 1.15 |
+| Crest x | 1.82 | 2.00 | 2.12 | 2.23 | 2.27 | 2.38 | 2.45 |
+| Crest y | 2.20 | 2.28 | 2.35 | 2.40 | 2.02 | 2.52 | 2.83 |
+
+Der hellste Punkt ist genau der Rephasing-Fall, also alle Tonphasen gleich —
+und der treibt den Crestfaktor auf sein Maximum √(2N). **Helligkeit am Trigger
+und Belastung der RF-Kette messen beide dasselbe**, nämlich wie stark die Töne
+rephasieren; getrennt einstellbar sind sie nicht. φ = 0 ist deshalb
+gleichzeitig der hellste und der für Verstärker und AOD ungünstigste Punkt.
+
+Daraus folgt: wer R minimiert, landet **von selbst** bei 1.82/2.20 und damit
+deutlich unter φ = 0 (2.45/2.83). Eine Nebenbedingung wäre nie bindend. Der
+Crestfaktor wird angezeigt, nicht erzwungen.
+
+### Was *nicht* funktioniert hat
+
+Die naheliegende Formulierung für einen getriggerten Puls — „minimiere die
+Empfindlichkeit gegen Trigger-Jitter", also den Effektivwert von A über ein
+Fenster ±Δ um t₀ — ist **degeneriert** und wurde verworfen. Bei realistischem
+Jitter ist sie ohnehin bedeutungslos (±50 ns ergibt schon für φ = 0 nur
+0.06 % Flächenfehler), und der Optimierer nutzt die verbleibende Freiheit, um
+einen *flachen, aber dunklen* Wendepunkt zu suchen: A(t₀) = 0.78·⟨A⟩ bei
+gleichzeitig **schlechterer** Gesamtschwebung (R = 0.87 gegen 0.72 bei
+Schroeder). Das Atom bekäme weniger Licht und die Schwebung wäre größer.
+
+Ebenfalls verworfen: R durch A(t₀) zu teilen, um Schwebung und Helligkeit in
+einer Zahl zu fassen. Das unterscheidet nicht — φ = 0 kommt auf 0.270,
+Schroeder auf 0.268, das Optimum auf 0.280. Ein schärferer Peak kauft die
+Helligkeit exakt proportional zur Schwebung ein.
+
+### Der Ortsterm
+
+Die räumliche Streuung über die Atomwolke, σ_θ/⟨θ⟩_W bei σ = 108 nm, ist
+**nicht** Teil der Zielfunktion. Sie ist klein, aber nicht null und verhält
+sich nicht monoton mit R: 0.7 % bei φ = 0 (im Rephasing-Maximum ist das
+Profil die glatte kohärente Summe), 18.8 % bei Schroeder, 6.0 % am Optimum.
+Wer sie mitnehmen will, muss sie explizit dazunehmen — sie wandert dann in
+die Zielfunktion, nicht in die Anzeige.
+
+### Bedienung
+
+*Optimise* im Kasten *Tone phases* auf **beating at the atom (atom weighted)**
+(Standard), T_p, atom T und ν_r setzen, dann *Optimise phases and t_0 for the
+atom*. Dauert rund 20 Sekunden für 300 Startpunkte. Das Ergebnis steht unter
+den Phasenfeldern: R, der Vergleichswert für alle Phasen 0, t₀, A(t₀)/⟨A⟩ und
+die beiden Crestfaktoren.
+
+Das alte Ziel heißt jetzt **pulse area, spatial spread over a region** und ist
+unverändert geblieben: std/mean von θ(r) über eine harte Maske zu *einem*
+Zeitpunkt. Es beantwortet eine Kamera-Frage und bleibt für den Vergleich mit
+den inkohärenten GUIs stehen.
+
+Code: `AtomBeating` und `atom_beating_at_centre` in Abschnitt 12 von
+`kern/beating_physik.py`.
 
 ## Wo die Unruhe sitzt: das Spektrum
 
@@ -1444,3 +1605,35 @@ Unverändert und weiter offen: C_rabi-Ersatzwert ohne `arc` ist der −8-GHz-Wer
 Kontrolle: altes und neues GUI headless mit identischen Eingaben. Unverändert
 (bitgleich): f₀, Zeitmittel, Varianz, σ_t/⟨I⟩, Pulsflächen-Uniformity,
 Rabi-Kurven für Ω ~ I. Geändert nur die oben genannten Größen.
+
+## Umbau 2026-09-14: Phasenoptimierung auf das Atom
+
+* **Neues Ziel `beating at the atom`** (Standard) im Kasten *Tone phases*:
+  minimiert R = σ_t₀(A)/⟨A⟩, den Hub der atomgewichteten Pulsfläche über den
+  Trigger-Zeitpunkt, und legt t₀ anschließend auf das Maximum von A. Am
+  Arbeitspunkt 115 % → 41 %; der Crestfaktor fällt dabei von 2.45/2.83 auf
+  1.82/2.20 mit. Einzelheiten in *Phasen für das Atom optimieren*.
+* **Abschnitt 12 in `kern/beating_physik.py`**: `AtomBeating` (geschlossene
+  Form über Parseval, ~13 µs je Auswertung) und `atom_beating_at_centre`.
+  Geprüft gegen eine Brute-Force-Zeitreihe (200 000 Stützstellen, Abweichung
+  < 10⁻⁵ relativ), gegen den Effektivwert der Kurve (bitgleich) und am
+  Grenzfall T_p = T₀ (R = 5·10⁻¹⁷).
+* **Neue Eingaben**: Pulslänge T_p für die Optimierung (Standard 1 µs,
+  unabhängig von f_Rabi — das Experiment legt den Puls fest, nicht die
+  π-Bedingung; der alte Optimierer benutzte stillschweigend 1/(2 f_Rabi)),
+  dazu atom T und ν_r mit σ-Anzeige. Beide Optimierer rechnen jetzt mit
+  demselben T_p.
+* **Der alte Optimierer** heißt `pulse area, spatial spread over a region` und
+  ist inhaltlich unverändert; nur die Pulslänge kommt jetzt aus dem neuen Feld.
+  Die Eingabefelder des jeweils nicht gewählten Ziels werden ausgegraut.
+* **Keine Crest-Nebenbedingung**, obwohl φ = 0 für die RF-Kette ausscheidet:
+  Helligkeit am Trigger und Crestfaktor messen dasselbe (beide: wie stark
+  rephasieren die Töne), das R-Optimum unterbietet φ = 0 also von selbst.
+  Pareto-Tabelle im Abschnitt.
+* **Verworfen**: die Jitter-Zielfunktion (degeneriert — findet flache *dunkle*
+  Stellen mit schlechterer Gesamtschwebung) und R/A(t₀) als Einzelzahl
+  (unterscheidet nicht). Beides mit Zahlen im Abschnitt dokumentiert.
+
+Kontrolle: GUI headless gebaut und beide Ziele durchgerechnet; das
+Regions-Ziel liefert unverändert dieselben Phasen wie vorher, sofern T_p auf
+1/(2 f_Rabi) gesetzt wird.

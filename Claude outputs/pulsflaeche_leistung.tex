@@ -1,0 +1,309 @@
+\subsection{From a given power to the pulse area}
+
+The pulse area is the only quantity the excitation depends on, and it follows
+from the optical power in three steps: fix the scale of the intensity, convert
+intensity into a Rabi frequency, integrate over the pulse. This section keeps
+the three normalisations apart, because only one of them is physics.
+
+\paragraph{What is normalised, and what is not.}
+\begin{enumerate}
+\item \emph{The mode.} $u(\mathbf 0)=1$, so the simulated intensity
+      $\tilde I(\mathbf r,t)=|E|^2$ is in arbitrary units. This choice is free
+      and drops out of every physical result.
+\item \emph{The power.} The optical power $P$ in the profile is the single
+      physical input. It fixes the scale factor $s$ in
+      $I(\mathbf r,t)=s\,\tilde I(\mathbf r,t)$.
+\item \emph{The reference.} A reference intensity $I_\mathrm{ref}$, an
+      effective area $A_\mathrm{eff}$ and a nominal Rabi frequency
+      $f_\mathrm{Rabi}$ are bookkeeping. They make the numbers readable and
+      cancel from the pulse area.
+\end{enumerate}
+
+\paragraph{Step 1: the scale from the power.}
+The power carried by the pattern is the area integral of the time average,
+\begin{equation}
+P=\int\!\langle I(\mathbf r)\rangle_t\,\mathrm d^2r
+ =s\int\!\langle\tilde I(\mathbf r)\rangle_t\,\mathrm d^2r
+ \equiv s\,\tilde P_\mathrm{prof},
+\qquad\Longrightarrow\qquad
+s=\frac{P}{\tilde P_\mathrm{prof}} .
+\end{equation}
+$\tilde P_\mathrm{prof}$ is known in closed form. A single spot of unit
+amplitude carries
+\begin{equation}
+P_1=\int\!|u|^2\,\mathrm d^2r=
+\begin{cases}
+\dfrac{\pi w_0^2}{2}, & \text{Gauss } u=e^{-r^2/w_0^2},\\[2ex]
+\dfrac{4\pi}{k^2}, & \text{Airy } u=\dfrac{2J_1(kr)}{kr},\quad
+k=\dfrac{3.8317}{1.4830\,w_0},
+\end{cases}
+\end{equation}
+and, since the cross terms of non-degenerate pairs average to zero in time,
+\begin{equation}
+\tilde P_\mathrm{prof}
+=\underbrace{\sum_s a_s\,P_1}_{\text{incoherent}}
++\underbrace{2\!\!\sum_{\substack{s<s'\\ k_s=k_{s'}}}\!\!\sqrt{a_sa_{s'}}
+\,\cos(\phi_s-\phi_{s'})\,
+\int\! u(\mathbf r-\mathbf c_s)\,u(\mathbf r-\mathbf c_{s'})\,\mathrm d^2r}
+_{\text{frequency degenerate pairs}} ,
+\end{equation}
+with the overlap integral, again analytic,
+\begin{equation}
+\int\! u(\mathbf r-\mathbf c_s)u(\mathbf r-\mathbf c_{s'})\,\mathrm d^2r
+=P_1\cdot
+\begin{cases}
+e^{-d^2/2w_0^2}, & \text{Gauss},\\[1ex]
+\dfrac{2J_1(kd)}{kd}=u(d), & \text{Airy},
+\end{cases}
+\qquad d=|\mathbf c_s-\mathbf c_{s'}| .
+\end{equation}
+The Airy result follows because the mode is the Fourier transform of a disc and
+the autocorrelation of a disc is the disc again. The sum runs over the
+intensity weights $a_s$, not $a_s^2$: the field carries $\sqrt{a_s}$. For
+$3\times4$ at all phases zero the degenerate corner pair contributes $+1.1\,\%$.
+The integral is never taken from the computation grid, which truncates about
+$5\,\%$ of the Airy power at the usual margin.
+
+\paragraph{Step 2: intensity to Rabi frequency.}
+The two Raman legs, of intensities $\beta I$ and $(1-\beta)I$, drive
+$|F{=}2,m\rangle\leftrightarrow|F{=}3,m\rangle$ via the $5P$ manifold. The
+single-photon Rabi frequency of leg $i$ on the transition to an excited state
+$e$ is $\Omega_{i,e}=d_e E_i/\hbar$, and with $I_i=\tfrac12\varepsilon_0cE_i^2$
+\begin{equation}
+\Omega_{i,e}^2=\frac{2\,d_e^2}{\varepsilon_0 c\,\hbar^2}\,I_i
+\equiv d_e^2\,\kappa\,I_i,\qquad
+\kappa=\frac{2}{\varepsilon_0 c\,\hbar^2} .
+\end{equation}
+For $|\Delta_e|\gg\Omega,\Gamma$ the excited states are eliminated
+adiabatically. Each of them contributes one Raman path, and the paths add
+coherently:
+\begin{equation}
+\Omega=\sum_e\frac{\Omega_{1,e}\,\Omega_{2,e}}{2\Delta_e}
+=\underbrace{\kappa\sqrt{\beta(1-\beta)}
+\sum_{e}\frac{d_{2e}\,d_{3e}}{2\Delta_e}}_{\textstyle C_\mathrm{rabi}}\;I ,
+\end{equation}
+The index $e$ labels an \emph{intermediate state}, i.e.\ a hyperfine level of
+the $5P$ manifold,
+\begin{equation}
+|e\rangle=|5P_{J'},F',m'\rangle,\qquad
+J'=\tfrac12\ (D_1,\ F'=2,3),\quad J'=\tfrac32\ (D_2,\ F'=1,2,3,4),
+\end{equation}
+so six terms for $\sigma^+$ light, where $m'=m+1$ is fixed by the polarisation.
+$d_{2e}=\langle e|\hat d_{q}|F{=}2,m\rangle$ and
+$d_{3e}=\langle e|\hat d_{q}|F{=}3,m\rangle$ are the \emph{signed} dipole matrix
+elements, and
+\begin{equation}
+\Delta_e=\Delta+\left(\nu_{D_1}-\nu_\mathrm{line}\right)-\Delta_\mathrm{hfs}(F')
+\end{equation}
+is the detuning of the two-photon resonant pair from that level, measured from
+the $5P_{1/2}$ centroid. The signs matter: the $F'$ contributions partly cancel,
+and dropping them is wrong by tens of percent as soon as $|\Delta|$ approaches
+the excited-state hyperfine splitting.
+
+The formula above is evaluated with atomic data from the ARC package: the
+signed matrix elements come from \texttt{getDipoleMatrixElementHFS}, the
+hyperfine shifts from \texttt{getHFSCoefficients}/\texttt{getHFSEnergyShift},
+the line centroids from \texttt{getTransitionFrequency} and the linewidths from
+\texttt{getStateLifetime}. Only the elimination itself is coded by hand, in the method \texttt{coeff()}
+of the module \texttt{rb85\_raman}. The same elimination gives the light shift of
+each ground state and the photon scattering rate,
+\begin{equation}
+\delta_F=\kappa\sum_e d_{Fe}^2
+\left[\frac{\beta}{4\Delta_e^{(1)}}+\frac{1-\beta}{4\Delta_e^{(2)}}\right]I,
+\qquad
+\Gamma_\mathrm{sc}=\kappa\sum_e\Gamma_e\,d_{Fe}^2
+\left[\frac{\beta}{4(\Delta_e^{(1)})^2}+\dots\right]I ,
+\end{equation}
+so that all three are linear in $I$:
+\begin{equation}
+\Omega=C_\mathrm{rabi}I,\qquad
+\delta_\mathrm{LS}=\delta_3-\delta_2\equiv C_\mathrm{shift}I,\qquad
+\Gamma_\mathrm{sc}=C_\mathrm{scatter}I .
+\end{equation}
+Their ratio $\eta=\delta_\mathrm{LS}/\Omega$ is therefore a pure number,
+independent of intensity, position and time. For $\sigma^+/\sigma^+$
+co-propagating light on the clock states of Rb-85 and $\beta=\tfrac12$ one finds
+$C_\mathrm{rabi}=11.66\,\mathrm{rad\,s^{-1}}/(\mathrm{W/m^2})$ and
+$\eta=-0.061$ at $\Delta=+50$\,GHz, and $71.98$ and $-0.442$ at
+$\Delta=-8$\,GHz. To leading order
+$\eta\simeq-\omega_\mathrm{HF}/\Delta$, since the differential shift is the
+difference of two denominators separated by the ground hyperfine splitting.
+
+\paragraph{Step 3: the pulse area, without any reference.}
+A rectangular pulse of length $T_p$ starting at $t_0$ accumulates the area
+$\theta=\int\Omega\,\mathrm dt$. Three substitutions turn this into the working
+formula. First the atomic law of Step 2, then the scale of Step 1, and finally
+$s$ itself:
+\begin{align}
+\theta(\mathbf r,t_0)
+&=\int_{t_0}^{t_0+T_p}\!\!\Omega(\mathbf r,t)\,\mathrm dt
+&&\text{definition}\\
+&=C_\mathrm{rabi}\int_{t_0}^{t_0+T_p}\!\! I(\mathbf r,t)\,\mathrm dt
+&&\Omega=C_\mathrm{rabi}I\\
+&=C_\mathrm{rabi}\,s\int_{t_0}^{t_0+T_p}\!\!\tilde I(\mathbf r,t)\,\mathrm dt
+&&I=s\,\tilde I\\
+&=C_\mathrm{rabi}\,\frac{P}{\tilde P_\mathrm{prof}}
+  \int_{t_0}^{t_0+T_p}\!\!\tilde I(\mathbf r,t)\,\mathrm dt
+&&s=P/\tilde P_\mathrm{prof} .
+\end{align}
+With $\tilde P_\mathrm{prof}=\int\langle\tilde I\rangle_t\,\mathrm d^2r$ this is
+\begin{equation}
+\boxed{\;
+\theta(\mathbf r,t_0)
+=C_\mathrm{rabi}\,P\;
+\frac{\displaystyle\int_{t_0}^{t_0+T_p}\!\tilde I(\mathbf r,t)\,\mathrm dt}
+     {\displaystyle\int\!\langle\tilde I\rangle_t\,\mathrm d^2r}\; }
+\end{equation}
+This is the whole physics. Only three things enter: the atomic coefficient, the
+power, and the shape of the pattern, the latter as the ratio of a time integral
+to an area integral. The arbitrary mode normalisation cancels in that ratio,
+and no region, no $A_\mathrm{eff}$ and no $f_\mathrm{Rabi}$ appear. Units:
+$[C_\mathrm{rabi}]\,\mathrm{W}\cdot\mathrm{s}/\mathrm{m^2}=\mathrm{rad}$.
+
+\paragraph{Why $f_\mathrm{Rabi}$ may still be used.}
+It is not an extra assumption but a name for the scale. Pick any reference
+intensity $I_\mathrm{ref}$ -- in this work the time average over the evaluation
+region -- and define
+\begin{equation}
+A_\mathrm{eff}=\frac{\int\langle I\rangle_t\,\mathrm d^2r}{I_\mathrm{ref}}
+=\frac{\tilde P_\mathrm{prof}}{\langle\tilde I\rangle_\mathrm{ref}},
+\qquad
+I_\mathrm{ref}=\frac{P}{A_\mathrm{eff}},
+\qquad
+2\pi f_\mathrm{Rabi}\equiv C_\mathrm{rabi}I_\mathrm{ref} .
+\end{equation}
+Substituting $P=I_\mathrm{ref}A_\mathrm{eff}$ into the boxed equation gives
+\begin{equation}
+\theta(\mathbf r,t_0)
+=2\pi f_\mathrm{Rabi}\,
+\frac{1}{\langle\tilde I\rangle_\mathrm{ref}}
+\int_{t_0}^{t_0+T_p}\!\tilde I(\mathbf r,t)\,\mathrm dt ,
+\end{equation}
+which is the same number: $A_\mathrm{eff}$ cancels against
+$\tilde P_\mathrm{prof}$. Choosing a different region changes $I_\mathrm{ref}$,
+$A_\mathrm{eff}$ and $f_\mathrm{Rabi}$ together and leaves $\theta$ untouched
+(checked numerically to $10^{-14}$). $f_\mathrm{Rabi}$ is the Rabi frequency one
+would measure by calibrating on the time averaged profile, without a trigger,
+and $\Omega(\mathbf r,t)=C_\mathrm{rabi}I(\mathbf r,t)$ is what the atom
+actually sees -- a quantity that varies in space and, through the beating,
+strongly in time.
+
+\paragraph{Where the sinc comes from.}
+The time integral in the box is the only part that still depends on the
+beating, and it can be done term by term. Inserting the Fourier series
+$\tilde I=\sum_d D_d(\mathbf r)\,e^{i2\pi df_0t}$, each order contributes
+\begin{equation}
+\int_{t_0}^{t_0+T_p}\!\! e^{i2\pi df_0t}\,\mathrm dt
+=\frac{e^{i2\pi df_0(t_0+T_p)}-e^{i2\pi df_0t_0}}{i\,2\pi df_0} .
+\end{equation}
+Pulling out the phase of the window \emph{centre}, $e^{i2\pi
+df_0(t_0+T_p/2)}$, makes the bracket symmetric,
+\begin{equation}
+=e^{i2\pi df_0\left(t_0+T_p/2\right)}\,
+\frac{e^{i\pi df_0T_p}-e^{-i\pi df_0T_p}}{i\,2\pi df_0}
+=e^{i2\pi df_0\left(t_0+T_p/2\right)}\,
+\frac{\sin\!\left(\pi df_0T_p\right)}{\pi df_0} ,
+\end{equation}
+where $e^{ix}-e^{-ix}=2i\sin x$ was used. Writing the last factor as $T_p$
+times $\operatorname{sinc}(z)=\sin(\pi z)/(\pi z)$ gives
+\begin{equation}
+\int_{t_0}^{t_0+T_p}\!\tilde I\,\mathrm dt
+=T_p\sum_d D_d(\mathbf r)\,\operatorname{sinc}(d f_0T_p)\,
+e^{i2\pi df_0\left(t_0+T_p/2\right)} .
+\end{equation}
+The three factors read directly: $T_p$ is the length of the window, the
+exponential says that only the \emph{centre} of the window matters for the
+phase, and the sinc is the Fourier transform of the window itself, evaluated at
+the beat frequency $df_0$. Integrating over a window of length $T_p$ is a
+convolution with a boxcar, and in frequency space a convolution is a
+multiplication -- with the transform of the box. The $d=0$ term is the limit
+$\operatorname{sinc}(0)=1$: the time average always survives, whatever the
+pulse length. Because $D_{-d}=D_d^*$ the sum is real,
+\begin{equation}
+\begin{split}
+\int_{t_0}^{t_0+T_p}\!\tilde I\,\mathrm dt
+=T_p\Bigl[\,&D_0(\mathbf r)\\
+&+2\sum_{d>0}\left|D_d(\mathbf r)\right|
+\operatorname{sinc}(df_0T_p)\,
+\cos\!\left(2\pi df_0\left(t_0+\tfrac{T_p}{2}\right)+\arg D_d\right)\Bigr].
+\end{split}
+\end{equation}
+This is the same expression as a camera exposure of duration $T_p$; a pulse and
+an exposure differ only in their length. Two limits:
+\begin{itemize}
+\item $T_p\gg T_0$: every $d\neq0$ is damped away and
+      $\theta\to C_\mathrm{rabi}\,s\,\langle\tilde I\rangle_t\,T_p$. The pulse
+      sees the time average.
+\item $T_p\ll T_0$: $\operatorname{sinc}\to1$. The pulse does not average the
+      beating, it \emph{samples} it, and $\theta$ depends on the trigger
+      instant $t_0$ -- on the time scale of the fast beats, not of $T_0$.
+\end{itemize}
+
+\paragraph{Averages over the atom are integrals.}
+$\theta(\mathbf r)$ is a field. What the atom experiences is the average over
+its position probability density, a proper integral,
+\begin{gather}
+\langle\theta\rangle_W=\int\! W(\mathbf r)\,\theta(\mathbf r)\,\mathrm d^2r,
+\qquad \int\! W(\mathbf r)\,\mathrm d^2r=1,\\
+W(\mathbf r)=\frac{1}{2\pi\sigma^2}
+\exp\!\left[-\frac{(\mathbf r-\mathbf r_0)^2}{2\sigma^2}\right],
+\end{gather}
+with the thermal width
+$\sigma^2=\frac{\hbar}{2m\omega_r}\coth\frac{\hbar\omega_r}{2k_BT}$
+($\sigma=108$\,nm at $\nu_r=60.4$\,kHz and $T=17\,\mu$K). A hard region is the
+special case $W=1/A_R$ inside and $0$ outside. On the uniform computation grid
+the integral becomes the weighted sum
+$\sum_i w_i\theta_i$ with $w_i=W_i/\sum_iW_i$, because the cell area cancels
+between numerator and denominator; that is how the code evaluates it, on a
+dedicated fine grid of $\pm4\sigma$, since the global grid is far too coarse for
+$\sigma\approx0.1\,\mu$m.
+
+\paragraph{What the atom does with the area.}
+For a resonant two-level system with a real $\Omega(t)$ the Hamiltonian
+commutes with itself at different times, so the excitation depends on the
+accumulated area alone -- exactly, not approximately:
+\begin{equation}
+p_\uparrow(\mathbf r)=\sin^2\frac{\theta(\mathbf r)}{2},
+\qquad
+p_\uparrow(\mathbf r)=\frac{1}{1+\eta^2}
+\sin^2\!\left(\sqrt{1+\eta^2}\,\frac{\theta(\mathbf r)}{2}\right)
+\ \text{with the light shift},
+\end{equation}
+and the measured signal is $\int W p_\uparrow\,\mathrm d^2r$: $\sin^2$ is
+non-linear, so the average is taken \emph{after} it. The spread of the area
+itself, $U(\theta)=\sigma_W(\theta)/\langle\theta\rangle_W$, is what limits the
+fidelity. Scattering multiplies the signal by $e^{-\Gamma_\mathrm{sc}T_p}$.
+
+\paragraph{Working point.}
+$3\times4$, Airy, waist $1.04\,\mu$m, $r_x/r_y=0.97/1.16$, all tone phases
+zero, $\Delta=+50$\,GHz, $P=10\,\mu$W in the profile, $T_p=1\,\mu$s, atom
+weighted ($\sigma=108$\,nm):
+
+\begin{center}
+\begin{tabular}{lr}
+\hline
+$\tilde P_\mathrm{prof}$ (simulation units) & $2.615\times10^{-11}$\,m$^2$\\
+$\langle\tilde I\rangle_W$ (simulation units) & $1.913$\\
+effective area $A_\mathrm{eff}$ & $13.67\,\mu$m$^2$\\
+reference intensity $I_\mathrm{ref}=P/A_\mathrm{eff}$ & $73.2$\,W/cm$^2$\\
+nominal Rabi frequency $f_\mathrm{Rabi}$ & $1.358$\,MHz\\
+area at the reference, $2f_\mathrm{Rabi}T_p$ & $2.72\,\pi$\\
+area at the best trigger, $\langle\theta\rangle_W$ & $11.54\,\pi$\\
+mean Rabi frequency during that pulse & $5.77$\,MHz\\
+$\sigma_\theta/\langle\theta\rangle_W$ there & $0.72\,\%$\\
+power for a $\pi$ pulse of $1\,\mu$s at that trigger & $0.87\,\mu$W\\
+\hline
+\end{tabular}
+\end{center}
+
+Both routes -- the boxed formula and the detour over $f_\mathrm{Rabi}$ -- give
+the same $11.539\,\pi$. The factor $4.25$ between the triggered and the
+reference area is the rephasing peak of the twelve tones at phases zero.
+
+\paragraph{Not included.}
+Static two-photon detuning and magnetic field shifts, any uncompensated
+gradient of the light shift, spontaneous emission during the pulse, the Zeeman
+substructure, atomic motion during the pulse, finite pulse edges and the
+acoustic fill time of the AOD, polarisation and vector light shifts,
+intermodulation in the AOD and its diffraction efficiency. $P$ is the power
+\emph{in the profile}, i.e. after both AODs.

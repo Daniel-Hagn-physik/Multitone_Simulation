@@ -47,7 +47,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, LogNorm
 from matplotlib.patches import Patch
-from matplotlib.ticker import FormatStrFormatter, MaxNLocator, MultipleLocator
+from matplotlib.ticker import (FormatStrFormatter, FuncFormatter, MaxNLocator,
+                               MultipleLocator)
 
 from . import paths
 from . import scan_data
@@ -266,6 +267,12 @@ VALLEY_LEGEND_PLACEMENT_DEFAULT = "below"
 # abgeschnitten. Bei 0.85 bleibt in allen geprueften Faellen eine Luecke von
 # mindestens 0.15 Figurbreiten; im Panel passt der Kasten damit ebenfalls
 # neben die Kurven.
+# Ob der Arbeitspunkt ueberhaupt eingezeichnet wird - Stern in den Karten,
+# roter Strich in den Schnitten. Ab Werk NICHT: der Punkt gehoert zur
+# Herleitung, nicht ins fertige Bild. Im Dialog anhakbar.
+DRAW_BEST_POINT_DEFAULT = False
+
+
 VALLEY_LEGEND_SCALE = 1.0
 # ... und sie darf ihr Panel nicht ueberragen. Reicht die volle Groesse dafuer
 # nicht (der Eintrag des Arbeitspunkts ist mit seinen Koordinaten der
@@ -373,16 +380,16 @@ def draw_working_point_line(ax, best, axis, label=True, text=None):
 # er "Waist at focus omega' (µm, after lenses)"; der Strich sollte "nach der
 # Linse" heissen, sagte das aber nur fuer den, der die Konvention schon kennt.
 # "in the atomic plane" sagt es direkt und macht den Strich ueberfluessig.
-WAIST_UM_LABEL = r"Waist in the atomic plane $\omega$ [$\mu$m]"
+WAIST_UM_LABEL = r"Waist in the atomic plane $\omega$ ($\mu$m)"
 # Kurzform fuer zwei Panels nebeneinander: dort bleiben je rund 2.5 Zoll, und
 # der ausgeschriebene Name laeuft ueber den Figurrand hinaus.
-WAIST_UM_LABEL_SHORT = r"Waist $\omega$ [$\mu$m]"
+WAIST_UM_LABEL_SHORT = r"Waist $\omega$ ($\mu$m)"
 WAIST_UM_SYMBOL = r"$\omega$"
-WIN_INPUT_LABEL = r"Input waist $\omega_{\mathrm{in}}$ [mm] (before lenses)"
-WIN_INPUT_LABEL_SHORT = r"Input waist $\omega_{\mathrm{in}}$ [mm]"
+WIN_INPUT_LABEL = r"Input waist $\omega_{\mathrm{in}}$ (mm) (before lenses)"
+WIN_INPUT_LABEL_SHORT = r"Input waist $\omega_{\mathrm{in}}$ (mm)"
 WIN_INPUT_SYMBOL = r"$\omega_{\mathrm{in}}$"
 
-WIDTH_LABEL = "Width [MHz]"
+WIDTH_LABEL = "Width (MHz)"
 
 # ----------------------------------------------------------------------
 # Beschriftung der Metriken - haengt an der Familie dieses Ordners
@@ -401,8 +408,8 @@ C_SYMBOL = r"$\eta_%s$" % _IDX
 # Schnitte. Was die Groesse ist, steht im Titel ueber der Karte - die
 # ausgeschriebene Definition daneben noch einmal zu wiederholen, kostete
 # Breite und stand in jeder der vier Karten ein zweites Mal.
-U_CBAR = U_SYMBOL + " [%]"
-C_CBAR = C_SYMBOL + " [%]"
+U_CBAR = U_SYMBOL + " (%)"
+C_CBAR = C_SYMBOL + " (%)"
 U_TITLE = (r"Uniformity $U_w$ (atom-weighted)" if _WEIGHTED
            else r"Uniformity $U_h$ (hard metric)")
 C_TITLE = (r"Crosstalk $\eta_w$ (atom-weighted)" if _WEIGHTED
@@ -544,60 +551,39 @@ def draw_best_point_marker(ax, results, win_axis, legend=True, best=None,
 # ======================================================================
 # Verbotener Bereich (ueberlappende Eck-Spots)
 # ======================================================================
-# Herleitung und Formel stehen in lib/scan_data.py. Hier nur das Zeichnen:
-# eine Grenzgerade plus schraffierte Flaeche darunter. Schraffur statt
-# Volltonflaeche und halbtransparent: die Heatmap darunter soll lesbar
-# bleiben.
-FORBIDDEN_LINE_STYLE = dict(color="#d62728", linewidth=1.8, linestyle="-")
-FORBIDDEN_FILL_STYLE = dict(facecolor="none", edgecolor="#d62728",
-                            hatch="///", linewidth=0.0, alpha=0.55)
-FORBIDDEN_LABEL = "Corner spots overlap"
+# Herleitung und Formel stehen in lib/scan_data.py. Hier wird der Bereich
+# nicht mehr GEZEICHNET, sondern AUSGELASSEN - siehe verboten_ausblenden().
 
 
-def forbidden_curve(results, win_axis, factor=FORBIDDEN_FACTOR_DEFAULT, n=400):
-    """(x, y_grenze) der Grenzlinie in den Koordinaten einer Karte.
+def verboten_ausblenden(grid, results, factor=FORBIDDEN_FACTOR_DEFAULT):
+    """Kopie von `grid`, im verbotenen Bereich auf NaN.
 
-    Auf der µm-Achse ist die Grenze eine Gerade durch den Ursprung. Auf der
-    mm-Achse ist sie es NICHT (waist ~ 1/win_input), die Gerade wird dort zu
-    einer Hyperbel - deshalb wird sie dicht abgetastet und als Polygonzug
-    gezeichnet."""
-    grenze = forbidden_boundary(results, factor)
-    if grenze is None:
-        return None
-    win_input_vals = np.asarray(results['win_input_vals'], dtype=float)
-    dicht = np.linspace(win_input_vals.min(), win_input_vals.max(), int(n))
-    hilfs = dict(results)
-    hilfs['win_input_vals'] = dicht
-    waist = waist_um_vals(hilfs)                       # µm
-    y = grenze['slope'] * waist                        # MHz
-    x = waist if win_axis == "after_lens" else dicht * 1e3
-    ordnung = np.argsort(x)
-    return x[ordnung], y[ordnung]
+    Dort ueberlappen sich die Eck-Spots; die Zahlen dieser Gitterpunkte
+    beschreiben keine brauchbare Falle mehr. Frueher wurden sie farbig
+    gezeichnet und rot schraffiert ueberdeckt - man sah also Werte, die
+    nicht gelten sollten, und die Schraffur brauchte dazu einen
+    Legendeneintrag.
 
+    Jetzt werden die Punkte schlicht WEGGELASSEN. matplotlib zeichnet NaN
+    durchsichtig, uebrig bleibt der weisse Untergrund; die Grenze erkennt
+    man an der Kante der Daten. Weil pcolormesh seine Farbskala aus den
+    uebergebenen Werten zieht, faellt der verbotene Bereich damit zugleich
+    aus der Skala heraus - vorher spannten gerade dessen extreme Werte die
+    Skala auf, obwohl sie niemand ablesen sollte.
 
-def draw_forbidden_region(ax, results, win_axis, factor=FORBIDDEN_FACTOR_DEFAULT,
-                          legend=True):
-    """Grenzlinie und schraffierte verbotene Flaeche in eine vorhandene
-    Karte zeichnen, ohne deren Achsengrenzen zu veraendern."""
-    kurve = forbidden_curve(results, win_axis, factor)
-    if kurve is None:
-        return
-    x, y = kurve
-    width_vals = np.asarray(results['width_vals'], dtype=float) * 1e-6
-    y_unten = float(width_vals.min())
-    # Auf den gescannten width-Bereich beschneiden - ohne das zoege die
-    # Grenze die y-Achse auf und die Heatmap schrumpfte auf einen Streifen.
-    y_oben = float(width_vals.max())
-    y_clip = np.clip(y, y_unten, y_oben)
-    sichtbar = y > y_unten
-    if not np.any(sichtbar):
-        return
-    ax.fill_between(x, y_unten, y_clip, where=sichtbar,
-                    label=(FORBIDDEN_LABEL if legend else "_nolegend_"),
-                    **SD(FORBIDDEN_FILL_STYLE))
-    innen = (y >= y_unten) & (y <= y_oben)
-    if np.any(innen):
-        ax.plot(x[innen], y[innen], label="_nolegend_", **SD(FORBIDDEN_LINE_STYLE))
+    NUR fuers Bild: `results` bleibt unveraendert, der Bericht rechnet
+    weiter mit allen Punkten (ausser der Aufrufer waehlt ausdruecklich
+    forbidden_excluded).
+    """
+    if grid is None or factor is None:
+        return grid
+    maske = forbidden_mask(results, factor)
+    if maske is None:
+        return grid
+    grid = np.array(grid, dtype=float)
+    if grid.shape == maske.shape:
+        grid[maske] = np.nan
+    return grid
 
 
 def score_grid(results):
@@ -1145,7 +1131,7 @@ def r_bounds_clamped_fraction(results):
 
 
 def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens",
-                           draw_best_point=True, save=True, show=False,
+                           draw_best_point=DRAW_BEST_POINT_DEFAULT, save=True, show=False,
                            confirm_overwrite=None, fit_line=None,
                            with_amplitudes=False, forbidden_factor=None,
                            best_point=None, fit_line_dashed_extrapolation=False):
@@ -1190,6 +1176,7 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
                 # Geklemmte Punkte aus der Farbskala nehmen; sie kommen gleich
                 # als eigene graue Ebene darueber.
                 Z = np.where(maske, np.nan, Z)
+            Z = verboten_ausblenden(Z, results, forbidden_factor)
             Z_plot = Z[:, ::-1] if reversed_ else Z
             norm = panel.get('norm')
             # pcolormesh nimmt norm ODER vmin/vmax, nie beides.
@@ -1211,8 +1198,6 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
                 ax.pcolormesh(x_vals, width_vals * 1e-6, M_plot, shading="auto",
                               cmap=ListedColormap([R_CLAMP_COLOR]), vmin=0.0, vmax=1.0)
             ax.set_title(panel['title'])
-            if forbidden_factor is not None:
-                draw_forbidden_region(ax, results, win_axis, forbidden_factor)
             if fit_line is not None:
                 draw_fit_line_on_map(ax, results, fit_line, win_axis,
                                      dashed_extrapolation=fit_line_dashed_extrapolation)
@@ -1241,7 +1226,7 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
 
 
 def plot_region(results, prefix, out_dir=None, win_axis="before_lens",
-                draw_best_point=True, save=True, show=False, confirm_overwrite=None,
+                draw_best_point=DRAW_BEST_POINT_DEFAULT, save=True, show=False, confirm_overwrite=None,
                 forbidden_factor=None, best_point=None):
     """Score-Heatmap, auf Wunsch mit dem Arbeitspunkt."""
     out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
@@ -1251,10 +1236,11 @@ def plot_region(results, prefix, out_dir=None, win_axis="before_lens",
     if Z is None:
         raise ValueError("Der Datensatz enthaelt kein Score-Gitter.")
     Z = np.asarray(Z, dtype=float) * 100.0
+    Z = verboten_ausblenden(Z, results, forbidden_factor)
     Z_plot = Z[:, ::-1] if reversed_ else Z
 
     alpha = float(results.get('alpha', 0.7))
-    score_label = r"$J_%s$ [%%]" % _IDX
+    score_label = r"$J_%s$ (%%)" % _IDX
     title = f"Combined score ({FAMILY_TITLE}, " + rf"$\alpha$ = {alpha:.2f})"
 
     with dokument_stil(REGION_FIGSIZE[0]):
@@ -1271,8 +1257,6 @@ def plot_region(results, prefix, out_dir=None, win_axis="before_lens",
                       f"{region['n_points_region']}/{region['n_points_total']}")
         ax.set_title(title)
 
-        if forbidden_factor is not None:
-            draw_forbidden_region(ax, results, win_axis, forbidden_factor)
         if draw_best_point:
             draw_best_point_marker(ax, results, win_axis, legend=False,
                                    label=True, best=best_point)
@@ -1961,7 +1945,7 @@ def write_report(results, output_path, valley_line=None, valley_axis_label=None,
 # ======================================================================
 # Sammel-Aufruf: alles auf einmal
 # ======================================================================
-def make_all(results, win_axis="before_lens", draw_best_point=True,
+def make_all(results, win_axis="before_lens", draw_best_point=DRAW_BEST_POINT_DEFAULT,
              plot_scan_overview=False, save=True, show=False,
              ask_before_save=True, legend_fontsize=9,
              plots_dir=None, results_dir=None,
@@ -2719,33 +2703,208 @@ ACHSEN_MAX_TICKS = 7
 _RASTER_FAKTOREN = [f * 10 ** k for k in range(7) for f in (1, 2, 5)]
 
 
-def _achsenraster(ax, einheit):
-    """Feste Tick-Aufloesung fuer eine Schnitt-Achse.
+def _raster_grenzen(lo, hi, einheit, max_ticks=None):
+    """`(untere Grenze, obere Grenze, Schrittweite, Nachkommastellen)` fuer
+    einen Wertebereich - oder None, wenn die Einheit kein festes Raster
+    vorgibt.
 
     Weitet den Bereich auf, bis mindestens ACHSEN_MIN_SCHRITTE Schritte der
     Einheit hineinpassen, waehlt daraus eine Schrittweite mit hoechstens
     ACHSEN_MAX_TICKS Strichen und rundet die Grenzen nach aussen auf ein
     Vielfaches davon. Die Zahl der Nachkommastellen folgt der Schrittweite -
-    ein Tick zeigt nie mehr Stellen, als er unterscheidet."""
+    ein Tick zeigt nie mehr Stellen, als er unterscheidet.
+
+    Getrennt von _achsenraster(), weil der Achsenbruch dieselbe Rechnung je
+    ABSCHNITT braucht: unterhalb und oberhalb der Luecke bekommt jeder Teil
+    sein eigenes Raster."""
     schritt0 = ACHSEN_MINDESTSCHRITT.get(einheit)
     if schritt0 is None:
-        return
-    lo, hi = (float(v) for v in ax.get_ylim())
-    if not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
-        return
+        return None
+    lo, hi = float(lo), float(hi)
+    if not (np.isfinite(lo) and np.isfinite(hi)) or hi < lo:
+        return None
     mitte = 0.5 * (lo + hi)
     spanne = max(hi - lo, schritt0 * ACHSEN_MIN_SCHRITTE)
     lo, hi = mitte - spanne / 2, mitte + spanne / 2
+    grenze = ACHSEN_MAX_TICKS if max_ticks is None else max_ticks
     schritt = schritt0 * _RASTER_FAKTOREN[-1]
     for faktor in _RASTER_FAKTOREN:
-        if spanne / (schritt0 * faktor) <= ACHSEN_MAX_TICKS:
+        if spanne / (schritt0 * faktor) <= grenze:
             schritt = schritt0 * faktor
             break
-    ax.set_ylim(np.floor(lo / schritt) * schritt,
-                np.ceil(hi / schritt) * schritt)
-    ax.yaxis.set_major_locator(MultipleLocator(schritt))
     stellen = max(0, int(np.ceil(-np.log10(schritt) - 1e-9)))
+    return (np.floor(lo / schritt) * schritt, np.ceil(hi / schritt) * schritt,
+            schritt, stellen)
+
+
+def _achsenraster(ax, einheit):
+    """Feste Tick-Aufloesung fuer eine Schnitt-Achse."""
+    raster = _raster_grenzen(*ax.get_ylim(), einheit=einheit)
+    if raster is None:
+        return
+    lo, hi, schritt, stellen = raster
+    ax.set_ylim(lo, hi)
+    ax.yaxis.set_major_locator(MultipleLocator(schritt))
     ax.yaxis.set_major_formatter(FormatStrFormatter(f"%.{stellen}f"))
+
+
+# ======================================================================
+# Achsenbruch: einen leeren Zwischenbereich aus der Achse herausschneiden
+# ======================================================================
+# Zwei Kurven in EINEM Feld teilen sich eine y-Achse. Liegen sie weit
+# auseinander - Uniformity bei 4 %, Crosstalk bei 0.1 % -, presst die
+# gemeinsame Achse beide an die Raender und dazwischen steht ein leeres
+# Band ueber die halbe Feldhoehe. Beide Kurven sind dann flach, obwohl
+# jede fuer sich Struktur hat.
+#
+# Zwei Wege waeren moeglich: eine log-Achse oder ein Achsenbruch. Log
+# verzerrt die ABSTAENDE innerhalb jeder Kurve, und genau die soll man
+# hier ablesen. Der Bruch laesst beide Abschnitte linear und schneidet
+# nur das Leere heraus, markiert mit den ueblichen Doppelstrichen an den
+# beiden Achsenraendern.
+#
+# Aufgeschnitten wird NUR bei einer echten Luecke: das leere Band muss
+# groesser sein als ACHSENBRUCH_MIN_ANTEIL der Gesamtspannweite. Liegen
+# die Kurven nah beieinander, bleibt die Achse durchgehend - ein Bruch,
+# der nichts gewinnt, macht das Bild nur schwerer lesbar.
+ACHSENBRUCH_MIN_ANTEIL = 0.40
+# So viel von der Achse bleibt der Luecke uebrig. Ganz auf null gestaucht
+# waere die Abbildung nicht mehr umkehrbar (matplotlib braucht beide
+# Richtungen), und ein sichtbarer Rest sagt dem Betrachter, dass hier
+# etwas fehlt.
+ACHSENBRUCH_REST = 0.05
+# Laenge der Bruchmarken, als Anteil der Feldbreite bzw. -hoehe.
+ACHSENBRUCH_MARKE = 0.018
+
+
+def _bruchstelle(bereiche):
+    """Die herauszuschneidende Luecke `(lo, hi)` - oder None.
+
+    `bereiche` ist je Kurve ein `(min, max)`. Gesucht ist der groesste
+    Abstand zwischen zwei aufeinanderfolgenden Bereichen; er wird nur
+    zurueckgegeben, wenn er lang genug ist.
+    """
+    gueltig = [(float(a), float(b)) for a, b in bereiche
+               if np.isfinite(a) and np.isfinite(b)]
+    if len(gueltig) < 2:
+        return None
+    gueltig.sort()
+    gesamt = max(b for _a, b in gueltig) - min(a for a, _b in gueltig)
+    if not np.isfinite(gesamt) or gesamt <= 0:
+        return None
+    beste, luecke = None, 0.0
+    oberkante = gueltig[0][1]
+    for a, b in gueltig[1:]:
+        if a - oberkante > luecke:
+            luecke, beste = a - oberkante, (oberkante, a)
+        oberkante = max(oberkante, b)
+    if beste is None or luecke / gesamt < ACHSENBRUCH_MIN_ANTEIL:
+        return None
+    return beste
+
+
+def _bruch_funktionen(lo, hi, spanne):
+    """Hin- und Ruecktransformation der gestauchten Achse.
+
+    Unterhalb von `lo` und oberhalb von `hi` bleibt die Achse linear und
+    unveraendert; dazwischen wird auf ACHSENBRUCH_REST der Gesamtspanne
+    gestaucht. Streng monoton, also umkehrbar - das verlangt matplotlib
+    fuer eine eigene Skala."""
+    weg = (hi - lo) - spanne * ACHSENBRUCH_REST      # das Verschluckte
+
+    def vor(y):
+        y = np.asarray(y, dtype=float)
+        return np.where(y <= lo, y,
+                        np.where(y >= hi, y - weg,
+                                 lo + (y - lo) * (1.0 - weg / (hi - lo))))
+
+    def zurueck(y):
+        y = np.asarray(y, dtype=float)
+        return np.where(y <= lo, y,
+                        np.where(y >= hi - weg, y + weg,
+                                 lo + (y - lo) / (1.0 - weg / (hi - lo))))
+
+    return vor, zurueck
+
+
+def _bruchmarken(ax, anteil):
+    """Die beiden Doppelstriche an den Achsenraendern, auf `anteil` der
+    Feldhoehe. Ausserhalb der Layout-Rechnung (`clip_on=False`), damit sie
+    ueber die Achse hinausragen duerfen."""
+    d = ACHSENBRUCH_MARKE
+    stil = dict(transform=ax.transAxes, color=plt.rcParams.get("axes.edgecolor", "black"),
+                linewidth=plt.rcParams.get("axes.linewidth", 0.8),
+                clip_on=False, zorder=5, solid_capstyle="butt")
+    for x in (0.0, 1.0):
+        # Das Stueck Achslinie unter der Marke wegnehmen, sonst laeuft die
+        # Achse durch den Bruch hindurch.
+        ax.plot([x, x], [anteil - d, anteil + d], transform=ax.transAxes,
+                color=plt.rcParams.get("axes.facecolor", "white"),
+                linewidth=stil["linewidth"] * 3, clip_on=False, zorder=4)
+        for versatz in (-d / 2, d / 2):
+            ax.plot([x - d, x + d], [anteil + versatz - d / 2,
+                                     anteil + versatz + d / 2], **stil)
+
+
+# Steht die Legende IM Feld (oben rechts), braucht sie dort freien Platz.
+# Bei drei Feldern nebeneinander legte sie sich sonst auf die oberste Kurve.
+# Statt die Legende zu verschieben ("best" waehlt je Datensatz eine andere
+# Ecke - derselbe Plot saehe dann bei jedem Datensatz anders aus) wird der
+# Achsenbereich oben um diesen Anteil aufgeweitet, bevor das Raster
+# gerechnet wird. Die Lage der Legende bleibt damit fest.
+ACHSEN_KOPFRAUM = 0.28
+
+
+def _achse_mit_bruch(ax, bereiche, einheit, kopfraum=False):
+    """y-Achse des Feldes setzen: mit Bruch, wenn die Kurven weit
+    auseinanderliegen, sonst das gewohnte feste Raster.
+
+    `kopfraum`: oben Platz fuer eine Legende im Feld lassen.
+
+    Gibt True zurueck, wenn aufgeschnitten wurde."""
+    if kopfraum and bereiche:
+        hoch = max(b for _a, b in bereiche)
+        tief = min(a for a, _b in bereiche)
+        luft = (hoch - tief) * ACHSEN_KOPFRAUM
+        if np.isfinite(luft) and luft > 0:
+            bereiche = [(a, b + luft if b >= hoch - 1e-12 else b)
+                        for a, b in bereiche]
+    stelle = _bruchstelle(bereiche)
+    if stelle is None:
+        if kopfraum and bereiche:
+            ax.set_ylim(min(a for a, _b in bereiche), max(b for _a, b in bereiche))
+        _achsenraster(ax, einheit)
+        return False
+    lo_roh, hi_roh = stelle
+    unten = [b for b in bereiche if b[1] <= lo_roh + 1e-12]
+    oben = [b for b in bereiche if b[0] >= hi_roh - 1e-12]
+    # Je Abschnitt nur die halbe Zahl an Strichen: beide zusammen sollen
+    # nicht mehr Ticks tragen als eine durchgehende Achse.
+    je = max(2, ACHSEN_MAX_TICKS // 2)
+    u = _raster_grenzen(min(a for a, _ in unten), max(b for _, b in unten), einheit, je)
+    o = _raster_grenzen(min(a for a, _ in oben), max(b for _, b in oben), einheit, je)
+    if u is None or o is None or u[1] >= o[0]:
+        _achsenraster(ax, einheit)
+        return False
+    lo, hi = u[1], o[0]
+    spanne = o[1] - u[0]
+    if (hi - lo) / spanne < ACHSENBRUCH_MIN_ANTEIL:
+        _achsenraster(ax, einheit)
+        return False
+    vor, zurueck = _bruch_funktionen(lo, hi, spanne)
+    ax.set_yscale("function", functions=(vor, zurueck))
+    ax.set_ylim(u[0], o[1])
+    ticks = (list(np.arange(u[0], u[1] + u[2] / 2, u[2]))
+             + list(np.arange(o[0], o[1] + o[2] / 2, o[2])))
+    ax.set_yticks(ticks)
+    # Jeder Abschnitt hat seine eigene Schrittweite und damit seine eigene
+    # Zahl an Nachkommastellen - ein Tick zeigt nie mehr Stellen, als er
+    # unterscheidet.
+    ax.yaxis.set_major_formatter(FuncFormatter(
+        lambda wert, _pos: ("%%.%df" % (u[3] if wert <= lo else o[3])) % wert))
+    unten_frac, oben_frac = vor(u[0]), vor(o[1])
+    _bruchmarken(ax, float((vor(lo) - unten_frac) / (oben_frac - unten_frac)))
+    return True
 
 
 # Eine helle Kurvenfarbe ist als LINIE gut zu sehen, als Achsenbeschriftung
@@ -2768,7 +2927,7 @@ def _axis_label_for_group(gruppe):
     labels = [TRACE_SPECS[k][0] for k in gruppe]
     einheit = TRACE_SPECS[gruppe[0]][1]
     text = ", ".join(labels)
-    return f"{text} [{einheit}]" if einheit else text
+    return f"{text} ({einheit})" if einheit else text
 
 
 def _break_at(werte, unbenutzt):
@@ -2799,7 +2958,7 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
                     guide_follow=GUIDE_FOLLOW_DEFAULT,
                     guide_halfwidth=GUIDE_HALFWIDTH_DEFAULT,
                     waist_range=None, width_range=None,
-                    map_show_path=False, draw_best_point=True, best_point=None,
+                    map_show_path=False, draw_best_point=DRAW_BEST_POINT_DEFAULT, best_point=None,
                     legend_placement=VALLEY_LEGEND_PLACEMENT_DEFAULT):
     """Querschnitt: links die Heatmap der Fuehrungsgroesse mit dem Pfad,
     rechts der Schnitt entlang dieses Pfads.
@@ -2894,8 +3053,9 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
         zeige_pfad = bool(map_show_path) or (
             fit_fuer_maske is None and path_mode != "line")
 
+        Z = verboten_ausblenden(Z, results, forbidden_factor)
         im = ax_map.pcolormesh(x_heat, width_vals * 1e-6, Z, shading="auto", cmap="magma_r")
-        label = follow_cbar_label(follow) + (" [%]" if skala == 100.0 else "")
+        label = follow_cbar_label(follow) + (" (%)" if skala == 100.0 else "")
         fig.colorbar(im, ax=ax_map, label=label)
         ax_map.set_xlabel(kurzes_achsenlabel(x_heat_label))
         # Die Karte ist das schmalere der beiden Panels; die automatische
@@ -2903,8 +3063,6 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
         # (sie kennt die Textbreite nicht) - sie klebten aneinander.
         ax_map.xaxis.set_major_locator(MaxNLocator(nbins=4, steps=[1, 2, 5, 10]))
         ax_map.set_ylabel(WIDTH_LABEL)
-        if forbidden_factor is not None:
-            draw_forbidden_region(ax_map, results, win_axis, forbidden_factor)
 
         x_pfad = np.asarray(valley["x_heat"], dtype=float)
         y_pfad = np.asarray(valley["y_heat"], dtype=float)
@@ -3681,25 +3839,40 @@ _PANEL_KEY_TO_TRACE = {
 }
 
 
-def line_panels(results):
-    """Die Felder des Panel-Plots, in der Reihenfolge der Metrik-Karten."""
-    felder = list(metric_panels(results))
-    amp = amplitude_panels(results)
-    if amp is not None:
-        felder = felder + amp
+def line_groups(results):
+    """Die Felder des Panel-Plots: verwandte Groessen JE FELD zusammen.
+
+    Vorher stand jede Groesse allein in einem eigenen Feld - vier Felder in
+    2x2. Zusammen gehoeren sie aber paarweise: Uniformity und Crosstalk sind
+    die beiden Haelften desselben Scores, r_x und r_y die beiden Amplituden
+    desselben Gitters. Nebeneinander in EINEM Feld liest man den Vergleich
+    direkt ab, und aus vier Feldern werden zwei nebeneinander - eine
+    Abbildung in Textbreite statt einer halben Seite.
+
+    Dass zwei Kurven eine y-Achse teilen, geht nur, weil die Achse
+    aufgeschnitten werden darf, wenn sie weit auseinanderliegen; siehe
+    _achse_mit_bruch().
+    """
     verfuegbar = available_trace_keys(results)
-    raus = []
-    for panel in felder:
-        key = _PANEL_KEY_TO_TRACE.get(panel["key"])
-        if key is None or key not in verfuegbar:
-            continue
-        # Die y-Achse traegt nur das Symbol; was die Groesse ist, sagt der
-        # Titel darueber. Zweimal derselbe Name im selben Feld kostet nur
-        # Platz.
-        einheit = TRACE_SPECS[key][1]
-        ylabel = TRACE_SPECS[key][0] + (f" [{einheit}]" if einheit else "")
-        raus.append(dict(trace=key, title=panel["title"], ylabel=ylabel))
-    return raus
+    gruppen = []
+    metrik = [k for k in ("uniformity", "crosstalk") if k in verfuegbar]
+    if metrik:
+        gruppen.append(dict(traces=metrik,
+                            title=("Uniformity and crosstalk (%s)" % FAMILY_TITLE)))
+    amp = [k for k in ("r_x", "r_y") if k in verfuegbar]
+    if amp:
+        gruppen.append(dict(traces=amp, title="Amplitude ratios"))
+    return gruppen
+
+
+# Ein Feld je Gruppe, alle nebeneinander in EINER Reihe: bei Textbreite
+# bleiben je Feld rund 3 Zoll. Untereinander waere jede Kurve breit und
+# niedrig, und die Abbildung fuellte eine halbe Seite statt eines Streifens.
+# Feste Seitengroesse, wie beim Schnittplot: mit bbox_inches="tight" haengt
+# die Hoehe an der Breite der y-Tick-Beschriftungen und an der Legende und
+# schwankte je Datensatz um rund 2 pt. Derselbe Plot soll ueber alle
+# Datensaetze und alle drei Ordner dieselbe Abbildungsgroesse haben.
+PANEL_ROW_FIGSIZE = (6.3, 2.9)
 
 
 def plot_line_panels(results, prefix, axis="waist_um", follow="score",
@@ -3708,10 +3881,11 @@ def plot_line_panels(results, prefix, axis="waist_um", follow="score",
                      guide_follow=GUIDE_FOLLOW_DEFAULT,
                      guide_halfwidth=GUIDE_HALFWIDTH_DEFAULT,
                      waist_range=None, width_range=None, path=None,
-                     draw_best_point=True, best_point=None,
+                     draw_best_point=DRAW_BEST_POINT_DEFAULT, best_point=None,
                      show_extrapolated=False,
                      legend_placement=VALLEY_LEGEND_PLACEMENT_DEFAULT):
-    """Jede Groesse der Uebersicht als Schnitt entlang der Geraden.
+    """Die Groessen der Uebersicht als Schnitt entlang der Geraden, paarweise
+    in einem Feld: Uniformity mit Crosstalk, r_x mit r_y.
 
     `path`: fertiges Ergebnis von extract_line_cut() - sonst wird es selbst
     geholt. Der Aufrufer reicht es durch, damit Gerade und Schnitt in beiden
@@ -3725,62 +3899,68 @@ def plot_line_panels(results, prefix, axis="waist_um", follow="score",
                                 guide_follow=guide_follow,
                                 guide_halfwidth=guide_halfwidth,
                                 waist_range=waist_range, width_range=width_range)
-    felder = line_panels(results)
-    if not felder:
+    gruppen = line_groups(results)
+    if not gruppen:
         return None
 
     x = np.asarray(path["x"], dtype=float)
     extrap = (np.asarray(path["extrapolated"], dtype=bool) if show_extrapolated
               else np.zeros(len(x), dtype=bool))
 
-    n_rows = (len(felder) + 1) // 2
-    figsize = HALF_PAGE_FIGSIZE if n_rows >= 2 else ROW_FIGSIZE
+    figsize = PANEL_ROW_FIGSIZE
     with dokument_stil(figsize[0], legend_fontsize=legend_fontsize):
-        fig, axes = plt.subplots(n_rows, 2, figsize=figsize, sharex="all",
+        fig, axes = plt.subplots(1, len(gruppen), figsize=figsize, sharex="all",
                                  squeeze=False, constrained_layout=True)
-        for ax, feld in zip(axes.flat, felder):
-            y = np.asarray(path["values"][feld["trace"]], dtype=float)
-            ax.plot(x, y, color=TRACE_SPECS[feld["trace"]][2], linewidth=S(1.6))
-            # Bei einer Legende JE PANEL braucht auch jedes Panel seine
-            # eigenen Eintraege; bei der gemeinsamen Legende unter der Figur
-            # genuegt einer, sonst stuende dasselbe vier- bzw. sechsmal drin.
-            eigene_legende = (legend_placement == "inside")
-            if extrap.any():
-                ax.plot(x[extrap], y[extrap],
-                        label=(f"extrapolated ({int(extrap.sum())})"
-                               if eigene_legende else "_nolegend_"),
-                        **SD(EXTRAPOLATED_MARKER))
+        axes = axes[0]
+        eigene_legende = (legend_placement == "inside")
+        for ax, gruppe in zip(axes, gruppen):
+            bereiche = []
+            for key in gruppe["traces"]:
+                y = np.asarray(path["values"][key], dtype=float)
+                ax.plot(x, y, color=TRACE_SPECS[key][2], linewidth=S(1.6),
+                        label=TRACE_SPECS[key][0])
+                endlich = y[np.isfinite(y)]
+                if endlich.size:
+                    bereiche.append((float(endlich.min()), float(endlich.max())))
+                if extrap.any():
+                    ax.plot(x[extrap], y[extrap], label="_nolegend_",
+                            **SD(EXTRAPOLATED_MARKER))
             if draw_best_point:
                 # In jedem Feld dieselbe Stelle - so liest man alle Werte am
                 # Arbeitspunkt in einem Blick ab.
                 draw_working_point_line(
                     ax, best_point, axis,
-                    label=(eigene_legende or ax is axes.flat[0]))
-            _achsenraster(ax, TRACE_SPECS[feld["trace"]][1])
-            ax.set_ylabel(feld["ylabel"])
-            ax.set_title(feld["title"])
+                    label=(eigene_legende or ax is axes[0]))
+            _achse_mit_bruch(ax, bereiche, TRACE_SPECS[gruppe["traces"][0]][1],
+                             kopfraum=eigene_legende)
+            ax.set_ylabel(_axis_label_for_group(gruppe["traces"]))
+            ax.set_title(gruppe["title"])
+            # Kurzform: drei Felder nebeneinander lassen je rund 2 Zoll,
+            # die ausgeschriebene Fassung ueberlappte die der Nachbarfelder.
+            ax.set_xlabel(kurzes_achsenlabel(path["x_label"]))
             ax.grid(True, alpha=0.25)
-        for ax in axes.flat[len(felder):]:
-            ax.set_visible(False)
-        for ax in axes[-1, :]:
-            ax.set_xlabel(path["x_label"])
 
-        if legend_placement == "inside":
-            # Je Panel eine eigene Legende oben rechts, wie im Kreuzschnitt.
+        if eigene_legende:
+            # Je Feld eine eigene Legende oben rechts, wie im Kreuzschnitt.
             # `set_in_layout(False)`: sonst schruempfte constrained_layout
-            # jedes Panel um die Flaeche seiner Legende.
-            for ax in axes.flat[:len(felder)]:
+            # jedes Feld um die Flaeche seiner Legende.
+            for ax in axes:
                 handles, labels = ax.get_legend_handles_labels()
                 if not handles:
                     continue
-                # Volle Legendenschrift, nicht die verkleinerte des
-                # Schnittplots: hier steht je Feld nur EIN kurzer Eintrag,
-                # der passt ohne Nachhelfen neben die Kurve.
                 legende = ax.legend(handles, labels, loc="upper right",
                                     ncol=legend_ncol(labels), framealpha=0.9)
                 legende.set_in_layout(False)
         else:
-            handles, labels = axes.flat[0].get_legend_handles_labels()
+            # Eine gemeinsame Legende unter der Figur. Anders als frueher
+            # traegt nicht jedes Feld dieselben Eintraege - jedes Feld zeigt
+            # ANDERE Kurven, also muessen alle hinein.
+            handles, labels = [], []
+            for ax in axes:
+                for h, l in zip(*ax.get_legend_handles_labels()):
+                    if l not in labels:
+                        handles.append(h)
+                        labels.append(l)
             if extrap.any():
                 handles.append(plt.Line2D([], [], **SD(EXTRAPOLATED_MARKER)))
                 labels.append(f"extrapolated ({int(extrap.sum())})")
@@ -3789,7 +3969,8 @@ def plot_line_panels(results, prefix, axis="waist_um", follow="score",
                            ncol=legend_ncol(labels), framealpha=0.9)
 
         dateiname = f"{prefix}_line_panels_over_{axis}.pdf"
-        return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite)
+        return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite,
+                       tight=False)
 
 
 def extract_line_cut(results, axis="waist_um", follow="score", fit=None,

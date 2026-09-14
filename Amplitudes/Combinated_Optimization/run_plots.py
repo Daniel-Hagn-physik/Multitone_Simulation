@@ -139,7 +139,10 @@ class PlotsDialog(QDialog):
         self.legend_fontsize = self._make_spin(9.0, 4.0, 24.0, 1.0, decimals=0)
         display_layout.addRow("Schriftgroesse Legenden:", self.legend_fontsize)
         self.draw_best_point = QCheckBox("Punkt als Stern einzeichnen")
-        self.draw_best_point.setChecked(True)
+        # Ab Werk AUS: der Stern gehoert zur Herleitung, nicht ins fertige
+        # Bild. In einer Abbildung ohne ihn spricht die Karte fuer sich; wer
+        # den Arbeitspunkt zeigen will, hakt ihn an.
+        self.draw_best_point.setChecked(False)
         self.draw_best_point.toggled.connect(self._on_draw_best_point_toggled)
         self.draw_best_point.setToolTip(
             "Markiert einen Punkt in den Karten als roten Stern. WELCHEN, bestimmt\n"

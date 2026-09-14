@@ -19,6 +19,20 @@ damit es die GUI-Zahlen gegenprueft statt sie nur zu wiederholen. Am Ende wird
 Die Frequenzen werden mit Bruechen (fractions.Fraction) gerechnet: f_0 und die
 Ordnungen k_s sind dann exakt, ohne Rundung.
 
+Wo dieselben Groessen im GUI-Code stehen:
+
+    <I>_t, Var_t         kern/beating_physik.py  ->  time_stats_exact()
+    H_m (Ordnungen)      kern/beating_physik.py  ->  order_amplitudes(), beat_orders()
+    sigma_d je Ordnung   kern/beating_physik.py  ->  VariationObjective.components()
+    f_0, Beat-Linien     kern/beating_physik.py  ->  fundamental_beat_frequency(),
+                                                     unique_beat_frequencies()
+    entartete Gruppen    kern/beating_physik.py  ->  degenerate_groups()
+    Leistung, Ueberlapp  kern/beating_physik.py  ->  profile_total_power(),
+                                                     spot_overlap_integral()
+    Auswertebereiche     Beating_Multitone_GUI.py -> recompute() (Plateau, Kreis,
+                                                     Spotzentren), _target_mask()
+    Atom-Gewicht W(r)    kern/beating_physik.py  ->  atom_local_stack(), sigma_thermal()
+
 Start:  python beispiel_3x4_nachrechnen.py
 Braucht numpy und scipy. Laeuft ab Python 3.9.
 """
@@ -52,8 +66,21 @@ grid_n = 200
 pad_factor = 2.5                       # Rand in Einheiten von win_eff
 
 # Falle und Puls
-nu_r = 60.4e3                          # Hz
+nu_r = 60.4e3                          # Hz, radiale Fallenfrequenz
+T_atom = 17e-6                         # K, Atomtemperatur (fuer das Atom-Gewicht)
 f_rabi = 1.0e6                         # Hz
+
+# Auswertebereich fuer sigma_d und sigma_I.  Der Text der Arbeit benutzt
+# "rechteck" - dieselbe Flaeche, ueber der auch die Uniformity U definiert ist.
+#   "rechteck" - Rechteck zwischen den aeussersten Spotzentren
+#   "plateau"  - <I>_t > 0.5 max   (frueherer Standard, phasenabhaengige Maske)
+#   "kreis"    - Kreis um die Mitte, Radius kreis_radius
+#   "atom"     - Gauss-Gewicht der Aufenthaltswahrscheinlichkeit, sigma aus nu_r und T
+REGION = "rechteck"
+kreis_radius = 1.0e-6                  # m, nur fuer REGION = "kreis"
+
+
+sigma_atom = None                      # wird nach sigma_thermal() gesetzt
 
 
 def titel(text):
@@ -75,11 +102,20 @@ def amps_from_ratio(r, N):
     return a
 
 
+def sigma_thermal(nu, T, masse=84.911789738 * 1.66053906660e-27):
+    """Thermische 1-sigma-Ortsbreite im harmonischen Topf, mit Nullpunktsbewegung."""
+    hbar, kB = 1.054571817e-34, 1.380649e-23
+    om = 2 * np.pi * nu
+    return math.sqrt(hbar / (2 * masse * om) / math.tanh(hbar * om / (2 * kB * T)))
+
+
 def schroeder(N):
     """Schroeder-Phasen phi_n = -pi n(n-1)/N."""
     n = np.arange(N)
     return -np.pi * n * (n - 1) / N
 
+
+sigma_atom = sigma_thermal(nu_r, T_atom)
 
 # =============================================================================
 # 1. Toene und Grundfrequenz
@@ -191,6 +227,12 @@ half = max(x_hi - x_lo, y_hi - y_lo) / 2
 X, Y = np.meshgrid(np.linspace(cx0 - half, cx0 + half, grid_n),
                    np.linspace(cy0 - half, cy0 + half, grid_n))
 
+# Mitte und halbe Kantenlaenge des Spot-Rechtecks, Atom-Breite
+x_mitte = 0.5 * (min(xs) + max(xs))
+y_mitte = 0.5 * (min(ys) + max(ys))
+h_x = 0.5 * (max(xs) - min(xs))
+h_y = 0.5 * (max(ys) - min(ys))
+
 g = {s: A_s[s] * u(np.hypot(X - c_s[s][0], Y - c_s[s][1])) for s in spots}
 I_inkoh = sum(g[s] ** 2 for s in spots)
 
@@ -260,6 +302,15 @@ for name, (phi_x, phi_y) in phasen.items():
 # =============================================================================
 titel("4. Beat-Ordnungen d = k_s - k_s'")
 
+flaechen_namen = {
+    "rechteck": f"Spot-Rechteck {2 * h_x * 1e6:.2f} x {2 * h_y * 1e6:.2f} um",
+    "plateau": "Plateau <I>_t > 0.5 max",
+    "kreis": f"Kreis r = {kreis_radius * 1e6:.2f} um",
+    "atom": f"Atom-Gewicht sigma = {sigma_atom * 1e9:.0f} nm (T = {T_atom * 1e6:.0f} uK)",
+}
+flaeche = flaechen_namen[REGION]
+print(f"Auswertebereich: {flaeche}\n")
+
 paare = {}                              # d -> Liste (s, s') mit k_s - k_s' = d >= 0
 for a in range(len(spots)):
     for b in range(a + 1, len(spots)):
@@ -271,12 +322,31 @@ for a in range(len(spots)):
 print(f"d = {step_x} Delta_i + {step_y} Delta_j\n")
 
 
-def sigma_d_rel(D0, Dd, maske):
-    """rms ueber die Maske von sqrt(2|D_d|^2)/D_0."""
-    return math.sqrt(np.mean(2 * np.abs(Dd[maske]) ** 2 / D0[maske] ** 2))
+def gewichte(art, D0):
+    """Normiertes Gewicht w(r) des Auswertebereichs, sum w = 1.
+
+    Maske und Gewicht sind dasselbe Konzept: eine harte Region ist ein Gewicht
+    aus Nullen und Einsen. So laesst sich auch das Atom-Gewicht einsetzen."""
+    if art == "plateau":                       # phasenabhaengige Maske!
+        w = (D0 > 0.5 * D0.max()).astype(float)
+    elif art == "rechteck":                    # zwischen den aeussersten Spotzentren
+        w = ((np.abs(X - x_mitte) <= h_x + 1e-15) &
+             (np.abs(Y - y_mitte) <= h_y + 1e-15)).astype(float)
+    elif art == "kreis":
+        w = (((X - x_mitte) ** 2 + (Y - y_mitte) ** 2) <= kreis_radius ** 2).astype(float)
+    elif art == "atom":
+        w = np.exp(-((X - x_mitte) ** 2 + (Y - y_mitte) ** 2) / (2 * sigma_atom ** 2))
+    else:
+        raise ValueError(art)
+    return w / w.sum()
 
 
-masken = {name: erg[name][2] > 0.5 * erg[name][2].max() for name in erg}
+def sigma_d_rel(D0, Dd, w):
+    """Gewichtetes rms von sqrt(2|D_d|^2)/D_0 - der Beitrag der Ordnung d."""
+    return math.sqrt(np.sum(w * 2 * np.abs(Dd) ** 2 / D0 ** 2))
+
+
+masken = {name: gewichte(REGION, erg[name][2]) for name in erg}
 kopf = (f"{'d':>3} {'f_beat[kHz]':>12} {'Paare':>6}  {'(Di,Dj)':<18} "
         f"{'Abstand[um]':<13}" + "".join(f"{n:>11}" for n in erg))
 print(kopf + "\n" + "-" * len(kopf))
@@ -304,15 +374,28 @@ for d in range(K + 1):
 print(f"\nSumme der Paare: {n_paare}  (erwartet S(S-1)/2 = "
       f"{len(spots) * (len(spots) - 1) // 2})")
 
-print("\nGesamtschwankung sigma_I/<I>_t (rms ueber das Plateau):")
+print(f"\nGesamtschwankung sigma_I/<I>_t (gewichtetes rms, {flaeche}):")
 for name in erg:
     _, _, D0, D = erg[name]
     m = masken[name]
     var = sum(2 * np.abs(D[d]) ** 2 for d in D)
-    total = math.sqrt(np.mean(var[m] / D0[m] ** 2))
+    total = math.sqrt(np.sum(m * var / D0 ** 2))
     summe = math.sqrt(sum(sigma_d_rel(D0, D[d], m) ** 2 for d in D))
+    n_pix = int(np.count_nonzero(m))
     print(f"  {name:<10}: {total * 100:.1f} %   (Wurzel der Summe der Quadrate: "
-          f"{summe * 100:.1f} %, Plateau {m.sum()} Pixel)")
+          f"{summe * 100:.1f} %, {n_pix} Pixel im Bereich)")
+
+# alle Bereiche nebeneinander - die Zahl haengt sichtbar davon ab
+print("\nZum Vergleich, dieselbe Groesse ueber andere Bereiche:")
+print(f"  {'Bereich':<42}" + "".join(f"{n:>13}" for n in erg))
+for art in ("plateau", "rechteck", "kreis", "atom"):
+    zeile = ""
+    for name in erg:
+        _, _, D0, D = erg[name]
+        w = gewichte(art, D0)
+        var = sum(2 * np.abs(D[d]) ** 2 for d in D)
+        zeile += f"{math.sqrt(np.sum(w * var / D0 ** 2)) * 100:>13.1f}"
+    print(f"  {flaechen_namen[art]:<42}" + zeile)
 
 # =============================================================================
 # 6. Probe: Parseval gegen eine echte Zeitreihe
@@ -347,7 +430,7 @@ print(f"D_{K} hat {len(paare.get(K, []))} Zeiger: "
 # Schranke fuer VOELLIG freie Paarphasen: je Ordnung bleibt mindestens
 # max(0, 2 max|c_p| - sum|c_p|), c_p = g_s g_s'.  Bezug: Phasen 0.
 _, _, D0_0, _ = erg["phi = 0"]
-m0 = masken["phi = 0"]
+m0 = masken["phi = 0"]                      # Gewicht, siehe gewichte()
 tot = np.zeros(X.shape)
 for d, ps in paare.items():
     if d == 0:
@@ -355,7 +438,8 @@ for d, ps in paare.items():
     c = np.stack([np.abs(g[s1] * g[s2]) for s1, s2 in ps])
     lo = np.maximum(0.0, 2 * c.max(axis=0) - c.sum(axis=0))
     tot += 2 * lo ** 2 / D0_0 ** 2
-print(f"untere Schranke (freie Paarphasen): {math.sqrt(np.mean(tot[m0])) * 100:.1f} %")
+print(f"untere Schranke (freie Paarphasen, {flaeche}): "
+      f"{math.sqrt(np.sum(m0 * tot)) * 100:.1f} %")
 
 # =============================================================================
 # 8. Falle und Puls
@@ -378,6 +462,7 @@ print(f"  pi-Puls bei f_Rabi = {f_rabi / 1e6:g} MHz: t_pi = {t_pi * 1e6:.2f} us,
 # 9. LaTeX-Zeilen der Tabelle
 # =============================================================================
 titel("8. Tabellenzeilen fuer LaTeX")
+print("% sigma_d als gewichtetes rms ueber: " + flaeche)
 print("\n".join(latex))
 
 # =============================================================================

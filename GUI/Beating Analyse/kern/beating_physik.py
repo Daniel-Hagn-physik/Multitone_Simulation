@@ -38,6 +38,7 @@ Contents
     11. Pulse area                    beat_coeffs_mean, pulse_area_curve,
                                       pulse_area_map, sqrt_*,
                                       sqrt_law_excitation, PulseArea
+    12. Beating at the atom           AtomBeating, atom_beating_at_centre
 
 
 Coherent superposition
@@ -599,6 +600,12 @@ def resonance_check(beats, nu_r, tol_rel=0.06):
 # single pair (for 3x4 e.g. d = 12) have no partner to cancel against.
 # Even with completely free spot phases - which cannot be driven with two
 # AODs at all - one only reaches 55 %.
+#
+# Those numbers are for the PLATEAU, i.e. a camera. What a single ATOM sees
+# is a different question and has its own section: see 12 (AtomBeating).
+# There the figure of merit is the swing of the PULSE AREA at the atom over
+# the trigger instant, 115 % at all phases zero down to 41 % at the optimum,
+# and the crest factor of the RF comes along for free.
 
 
 def schroeder_phases(N):
@@ -1628,3 +1635,200 @@ class PulseArea:
         th = self.theta(phases, t0, t_p, f_spots)
         m = float(np.mean(th))
         return float(np.std(th) / m) if m > 0 else float("nan")
+
+
+# ============================================================================
+# 12. Die Schwebung, die EIN Atom sieht
+# ============================================================================
+# Jede Groesse der Abschnitte 8 und 11 mittelt ueber eine FLAECHE - ein
+# Plateau, einen Kreis, die Spotzentren. Auf keiner dieser Flaechen sitzt ein
+# einzelnes Atom. Ein Atom sitzt an EINEM Ort und ist dort um sigma_thermal
+# unscharf (rund 100 nm bei 17 uK und 60 kHz); was es sieht, ist die mit
+# seiner Aufenthaltswahrscheinlichkeit W(r) gewichtete Intensitaet.
+#
+# Diese Gewichtung aendert nicht nur die Zahl, sie aendert die STRUKTUR des
+# Problems, und zwar zum Besseren. Das Ortsmittel vertauscht mit allem
+# Weiteren, also darf es GANZ NACH VORNE gezogen werden:
+#
+#     I_W(t) = sum_r W(r) I(r,t) / sum_r W(r)
+#            = sum_d C_d e^{2 pi i d f_0 t} ,
+#     C_d    = sum_{k_s - k_s' = d} <g_s g_s'>_W e^{i(phi_s - phi_s')} .
+#
+# Aus einem Feld ueber tausenden Pixeln wird EIN komplexer Vektor mit so
+# vielen Eintraegen, wie es Beat-Ordnungen gibt - fuer 3x4 sind das zwoelf.
+# Die Paarprodukte <g_s g_s'>_W haengen nicht von den Phasen ab und werden
+# einmal vorberechnet; danach kostet eine Auswertung ein paar Dutzend
+# komplexe Multiplikationen statt einer Matrixrechnung pro Pixel.
+# VariationObjective braucht dafuer die M_d-Matrizen und ist um Groessen-
+# ordnungen teurer. Deshalb sind hier mehrere hundert Startpunkte praktisch
+# gratis - und das ist noetig, denn die Zielfunktion hat viele lokale Minima.
+#
+# WAS EIN PULS DAVON AUFSAMMELT
+# Ein Rechteckpuls der Laenge t_p ab t_0 ist derselbe Boxcar wie eine
+# Kamerabelichtung, also ein sinc auf jeder Ordnung:
+#
+#     A(t_0) = (1/t_p) int_{t_0}^{t_0+t_p} I_W(t) dt
+#            = sum_d C_d sinc(d f_0 t_p) e^{2 pi i d f_0 (t_0 + t_p/2)} .
+#
+# Bei t_p = 1 us und f_0 = 61.67 kHz ist sinc(0.0617) = 0.9937 fuer die
+# Grundordnung und immer noch 0.30 bei d = 12: der Puls mittelt die Schwebung
+# NICHT weg, er tastet sie ab. Erst bei t_p = T_0 = 1/f_0 wird jedes
+# sinc(d) = 0 und die Welligkeit exakt null - der Puls deckt dann genau eine
+# volle Periode ab.
+#
+# DAS MASS FUER DIE SCHWEBUNG
+# Wegen Parseval ist der Effektivwert von A ueber eine ganze Grundperiode
+# geschlossen angebbar, ohne jedes Zeitraster:
+#
+#     R = sqrt( 2 * sum_{d>0} |C_d sinc(d f_0 t_p)|^2 ) / C_0 .
+#
+# R ist die Groesse, die minimiert wird: die relative Schwankung der
+# Pulsflaeche am Atomort ueber den Trigger-Zeitpunkt. R = 0 hiesse, der Puls
+# liefert bei JEDEM Trigger dieselbe Rabi-Flaeche.
+#
+# WARUM HELLIGKEIT UND CRESTFAKTOR DASSELBE SIND
+# Am Arbeitspunkt (3x4, w = 1.04 um, width = 0.37 MHz, r_x/r_y = 0.97/1.16,
+# 75/750 mm, sigma_Atom = 108 nm, t_p = 1 us) ergibt eine Pareto-Rechnung:
+#
+#     A(t_0)/<A>     1.40   2.00   2.50   3.00   3.50   4.00   4.25
+#     R              0.40   0.46   0.56   0.70   0.84   1.02   1.15
+#     Crest x / y    1.82   2.00   2.12   2.23   2.27   2.38   2.45
+#                    2.20   2.28   2.35   2.40   2.02   2.52   2.83
+#
+# Der hellste Punkt ist genau der Rephasing-Fall, also alle Tonphasen gleich -
+# und der treibt den Crestfaktor auf sein Maximum sqrt(2N). Helligkeit am
+# Trigger und Belastung der RF-Kette messen BEIDE, wie stark die Toene
+# rephasieren; man kann sie nicht getrennt einstellen. Deshalb ist phi = 0
+# gleichzeitig der hellste und der fuer Verstaerker und AOD unguenstigste
+# Punkt, und deshalb braucht die Optimierung KEINE Crest-Nebenbedingung: wer
+# R minimiert, landet bei 1.82/2.20 und damit von selbst unter phi = 0
+# (2.45/2.83). Der Crestfaktor wird nur angezeigt.
+#
+# GRENZEN
+# Mit reinen TONphasen (N_x + N_y - 1 Freiheitsgrade) kommt man am
+# Arbeitspunkt auf R = 0.401, mit Quadratur-Nebenbedingung auf 0.411. Waeren
+# die zwoelf Spotphasen frei waehlbar - was mit zwei AODs nicht geht -, waere
+# bei 0.249 Schluss. Null ist auch dann nicht erreichbar: Ordnungen, die nur
+# von einem einzigen Spotpaar erzeugt werden (fuer 3x4 ist d = 12 so eine),
+# haben keinen Partner zum Wegkuerzen.
+#
+# Zum Vergleich am selben Arbeitspunkt, t_p = 1 us:
+#     alle Phasen 0     R = 1.146   A(t_0)/<A> = 4.25   Crest 2.45/2.83
+#     Schroeder         R = 0.723   A(t_0)/<A> = 2.70   Crest 2.16/2.00
+#     optimiert         R = 0.411   A(t_0)/<A> = 1.47   Crest 1.82/2.21
+
+
+class AtomBeating:
+    """Pulsflaeche am Atomort als Funktion von Tonphasen und Trigger.
+
+    Vorberechnet die atomgewichteten Paarprodukte <g_s g_s'>_W und das
+    sinc-Fenster des Pulses; danach sind ripple(), area() und curve() reine
+    Rechnungen auf einem Vektor der Laenge (Zahl der Beat-Ordnungen).
+
+    Alle Flaechen sind auf die Pulslaenge normiert, also mittlere Intensitaet
+    im Pulsfenster - nicht Intensitaet mal Zeit. Damit ist A(t_0)/<A> direkt
+    ablesbar als "wie viel heller als der Zeitmittelwert ist der Puls".
+    """
+
+    def __init__(self, F, k, f0, weights, t_p):
+        G = F.reshape(F.shape[0], -1)
+        w = np.asarray(weights, dtype=float).ravel()
+        wsum = float(np.sum(w))
+        if wsum <= 0:
+            raise ValueError("Gewicht W(r) ist ueberall null")
+        self.f0 = float(f0)
+        self.t_p = float(t_p)
+        self.pl = pair_lists(k)
+        # <g_s g_s'>_W fuer jedes Paar, nach Ordnung sortiert
+        self.v = {d: np.array([float(np.dot(G[i] * G[j], w)) / wsum for i, j in ps])
+                  for d, ps in self.pl.items()}
+        self.orders = np.array([d for d in sorted(self.pl) if d != 0], dtype=int)
+        self._P0 = self.pl.get(0, np.zeros((0, 2), int))
+        self._v0 = self.v.get(0, np.zeros(0))
+        # Alle Paare aller Ordnungen d > 0 in EINEM flachen Block, dazu die
+        # Segmentgrenzen. Damit wird coefficients() zu drei numpy-Aufrufen
+        # statt einer Python-Schleife ueber die Ordnungen - bei zwoelf
+        # Ordnungen ein Faktor von rund zehn, und die Optimierung lebt von
+        # hunderttausenden Auswertungen.
+        vs = [self.v[d] for d in self.orders]
+        ps = [self.pl[d] for d in self.orders]
+        self._starts = np.concatenate(([0], np.cumsum([len(x) for x in vs])[:-1])) \
+            if self.orders.size else np.zeros(0, int)
+        self._vall = np.concatenate(vs) if vs else np.zeros(0)
+        self._iall = np.concatenate([q[:, 0] for q in ps]) if ps else np.zeros(0, int)
+        self._jall = np.concatenate([q[:, 1] for q in ps]) if ps else np.zeros(0, int)
+        # Boxcar des Pulses auf jeder Ordnung
+        self.sinc = np.sinc(self.orders * self.f0 * self.t_p)
+
+    # ---------------------------------------------------------- Koeffizienten
+    def coefficients(self, phases):
+        """(C_0, C_d) der atomgewichteten Intensitaet, C_d schon mit dem
+        sinc des Pulses multipliziert. C_0 ist reell und ist <A>."""
+        e = np.exp(1j * np.asarray(phases, dtype=float))
+        c0 = float(np.real(np.dot(self._v0,
+                                  e[self._P0[:, 0]] * np.conj(e[self._P0[:, 1]]))))
+        if self.orders.size == 0:
+            return c0, np.zeros(0, dtype=np.complex128)
+        w = self._vall * e[self._iall] * np.conj(e[self._jall])
+        cd = np.add.reduceat(w, self._starts)
+        return c0, cd * self.sinc
+
+    # ---------------------------------------------------------- Zielgroessen
+    def level(self, phases):
+        """<A> = zeitlicher Mittelwert der atomgewichteten Intensitaet.
+
+        Haengt nur ueber die frequenzentarteten Paare von den Phasen ab und
+        ist deshalb praktisch konstant - am Arbeitspunkt 1.9128 gegen 1.9119
+        zwischen dem schlechtesten und dem besten Phasensatz. An der
+        Helligkeit ist mit Phasen nichts zu gewinnen, nur an der Schwebung."""
+        return self.coefficients(phases)[0]
+
+    def ripple(self, phases):
+        """R = sigma_{t_0}(A) / <A>, exakt ueber eine Grundperiode.
+
+        Die Zielgroesse der Phasenoptimierung. Kein Zeitraster: Parseval
+        erledigt das Integral."""
+        c0, cd = self.coefficients(phases)
+        if c0 <= 0:
+            return float("nan")
+        return float(np.sqrt(2.0 * np.sum(np.abs(cd) ** 2)) / c0)
+
+    def area(self, phases, t0):
+        """A(t_0) fuer einen oder viele Trigger-Zeitpunkte."""
+        c0, cd = self.coefficients(phases)
+        t0 = np.atleast_1d(np.asarray(t0, dtype=float))
+        if self.orders.size == 0 or self.f0 <= 0:
+            return np.full(t0.size, c0)
+        E = np.exp(2j * np.pi * self.f0
+                   * np.outer(t0 + 0.5 * self.t_p, self.orders))
+        return c0 + 2.0 * np.real(E @ cd)
+
+    def curve(self, phases, n_t=2001):
+        """(t, A(t)) ueber eine volle Grundperiode."""
+        T0 = 1.0 / self.f0 if self.f0 > 0 else 1.0
+        t = np.linspace(0.0, T0, int(n_t), endpoint=False)
+        return t, self.area(phases, t)
+
+    def best_t0(self, phases, n_t=4001):
+        """Trigger auf das Maximum der Pulsflaeche.
+
+        Dort verschwindet dA/dt_0, Trigger-Jitter geht also nur quadratisch
+        ein - derselbe Gedanke wie in _on_snap_flat(), aber auf der
+        atomgewichteten Kurve statt auf der Flaechenmittelung."""
+        t, A = self.curve(phases, n_t)
+        i = int(np.argmax(A))
+        return float(t[i]), float(A[i])
+
+
+def atom_beating_at_centre(centers_x, centers_y, amp_spots, waist, use_airy,
+                           airy_factor, sigma, k, f0, t_p, n_sigma=4.0,
+                           n_grid=61, center=None):
+    """AtomBeating auf dem feinen lokalen Gitter um den Atomort.
+
+    Bequemlichkeitsfunktion: baut atom_local_stack() und gibt das fertige
+    Objekt zurueck. n_grid = 61 auf +-4 sigma sind 14 nm pro Zelle - das
+    globale Rechengitter hat 600."""
+    xs, ys, Xs, Ys, F, W = atom_local_stack(
+        centers_x, centers_y, amp_spots, waist, use_airy, airy_factor,
+        sigma, n_sigma=n_sigma, n_grid=n_grid, center=center)
+    return AtomBeating(F, k, f0, W, t_p), (xs, ys, F, W)

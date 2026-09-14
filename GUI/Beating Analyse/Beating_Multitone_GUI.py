@@ -39,6 +39,7 @@ The GUI always opens with this working point:
     optics           f1 = 75 mm, f2 = 750 mm, fLO = 52.88 mm
     light / AOD      795 nm, offset 100 MHz
     pulse            f_Rabi = 1 MHz, Omega ~ I, eta = 0
+    optimisation     beating at the atom, T_p = 1 us, 17 uK, nu_r = 60.4 kHz
 
 From it follow f_0 = width/6 = 61.67 kHz, T_0 = 16.22 us, a tone spacing of
 1.169 um in x and 0.779 um in y, and one frequency degenerate corner pair
@@ -51,6 +52,34 @@ Operation
 All parameters are typed in (no sliders except the time axis). Press
 'Recompute' or tick 'Recompute automatically'. A click into the 2D map moves
 the crosshair; the space-time map, the cut and I(t) refer to it.
+
+Phase optimisation
+------------------
+'Optimise' in the tone phase group picks WHAT is minimised.
+
+    beating at the atom      the default. Weights the profile with the atomic
+    (atom weighted)          position probability W(r) - a Gaussian of sigma
+                             from T and nu_r, some 100 nm - and minimises the
+                             relative swing of the PULSE AREA over the trigger
+                             instant, R = sigma_t0(A)/<A>. Then it puts t_0 on
+                             the maximum of that area, where dA/dt_0 = 0 and
+                             jitter only enters quadratically.
+                             At the working point, T_p = 1 us:
+                                 all phases 0   R = 115 %, crest 2.45/2.83
+                                 Schroeder      R =  72 %, crest 2.16/2.00
+                                 optimised      R =  41 %, crest 1.82/2.20
+
+    pulse area, spatial      the older objective: std/mean of theta(r) across a
+    spread over a region     hard mask (plateau, spot centres, circle) at one
+                             instant. A camera question - no single atom sits
+                             on a plateau - kept for comparing against the
+                             incoherent GUIs.
+
+The crest factor of the RF is reported, never constrained, and it does not
+need to be: brightness at the trigger and load on the amplifier are the SAME
+quantity (both measure how strongly the tones rephase), so minimising the
+beating walks away from phi = 0 in both respects at once. Section 12 of
+kern/beating_physik.py has the Pareto table.
 
 Start:
     python Beating_Multitone_GUI.py
@@ -84,6 +113,7 @@ from kern.beating_physik import (
     fLO, theta_max, f_band, AIRY_FACTOR,
     # frequencies, geometry, amplitudes, fields
     conjugate_waist, compute_centers_and_freqs, amps_from_ratio,
+    multitone_frequencies,
     amp_spots_from_ratios, build_field_stack, compute_grid,
     # beat frequencies and phases
     unique_beat_frequencies, fundamental_beat_frequency, degenerate_groups,
@@ -93,6 +123,8 @@ from kern.beating_physik import (
     # time evolution and statistics
     intensity_cube, boxcar_in_time, beat_orders, time_stats_exact,
     uniformity_of, VariationObjective, UniformitySeries, PulseArea,
+    # the atom as a weight, and the beating it actually sees
+    sigma_thermal, atom_beating_at_centre,
 )
 
 try:
@@ -201,6 +233,11 @@ class BeatingMultitoneWindow(QMainWindow):
             "pulse_t0": 0.0,             # s, start time of the pulse in the beat cycle
             "rabi_law": "I",             # 'I' (two-photon Raman) | 'sqrtI'
             "eta_ls": 0.0,               # differential light shift / Rabi frequency
+            # --- phase optimisation ---
+            "opt_target": 0,             # 0 = beating at the atom, 1 = spread over a region
+            "opt_tp": 1.0e-6,            # s, pulse length the optimiser works with
+            "atom_T": 17.0e-6,           # K, atom temperature
+            "atom_nu": 60.4e3,           # Hz, radial trap frequency
             "auto_update": False,
         }
         self.state["win_in"] = conjugate_waist(
@@ -480,12 +517,17 @@ class BeatingMultitoneWindow(QMainWindow):
         self.btn_snap_flat.clicked.connect(self._on_snap_flat)
         lay.addWidget(self.btn_snap_flat, 4, 0, 1, 2)
 
-        self.btn_opt_pulse = QPushButton("Optimise phases and t_0 for the pulse area")
+        self.btn_opt_pulse = QPushButton("Optimise phases and t_0 for the atom")
         self.btn_opt_pulse.setToolTip(
-            "Minimises the uniformity of the accumulated Rabi area in the\n"
-            "selected target region - the quantity that really counts for\n"
-            "pulsed driving. Optimises tone phases AND pulse timing jointly.\n"
-            "Takes about half a minute.")
+            "Runs the phase search on whatever 'Optimise' in the tone phase\n"
+            "group is set to, and puts t_0 with it.\n\n"
+            "Atom weighted (the default): minimises the swing of the PULSE\n"
+            "AREA at the atom over the trigger instant, then triggers on the\n"
+            "maximum of that area. At the working point this takes the swing\n"
+            "from 115 % (all phases 0) to 41 %, and the crest factor of the\n"
+            "RF drops from 2.45/2.83 to 1.82/2.20 along with it.\n\n"
+            "Region: the older std/mean of theta(r) over a hard mask.\n\n"
+            "Takes a few tens of seconds either way.")
         self.btn_opt_pulse.clicked.connect(self._on_optimize_pulse)
         lay.addWidget(self.btn_opt_pulse, 5, 0, 1, 2)
 
@@ -592,20 +634,99 @@ class BeatingMultitoneWindow(QMainWindow):
         holder = QWidget(); holder.setLayout(btns)
         outer.addWidget(holder)
 
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Target region"))
+        # ---- what the optimiser minimises ----------------------------------
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        self.cmb_opt_target = QComboBox()
+        self.cmb_opt_target.addItems(
+            ["beating at the atom (atom weighted)",
+             "pulse area, spatial spread over a region"])
+        self.cmb_opt_target.setToolTip(
+            "WHICH quantity the phase search minimises.\n\n"
+            "'beating at the atom' weights the profile with the atomic\n"
+            "position probability W(r) (Gaussian, sigma from T and nu_r) and\n"
+            "minimises\n\n"
+            "    R = sigma_t0(A) / <A>\n\n"
+            "the relative swing of the PULSE AREA over the trigger instant.\n"
+            "That is the beating a single atom is actually exposed to: it\n"
+            "sits at one place, and what changes from shot to shot is WHEN\n"
+            "the pulse lands in the beat cycle. R = 0 would mean the pulse\n"
+            "delivers the same Rabi area at every trigger.\n\n"
+            "'spatial spread over a region' is the older objective: the\n"
+            "std/mean of theta(r) across a hard mask at one instant. That is\n"
+            "a camera quantity - it averages over an area on which no single\n"
+            "atom sits - and it is kept for comparing against the incoherent\n"
+            "GUIs, not for the atom.")
+        self.cmb_opt_target.setCurrentIndex(self.state["opt_target"])
+        self.cmb_opt_target.currentIndexChanged.connect(self._sync_opt_target)
+        grid.addWidget(QLabel("Optimise"), 0, 0)
+        grid.addWidget(self.cmb_opt_target, 0, 1, 1, 2)
+
+        self.sp_opt_tp = QDoubleSpinBox()
+        self.sp_opt_tp.setRange(0.0001, 1000.0); self.sp_opt_tp.setDecimals(4)
+        self.sp_opt_tp.setSingleStep(0.1)
+        self.sp_opt_tp.setValue(self.state["opt_tp"] * 1e6)
+        self.sp_opt_tp.setSuffix(" us"); self.sp_opt_tp.setKeyboardTracking(False)
+        self.sp_opt_tp.setToolTip(
+            "Pulse length the optimisation works with - INDEPENDENT of\n"
+            "f_Rabi, because the experiment fixes the pulse, not the pi\n"
+            "condition. Default 1 us, the same number pulse_timing.py opens\n"
+            "with.\n\n"
+            "It enters through the boxcar of the pulse, sinc(d f_0 T_p) on\n"
+            "beat order d. At 1 us and f_0 = 61.7 kHz that is 0.994 on the\n"
+            "fundamental and still 0.30 at d = 12: the pulse SAMPLES the\n"
+            "beating, it does not average it away. Only at T_p = T_0 does\n"
+            "every sinc vanish and the swing become exactly zero.")
+        btn_tp_pi = QPushButton("= pi pulse")
+        btn_tp_pi.setToolTip("T_p = 1/(2 f_Rabi).")
+        btn_tp_pi.clicked.connect(
+            lambda: self.sp_opt_tp.setValue(1e6 / (2.0 * self.sp_frabi.value() * 1e6)))
+        grid.addWidget(QLabel("Pulse length T_p"), 1, 0)
+        grid.addWidget(self.sp_opt_tp, 1, 1)
+        grid.addWidget(btn_tp_pi, 1, 2)
+
+        # ---- the atom (only for the atom weighted target) ------------------
+        self.sp_atom_T = QDoubleSpinBox()
+        self.sp_atom_T.setRange(0.01, 10000.0); self.sp_atom_T.setDecimals(2)
+        self.sp_atom_T.setSingleStep(1.0); self.sp_atom_T.setValue(self.state["atom_T"] * 1e6)
+        self.sp_atom_T.setSuffix(" uK"); self.sp_atom_T.setKeyboardTracking(False)
+        self.sp_atom_T.setToolTip("Atom temperature. With nu_r it gives\n"
+                                  "sigma^2 = hbar/(2 m w) coth(hbar w / 2 kB T),\n"
+                                  "the same formula as Weighted_Multitone_Lens_GUI\n"
+                                  "and pulse_timing.py.")
+        self.sp_atom_nu = QDoubleSpinBox()
+        self.sp_atom_nu.setRange(0.1, 100000.0); self.sp_atom_nu.setDecimals(2)
+        self.sp_atom_nu.setSingleStep(1.0); self.sp_atom_nu.setValue(self.state["atom_nu"] * 1e-3)
+        self.sp_atom_nu.setSuffix(" kHz"); self.sp_atom_nu.setKeyboardTracking(False)
+        self.sp_atom_nu.setToolTip("Radial trap frequency nu_r.")
+        self.sp_atom_T.valueChanged.connect(self._show_sigma)
+        self.sp_atom_nu.valueChanged.connect(self._show_sigma)
+        self.lbl_sigma = QLabel("-")
+        self.lbl_sigma.setStyleSheet("color: #555; font-size: 10px;")
+        grid.addWidget(QLabel("atom T"), 2, 0)
+        grid.addWidget(self.sp_atom_T, 2, 1)
+        grid.addWidget(self.lbl_sigma, 2, 2)
+        grid.addWidget(QLabel("trap frequency nu_r"), 3, 0)
+        grid.addWidget(self.sp_atom_nu, 3, 1)
+
+        # ---- the hard mask (only for the region target) --------------------
+        self.lbl_opt_region = QLabel("Target region")
         self.cmb_opt_region = QComboBox()
         self.cmb_opt_region.addItems(["Plateau (<I> > 50 % max)", "Spot centres",
                                       "Circle around the centre"])
         self.cmb_opt_region.setCurrentIndex(2)   # default: the 2 um circle
-        row.addWidget(self.cmb_opt_region)
         self.sp_opt_radius = QDoubleSpinBox()
         self.sp_opt_radius.setRange(0.1, 20.0); self.sp_opt_radius.setDecimals(2)
         self.sp_opt_radius.setSingleStep(0.1); self.sp_opt_radius.setValue(2.0)
         self.sp_opt_radius.setSuffix(" um")
-        row.addWidget(self.sp_opt_radius)
-        holder2 = QWidget(); holder2.setLayout(row)
+        grid.addWidget(self.lbl_opt_region, 4, 0)
+        grid.addWidget(self.cmb_opt_region, 4, 1)
+        grid.addWidget(self.sp_opt_radius, 4, 2)
+
+        holder2 = QWidget(); holder2.setLayout(grid)
         outer.addWidget(holder2)
+        self._show_sigma()
+        self._sync_opt_target(self.state["opt_target"])
 
         self.cb_quad = QCheckBox("keep degenerate pairs in quadrature")
         self.cb_quad.setChecked(True)
@@ -632,6 +753,49 @@ class BeatingMultitoneWindow(QMainWindow):
         self.lbl_phase.setStyleSheet("color: #555; font-size: 10px;")
         outer.addWidget(self.lbl_phase)
         return g
+
+    def _sync_opt_target(self, idx):
+        """Only the inputs the chosen objective actually uses stay enabled."""
+        self.state["opt_target"] = int(idx)
+        atom = (int(idx) == 0)
+        for w in (self.sp_atom_T, self.sp_atom_nu, self.lbl_sigma):
+            w.setEnabled(atom)
+        for w in (self.lbl_opt_region, self.cmb_opt_region, self.sp_opt_radius):
+            w.setEnabled(not atom)
+        if hasattr(self, "btn_opt_pulse"):
+            self.btn_opt_pulse.setText("Optimise phases and t_0 for the atom"
+                                       if atom else
+                                       "Optimise phases and t_0 for the pulse area")
+
+    def _show_sigma(self, *_):
+        sig = sigma_thermal(self.sp_atom_nu.value() * 1e3,
+                            self.sp_atom_T.value() * 1e-6)
+        self.lbl_sigma.setText("sigma = %.1f nm" % (sig * 1e9)
+                               if np.isfinite(sig) else "sigma = -")
+
+    def _atom_beating(self, t_p=None):
+        """AtomBeating object for the current parameters, or None.
+
+        The atom sits at the centre of the profile - the same reference point
+        pulse_timing.py uses - on its own fine grid of +-4 sigma. The global
+        grid has some 600 nm per cell and would smear an atom of 100 nm over
+        a fraction of one pixel."""
+        s = self.state
+        cxs, cys, f_spots, _, _, _, _ = compute_centers_and_freqs(
+            s["N_x"], s["N_y"], s["width_x"], s["width_y"], s["f1"], s["f2"],
+            s["offset"], s["one_lens"], s["f_single"])
+        f0 = fundamental_beat_frequency(f_spots)
+        if f0 <= 0:
+            return None, None
+        k = beat_orders(f_spots, f0)
+        amp = amp_spots_from_ratios(s["r_x"], s["r_y"], s["N_x"], s["N_y"])
+        sig = sigma_thermal(s["atom_nu"], s["atom_T"])
+        if not np.isfinite(sig) or sig <= 0:
+            return None, None
+        ab, _ = atom_beating_at_centre(
+            cxs, cys, amp, s["win"], s["use_airy"], s["airy_factor"], sig, k, f0,
+            s["opt_tp"] if t_p is None else t_p)
+        return ab, sig
 
     def _rebuild_phase_fields(self):
         """Creates the input fields anew when N_x or N_y changes.
@@ -734,15 +898,112 @@ class BeatingMultitoneWindow(QMainWindow):
         self.recompute()
 
     def _on_optimize_pulse(self):
-        """Searches for tone phases AND pulse timing with the most uniform
-        pulse area.
-
-        This is the only optimiser left. The earlier objectives (broadband
-        time variation, peak intensity, quiet window) have been removed:
-        they all ended up at nearly the same phase set, and for pulsed
-        operation the pulse area is the relevant quantity anyway."""
-        from scipy.optimize import minimize
+        """Entry point of the phase search - dispatches on the target."""
         self._read_widgets()
+        if self.state["opt_target"] == 0:
+            self._optimize_atom_beating()
+        else:
+            self._optimize_region_spread()
+
+    # ------------------------------------------------------------------
+    def _optimize_atom_beating(self):
+        """Tone phases that minimise the beating AS THE ATOM SEES IT.
+
+        The objective is
+
+            R(phi) = sigma_t0(A) / <A> ,
+            A(t_0) = (1/T_p) int_{t_0}^{t_0+T_p} I_W(t) dt ,
+
+        with I_W the intensity weighted by the atomic position probability
+        W(r). R is the relative swing of the pulse area over the trigger
+        instant - the one thing about the beating a single atom can notice,
+        since it sits at one place and only the timing changes from shot to
+        shot. kern/beating_physik.AtomBeating gives R in closed form (no time
+        grid, Parseval does the integral), so one evaluation costs about
+        13 us and a few hundred restarts are affordable. They are needed: the
+        objective is riddled with local minima.
+
+        Afterwards t_0 is put on the maximum of A. There dA/dt_0 = 0, so
+        trigger jitter only enters quadratically, and the atom gets MORE than
+        the time average rather than less.
+
+        The crest factor is reported, not constrained. It cannot be traded
+        against the beating anyway: both measure how strongly the tones
+        rephase, so the R optimum comes out at 1.82/2.20 by itself, well
+        below the 2.45/2.83 of phi = 0 (see section 12 of beating_physik)."""
+        from scipy.optimize import minimize
+        s = self.state
+        N_x, N_y = s["N_x"], s["N_y"]
+        n_free = max(0, N_x - 1) + max(0, N_y - 1)
+        ab, sig = self._atom_beating()
+        if ab is None or n_free == 0:
+            self.lbl_status.setText("No beating, no free phases, or no atom size.")
+            return
+        degen_g = degenerate_groups(
+            compute_centers_and_freqs(N_x, N_y, s["width_x"], s["width_y"],
+                                      s["f1"], s["f2"], s["offset"],
+                                      s["one_lens"], s["f_single"])[2], ab.f0)
+        use_quad = self.cb_quad.isChecked()
+
+        def tones(v):
+            px = np.concatenate(([0.0], v[:N_x - 1])) if N_x > 1 else np.zeros(1)
+            py = np.concatenate(([0.0], v[N_x - 1:n_free])) if N_y > 1 else np.zeros(1)
+            return px, py
+
+        def cost(v):
+            px, py = tones(v)
+            ph = spot_phases_from_tones(px, py, N_x, N_y)
+            r = ab.ripple(ph)
+            if not np.isfinite(r):
+                return 1e6
+            return r + (2.0 * quadrature_penalty(ph, degen_g) if use_quad else 0.0)
+
+        self.lbl_status.setText("searching phases for the atom ...")
+        self.lbl_status.setStyleSheet("color: #555; font-size: 10px;")
+        QApplication.processEvents()
+        rng = np.random.default_rng(3)
+        best_f, best_v = 1e18, None
+        n_start = 300
+        for n in range(n_start):
+            r = minimize(cost, rng.uniform(0, 2 * np.pi, n_free),
+                         method="Nelder-Mead",
+                         options=dict(maxiter=4000, xatol=1e-9, fatol=1e-13))
+            if r.fun < best_f:
+                best_f, best_v = float(r.fun), r.x
+            if n % 40 == 0:
+                QApplication.processEvents()
+        px, py = tones(best_v)
+        ph = spot_phases_from_tones(px, py, N_x, N_y)
+        t0, A0 = ab.best_t0(ph)
+        lvl = ab.level(ph)
+        self._write_phase_fields(px, py)
+        self.sp_t0.blockSignals(True); self.sp_t0.setValue(t0 * 1e6)
+        self.sp_t0.blockSignals(False)
+        self.state["pulse_t0"] = t0
+        cx = crest_factor(multitone_frequencies(N_x, s["offset"], s["width_x"]), px,
+                          amps=rf_voltage_ratios(s["r_x"], N_x))
+        cy = crest_factor(multitone_frequencies(N_y, s["offset"], s["width_y"]), py,
+                          amps=rf_voltage_ratios(s["r_y"], N_y))
+        self._opt_note = (
+            f"Atom (sigma = {sig * 1e9:.1f} nm, T_p = {s['opt_tp'] * 1e6:.3f} us): "
+            f"pulse area swing R = {ab.ripple(ph) * 100:.1f} % "
+            f"(all phases 0: {ab.ripple(np.zeros(N_x * N_y)) * 100:.1f} %), "
+            f"t_0 = {t0 * 1e6:.3f} us, A(t_0) = {A0 / lvl:.2f} x <A>, "
+            f"crest {cx:.2f}/{cy:.2f}")
+        self.recompute()
+
+    # ------------------------------------------------------------------
+    def _optimize_region_spread(self):
+        """Searches for tone phases AND pulse timing with the most uniform
+        pulse area ACROSS A HARD MASK.
+
+        The older objective, kept for comparison with the incoherent GUIs:
+        it is the same std/mean over a region that Multitone_Lens_GUI and
+        Weighted_Multitone_Lens_GUI optimise, only evaluated on the pulse
+        area instead of the time average. It answers a camera question - no
+        single atom sits on a plateau - so for the atom use the other
+        target."""
+        from scipy.optimize import minimize
         s = self.state
         N_x, N_y = s["N_x"], s["N_y"]
         n_free = max(0, N_x - 1) + max(0, N_y - 1)
@@ -751,7 +1012,7 @@ class BeatingMultitoneWindow(QMainWindow):
             self.lbl_status.setText("No beating or no free phases.")
             return
         T0 = st["T0"]
-        t_p = 1.0 / (2.0 * s["f_rabi"])
+        t_p = s["opt_tp"]
         pa = PulseArea(st["F"], st["k"], st["f0"], st["mask"], law=s["rabi_law"])
         degen_g = degenerate_groups(st["f_spots"], st["f0"])
 
@@ -1045,6 +1306,10 @@ class BeatingMultitoneWindow(QMainWindow):
             self._rebuild_phase_fields()
         s["f_rabi"] = self.sp_frabi.value() * 1e6
         s["pulse_t0"] = self.sp_t0.value() * 1e-6
+        s["opt_target"] = self.cmb_opt_target.currentIndex()
+        s["opt_tp"] = self.sp_opt_tp.value() * 1e-6
+        s["atom_T"] = self.sp_atom_T.value() * 1e-6
+        s["atom_nu"] = self.sp_atom_nu.value() * 1e3
         s["rabi_law"] = "I" if self.cmb_rabi_law.currentIndex() == 0 else "sqrtI"
         s["eta_ls"] = self.sp_eta.value()
         s["phase_x"] = np.radians([sp.value() for sp in self.phase_spins_x])
