@@ -25,7 +25,7 @@ Contents
                                       resonance_check
      5. Tone phases                   schroeder_phases, kitayoshi_phases,
                                       spot_phases_from_tones, quadrature_penalty,
-                                      crest_factor
+                                      crest_factor, CrestBasis
      6. Time series on a time grid    intensity_cube, boxcar_in_time
      7. Exact time statistics         beat_orders, pair_lists, order_amplitudes,
                                       time_stats_exact, camera_frames_exact
@@ -703,6 +703,51 @@ def crest_factor(f_tones, phases, n_samples=20000, f_ref=None, amps=None):
     mod = np.abs(A)
     rms = np.sqrt(np.mean(mod ** 2))
     return float(np.sqrt(2.0) * mod.max() / rms) if rms > 0 else float("nan")
+
+
+class CrestBasis:
+    """crest_factor() mit vorberechnetem Zeitraster, fuer die Optimierung.
+
+    crest_factor() baut bei jedem Aufruf das Abtastraster und die
+    Exponentialmatrix neu auf - in einer Optimierungsschleife mit
+    hunderttausenden Auswertungen ist das der teuerste Posten von allen. Hier
+    haengt nur noch e^{i phi} von den Phasen ab, der Rest steht fest:
+
+        A(t) = sum_n a_n e^{i(2 pi (f_n - f_mean) t + phi_n)}  =  e^{i phi} . B
+
+    Identische Konvention und identisches Ergebnis wie crest_factor() bei
+    gleichem n_samples - die Funktion dort bleibt die Referenz.
+
+    n_samples = 2048 genuegt: die Huellkurve hat bei einer Handvoll Toenen nur
+    wenige Extrema pro Periode. Gegen 20000 Abtastpunkte betraegt die
+    Abweichung bei 3 und 4 Toenen weniger als 10^-5, bei 13 Toenen 7*10^-5. Wichtig ist nur, dass SCHRANKE und ANZEIGE dieselbe Zahl
+    benutzen - sonst laeuft der Optimierer gegen ein Limit, das die Anzeige
+    dann knapp verletzt."""
+
+    def __init__(self, f_tones, amps=None, n_samples=2048, f_ref=None):
+        f = np.asarray(f_tones, dtype=float)
+        self.n = f.size
+        if self.n <= 1:
+            self.B = None
+            return
+        a = np.ones(self.n) if amps is None else np.asarray(amps, dtype=float)
+        if f_ref is None or f_ref <= 0:
+            f_ref = fundamental_beat_frequency(f)
+            if f_ref <= 0:                 # incommensurable: take the closest pair
+                d = np.diff(np.sort(f))
+                d = d[d > 0]
+                f_ref = float(d.min()) if d.size else 1.0
+        t = np.linspace(0.0, 1.0 / f_ref, int(n_samples), endpoint=False)
+        self.B = a[:, None] * np.exp(2j * np.pi * (f - f.mean())[:, None] * t[None, :])
+
+    def __call__(self, phases):
+        if self.n == 0:
+            return float("nan")
+        if self.B is None:
+            return float(np.sqrt(2.0))
+        mod = np.abs(np.exp(1j * np.asarray(phases, dtype=float)) @ self.B)
+        rms = np.sqrt(np.mean(mod ** 2))
+        return float(np.sqrt(2.0) * mod.max() / rms) if rms > 0 else float("nan")
 
 
 # ============================================================================
@@ -1686,23 +1731,54 @@ class PulseArea:
 # Pulsflaeche am Atomort ueber den Trigger-Zeitpunkt. R = 0 hiesse, der Puls
 # liefert bei JEDEM Trigger dieselbe Rabi-Flaeche.
 #
-# WARUM HELLIGKEIT UND CRESTFAKTOR DASSELBE SIND
-# Am Arbeitspunkt (3x4, w = 1.04 um, width = 0.37 MHz, r_x/r_y = 0.97/1.16,
-# 75/750 mm, sigma_Atom = 108 nm, t_p = 1 us) ergibt eine Pareto-Rechnung:
+# WAS MAN OPTIMIERT - UND WARUM DER CRESTFAKTOR DARIN STEHT
+# R ist die richtige Groesse, WENN der Trigger unsicher ist. Ist der Puls
+# sauber getriggert, ist sie die falsche: dann friert jeder Schuss auf
+# denselben Wert ein, und was zaehlt, ist allein, wie viel Rabi-Flaeche das
+# Atom bei diesem einen t_0 bekommt, also peak_ratio = max_t A(t) / <A>.
 #
-#     A(t_0)/<A>     1.40   2.00   2.50   3.00   3.50   4.00   4.25
-#     R              0.40   0.46   0.56   0.70   0.84   1.02   1.15
-#     Crest x / y    1.82   2.00   2.12   2.23   2.27   2.38   2.45
-#                    2.20   2.28   2.35   2.40   2.02   2.52   2.83
+# Aber peak_ratio allein ist noch nicht die Antwort, denn <A> ist keine feste
+# Groesse: es haengt an der optischen Leistung, die haengt an der mittleren
+# RF-Leistung, und die ist durch den Verstaerker begrenzt. Der CRESTFAKTOR ist
+# Spitze/Effektivwert des RF-Signals einer Achse. Ist der Verstaerker durch
+# seine SPITZENSPANNUNG begrenzt (Kompression, nicht Erwaermung), dann gilt
 #
-# Der hellste Punkt ist genau der Rephasing-Fall, also alle Tonphasen gleich -
-# und der treibt den Crestfaktor auf sein Maximum sqrt(2N). Helligkeit am
-# Trigger und Belastung der RF-Kette messen BEIDE, wie stark die Toene
-# rephasieren; man kann sie nicht getrennt einstellen. Deshalb ist phi = 0
-# gleichzeitig der hellste und der fuer Verstaerker und AOD unguenstigste
-# Punkt, und deshalb braucht die Optimierung KEINE Crest-Nebenbedingung: wer
-# R minimiert, landet bei 1.82/2.20 und damit von selbst unter phi = 0
-# (2.45/2.83). Der Crestfaktor wird nur angezeigt.
+#     P_mittel <= V_max^2 / (R_load * crest^2)
+#
+# und die gebeugte optische Leistung folgt der mittleren RF-Leistung. Ein Spot
+# wird je Achse einmal gebeugt, seine Intensitaet traegt also 1/(Cx^2 Cy^2).
+# Die Zielgroesse ist damit
+#
+#     F = max_t A(t) / (crest_x^2 * crest_y^2) ,
+#
+# die Rabi-Flaeche pro Volt Verstaerker-Reserve. Der Crestfaktor ist hier
+# keine Nebenbedingung, sondern Teil der Antwort - es gibt nichts mehr
+# einzustellen.
+#
+# Das dreht das Vorzeichen um: mehr Rephasieren bringt einen helleren Peak,
+# kostet aber mehr mittlere Leistung, als es einbringt. Bei gleichen Tonphasen
+# erreicht der Crest sein Maximum sqrt(2N) (3 Toene 2.449, 4 Toene 2.828) -
+# genau deshalb ist phi = 0 hier der SCHLECHTESTE und nicht der beste Punkt.
+#
+# Arbeitspunkt, t_p = 1 us, Atom sigma = 108 nm:
+#
+#     Phasen           F        peak_ratio   Crest x/y    R
+#     alle 0           0.089       4.25      2.45/2.83   115 %
+#     Kitayoshi        0.133       2.47      2.16/2.00    72 %
+#     Schroeder        0.145       2.70      2.16/2.00    72 %
+#     auf R optimiert  0.091       1.47      1.82/2.21    41 %
+#     auf F optimiert  0.239       2.47      1.82/1.77    62 %
+#
+# Also 2.7-fache Pulsflaeche gegenueber phi = 0 und 1.6-fache gegenueber
+# Schroeder, bei gleichem Verstaerker. Bemerkenswert: das R-Optimum ist unter
+# dieser Normierung kaum besser als phi = 0 - es erkauft Ruhe mit Helligkeit,
+# und zwar teuer.
+#
+# WAERE DIE KETTE STATT DESSEN DURCH DIE MITTLERE LEISTUNG BEGRENZT
+# (thermisch limitierter AOD), waere der Crest nur eine Verzerrungsgrenze und
+# die richtige Zielgroesse max_t A(t) allein - dann braeuchte man eine
+# Crest-SCHRANKE, sonst lautet die Antwort immer phi = 0. Fuer diesen Aufbau
+# gilt das nicht.
 #
 # GRENZEN
 # Mit reinen TONphasen (N_x + N_y - 1 Freiheitsgrade) kommt man am
@@ -1711,11 +1787,6 @@ class PulseArea:
 # bei 0.249 Schluss. Null ist auch dann nicht erreichbar: Ordnungen, die nur
 # von einem einzigen Spotpaar erzeugt werden (fuer 3x4 ist d = 12 so eine),
 # haben keinen Partner zum Wegkuerzen.
-#
-# Zum Vergleich am selben Arbeitspunkt, t_p = 1 us:
-#     alle Phasen 0     R = 1.146   A(t_0)/<A> = 4.25   Crest 2.45/2.83
-#     Schroeder         R = 0.723   A(t_0)/<A> = 2.70   Crest 2.16/2.00
-#     optimiert         R = 0.411   A(t_0)/<A> = 1.47   Crest 1.82/2.21
 
 
 class AtomBeating:
@@ -1759,6 +1830,11 @@ class AtomBeating:
         self._jall = np.concatenate([q[:, 1] for q in ps]) if ps else np.zeros(0, int)
         # Boxcar des Pulses auf jeder Ordnung
         self.sinc = np.sinc(self.orders * self.f0 * self.t_p)
+        # Zeitbasis e^{2 pi i d f_0 (t + t_p/2)} je Rasterlaenge, einmal gebaut.
+        # In peak_ratio() steckte sonst bei jedem Aufruf ein exp() ueber
+        # (n_t x Ordnungen) - in einer Schleife mit hunderttausenden Aufrufen
+        # der teuerste Posten der ganzen Optimierung.
+        self._basis = {}
 
     # ---------------------------------------------------------- Koeffizienten
     def coefficients(self, phases):
@@ -1807,7 +1883,46 @@ class AtomBeating:
         """(t, A(t)) ueber eine volle Grundperiode."""
         T0 = 1.0 / self.f0 if self.f0 > 0 else 1.0
         t = np.linspace(0.0, T0, int(n_t), endpoint=False)
-        return t, self.area(phases, t)
+        if self.orders.size == 0 or self.f0 <= 0:
+            return t, self.area(phases, t)
+        c0, cd = self.coefficients(phases)
+        return t, c0 + 2.0 * np.real(self._time_basis(n_t) @ cd)
+
+    def peak_ratio(self, phases, n_t=256):
+        """max_t A(t) / <A> - wie viel heller als der Zeitmittelwert der Puls
+        am besten Trigger ist.
+
+        Sagt, wie viel Rabi-Flaeche das Atom bei geeignetem t_0 bekommt -
+        bezogen auf den Zeitmittelwert. <A> ist praktisch phasenunabhaengig,
+        das Verhaeltnis vergleicht Phasensaetze also direkt, SOLANGE die
+        optische Leistung festgehalten wird.
+
+        Bei einem spitzenspannungsbegrenzten Verstaerker ist sie das gerade
+        NICHT: dort ist die mittlere RF-Leistung ~ 1/crest^2, und die
+        eigentliche Zielgroesse lautet peak_ratio/(crest_x^2 crest_y^2) -
+        siehe den Text zu Abschnitt 12. peak_ratio ist dann nur ein Faktor
+        davon.
+
+        n_t = 256 reicht fuer die Suche (zwoelf Ordnungen brauchen 25 Punkte);
+        best_t0() rastert danach feiner."""
+        c0, cd = self.coefficients(phases)
+        if c0 <= 0:
+            return float("nan")
+        if self.orders.size == 0 or self.f0 <= 0:
+            return 1.0
+        return float((c0 + 2.0 * np.real(self._time_basis(n_t) @ cd)).max() / c0)
+
+    def _time_basis(self, n_t):
+        """e^{2 pi i d f_0 (t_j + t_p/2)} auf einem Raster von n_t Punkten ueber
+        eine Grundperiode, gecacht."""
+        n_t = int(n_t)
+        E = self._basis.get(n_t)
+        if E is None:
+            t = np.linspace(0.0, 1.0 / self.f0, n_t, endpoint=False)
+            E = np.exp(2j * np.pi * self.f0
+                       * np.outer(t + 0.5 * self.t_p, self.orders))
+            self._basis[n_t] = E
+        return E
 
     def best_t0(self, phases, n_t=4001):
         """Trigger auf das Maximum der Pulsflaeche.
@@ -1832,3 +1947,153 @@ def atom_beating_at_centre(centers_x, centers_y, amp_spots, waist, use_airy,
         centers_x, centers_y, amp_spots, waist, use_airy, airy_factor,
         sigma, n_sigma=n_sigma, n_grid=n_grid, center=center)
     return AtomBeating(F, k, f0, W, t_p), (xs, ys, F, W)
+
+
+# ============================================================================
+# 13. Gleichmaessige Beleuchtung EINES Atoms
+# ============================================================================
+# Die eigentliche Frage des Experiments lautet nicht "wie ruhig ist die
+# Schwebung" und auch nicht "wie hell wird der Puls", sondern:
+#
+#     Sitzt der Interferenzfleck waehrend des Pulses MITTIG auf dem Atom,
+#     und ist die aufgesammelte Rabi-Flaeche ueber die Ausdehnung des Atoms
+#     gleichmaessig?
+#
+# Das Atom ist um sigma_thermal unscharf (rund 100 nm). Laeuft der Fleck
+# waehrend des Pulses halb an ihm vorbei, dann ist theta auf der einen Seite
+# der Aufenthaltsverteilung deutlich groesser als auf der anderen - das Atom
+# bekommt je nach Schuss einen anderen Drehwinkel, obwohl der Trigger sauber
+# ist und obwohl die MITTLERE Flaeche stimmt. Genau das misst
+#
+#     U_W = sigma_W(theta) / <theta>_W ,
+#
+# die mit W(r) gewichtete Ortsstreuung der Pulsflaeche. Ein linearer Gradient
+# quer durch die Atomwolke, also ein seitlich versetzter Fleck, erzeugt
+# U_W = |grad theta| * sigma / <theta> - der Versatz IST der dominante Beitrag
+# zu U_W, "mittig" und "gleichmaessig" sind dieselbe Bedingung. Der
+# Schwerpunktversatz wird trotzdem getrennt ausgegeben, weil er in Nanometern
+# anschaulich ist.
+#
+# WARUM DAS NICHT MIT DEN MITTELN AUS ABSCHNITT 12 GEHT
+# Dort wurde der Ort ganz nach vorne gezogen und das Feld auf einen Vektor
+# ueber die Beat-Ordnungen zusammengefaltet. Das ist hier gerade nicht
+# erlaubt: U_W ist eine Aussage UEBER den Ort, das Ortsmittel darf also nicht
+# vorweggenommen werden. theta(r) wird aber trotzdem nicht Pixel fuer Pixel
+# gebraucht, denn
+#
+#     theta(r) = sum_p a_p * (g_s g_s')_p (r) ,
+#     a_p      = Re[ e^{i(phi_s - phi_s')} * c_{d(p)} ] ,
+#     c_0 = t_p ,  c_d = 2 * (e^{i d w0 (t0+t_p)} - e^{i d w0 t0}) / (i d w0)
+#
+# ist LINEAR in den Paarprodukten. Damit sind
+#
+#     <theta>_W   = sum_p a_p m_p ,          m_p  = <prod_p>_W
+#     <theta^2>_W = sum_pq a_p a_q M_pq ,    M_pq = <prod_p prod_q>_W
+#
+# und M ist eine feste (Paare x Paare)-Matrix - fuer 3x4 sind das 75x75. Eine
+# Auswertung kostet danach ein a^T M a, also rund 5600 Multiplikationen statt
+# einer Rechnung ueber 3721 Pixel. Der Aufbau von M kostet einmalig
+# 75*75*3721 Operationen, ein Bruchteil einer Sekunde.
+
+
+class AtomIllumination:
+    """Gleichmaessigkeit der Beleuchtung eines Atoms durch einen Puls.
+
+    Zielgroesse ist U_W = sigma_W(theta)/<theta>_W ueber die
+    Aufenthaltsverteilung W(r) des Atoms, gemeinsam in den Tonphasen und im
+    Trigger t_0 zu minimieren. Ergaenzend liefert centroid() den
+    Schwerpunktversatz der Pulsflaeche gegen den Atomort in Metern.
+
+    Gilt fuer Omega ~ I (beide Raman-Zweige aus diesem Profil). Dort ist die
+    Pulsflaeche in geschlossener Form angebbar, und nur deshalb ist die
+    gemeinsame Suche ueber Phasen UND t_0 bezahlbar."""
+
+    def __init__(self, F, k, f0, weights, t_p, dx=None, dy=None):
+        G = F.reshape(F.shape[0], -1)
+        w = np.asarray(weights, dtype=float).ravel()
+        wsum = float(np.sum(w))
+        if wsum <= 0:
+            raise ValueError("Gewicht W(r) ist ueberall null")
+        self.f0, self.t_p = float(f0), float(t_p)
+        self.w0 = 2.0 * np.pi * self.f0
+        pl = pair_lists(k)
+        self.orders = np.array(sorted(pl), dtype=int)
+        ps = [pl[d] for d in self.orders]
+        self.n_per = np.array([len(q) for q in ps], dtype=int)
+        self.d_of_p = np.repeat(self.orders, self.n_per)
+        self.i_all = np.concatenate([q[:, 0] for q in ps])
+        self.j_all = np.concatenate([q[:, 1] for q in ps])
+        P = np.stack([G[i] * G[j] for i, j in zip(self.i_all, self.j_all)])
+        self.m = P @ w / wsum                       # <prod_p>_W
+        self.M = (P * w) @ P.T / wsum               # <prod_p prod_q>_W
+        self.mx = (P @ (w * np.asarray(dx).ravel()) / wsum) if dx is not None else None
+        self.my = (P @ (w * np.asarray(dy).ravel()) / wsum) if dy is not None else None
+        self._zero = (self.orders == 0)
+        self._dw = self.orders[~self._zero] * self.w0
+
+    def _a(self, phases, t0):
+        """Reellwertiger Gewichtsvektor a_p der Paarprodukte.
+
+        Vollstaendig vektorisiert - eine Schleife ueber die Ordnungen kostete
+        hier mehr als die ganze uebrige Rechnung, und die Optimierung ruft das
+        hunderttausendfach auf."""
+        e = np.exp(1j * np.asarray(phases, dtype=float))
+        wp = e[self.i_all] * np.conj(e[self.j_all])
+        dw = self._dw                               # d * w0, Ordnung 0 ausgenommen
+        c = np.empty(self.orders.size, dtype=np.complex128)
+        c[self._zero] = self.t_p
+        if dw.size:
+            c[~self._zero] = 2.0 * ((np.exp(1j * dw * (t0 + self.t_p))
+                                     - np.exp(1j * dw * t0)) / (1j * dw))
+        return np.real(wp * np.repeat(c, self.n_per))
+
+    def mean(self, phases, t0):
+        """<theta>_W, in Intensitaet mal Zeit."""
+        return float(self._a(phases, t0) @ self.m)
+
+    def stats(self, phases, t0):
+        """(<theta>_W, U_W) in einem Durchgang - der Aufruf der Optimierung.
+
+        Getrennte Aufrufe von mean() und uniformity() berechnen a_p zweimal."""
+        a = self._a(phases, t0)
+        mu = float(a @ self.m)
+        if mu <= 0:
+            return mu, float("nan")
+        var = float(a @ self.M @ a) - mu * mu
+        return mu, float(np.sqrt(max(var, 0.0)) / mu)
+
+    def uniformity(self, phases, t0):
+        """U_W = sigma_W(theta)/<theta>_W - die Zielgroesse."""
+        return self.stats(phases, t0)[1]
+
+    def centroid(self, phases, t0):
+        """Schwerpunkt der Pulsflaeche relativ zum Atomort, (dx, dy) in m.
+
+        Null heisst: der Fleck sitzt mittig auf dem Atom. Ein Versatz von
+        einigen zehn Nanometern gegen sigma = 100 nm ist bereits das, was den
+        Drehwinkel ueber die Wolke schief macht."""
+        if self.mx is None:
+            return float("nan"), float("nan")
+        a = self._a(phases, t0)
+        mu = float(a @ self.m)
+        if mu <= 0:
+            return float("nan"), float("nan")
+        return float(a @ self.mx / mu), float(a @ self.my / mu)
+
+
+def atom_illumination_at_centre(centers_x, centers_y, amp_spots, waist, use_airy,
+                                airy_factor, sigma, k, f0, t_p, n_sigma=3.0,
+                                n_grid=31, center=None):
+    """AtomIllumination auf dem feinen lokalen Gitter um den Atomort.
+
+    n_grid = 31 ueber +-3 sigma sind 21 nm je Zelle. Feiner lohnt nicht: U_W
+    ist ein Verhaeltnis von Flaechenmitteln und aendert sich damit erst in der
+    dritten Stelle, waehrend die Matrix M quadratisch in der Pixelzahl
+    aufgebaut wird."""
+    cx0, cy0 = (float(np.mean(centers_x)), float(np.mean(centers_y))) \
+        if center is None else (float(center[0]), float(center[1]))
+    xs, ys, Xs, Ys, F, W = atom_local_stack(
+        centers_x, centers_y, amp_spots, waist, use_airy, airy_factor, sigma,
+        n_sigma=n_sigma, n_grid=n_grid, center=(cx0, cy0))
+    obj = AtomIllumination(F, k, f0, W, t_p, dx=Xs - cx0, dy=Ys - cy0)
+    return obj, (xs, ys, F, W)

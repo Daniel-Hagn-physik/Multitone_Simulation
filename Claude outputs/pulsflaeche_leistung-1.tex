@@ -39,7 +39,14 @@ convenient to abbreviate the intensity weight of a spot by
 a_s\equiv A_s^2=a_{x,i}\,a_{y,j} .
 \end{equation}
 A single spot then carries $\int g_s^2\,\mathrm d^2r=a_sP_1$, with
-$P_1=\int|u|^2\mathrm d^2r$. For the Gaussian, substituting
+$P_1=\int|u|^2\mathrm d^2r$.
+
+\emph{Notation.} A bold symbol is a vector in the focal plane, the same letter
+in italics its length: $r=|\mathbf r|$, $q=|\mathbf q|$, $d=|\mathbf d|$. All
+integrals $\int\!\ldots\mathrm d^2r$ and $\int\!\ldots\mathrm d^2q$ run over the
+plane, i.e.\ over the vector. The mode is radially symmetric, so $u$ is written
+as a function of the \emph{scalar} radius, $u(r)\equiv u(|\mathbf r|)$, and the
+same holds for $\tilde u(q)$ and for the overlap $O(d)$. For the Gaussian, substituting
 $x=2r^2/w_0^2$,
 \begin{equation}
 P_1^\mathrm{G}=\int_0^\infty\! e^{-2r^2/w_0^2}\,2\pi r\,\mathrm dr
@@ -97,35 +104,46 @@ transform is
 \begin{equation}
 \frac{1}{(2\pi)^2}\int_{|\mathbf q|<k}\! e^{i\mathbf q\cdot\mathbf r}\,\mathrm d^2q
 =\frac{k^2}{4\pi}\,\frac{2J_1(kr)}{kr}
-=\frac{k^2}{4\pi}\,u(r),
+=\frac{k^2}{4\pi}\,u(r),\qquad r=|\mathbf r| ,
 \end{equation}
-so that, read backwards,
+where the left side is an integral over the vector $\mathbf q$ while the right
+side depends only on the length $r$, as it must for a radially symmetric
+pupil. Read backwards,
 \begin{equation}
-\tilde u(\mathbf q)=\int\! u(\mathbf r)\,e^{-i\mathbf q\cdot\mathbf r}\,\mathrm d^2r
-=\frac{4\pi}{k^2}\,\Theta\!\left(k-|\mathbf q|\right),
+\tilde u(q)=\int\! u(|\mathbf r|)\,e^{-i\mathbf q\cdot\mathbf r}\,\mathrm d^2r
+=\frac{4\pi}{k^2}\,\Theta\!\left(k-q\right),
+\qquad q=|\mathbf q| ,
 \end{equation}
 a \emph{flat} spectrum inside the cutoff $k=2\pi\,\mathrm{NA}/\lambda$ and zero
-outside. The prefactor follows from $\mathbf q=0$:
-$\tilde u(0)=\int u\,\mathrm d^2r=\frac{4\pi}{k}\int_0^\infty
-J_1(kr)\,\mathrm dr=\frac{4\pi}{k^2}$, using $\int_0^\infty J_1(x)\mathrm dx=1$.
+outside. The prefactor follows from $\mathbf q=0$, where the exponential is unity and
+the plane integral becomes a radial one,
+$\tilde u(0)=\int u\,\mathrm d^2r=2\pi\int_0^\infty u(r)\,r\,\mathrm dr
+=\frac{4\pi}{k}\int_0^\infty J_1(kr)\,\mathrm dr=\frac{4\pi}{k^2}$,
+using $\int_0^\infty J_1(x)\,\mathrm dx=1$.
 
 \emph{(ii) The integral over a disc.} The angular integral gives a Bessel
 function, $\int_0^{2\pi}e^{ix\cos\varphi}\,\mathrm d\varphi=2\pi J_0(x)$, and
 the radial one closes with $\int_0^XJ_0(t)\,t\,\mathrm dt=XJ_1(X)$:
 \begin{equation}
 \int_{|\mathbf q|<k}\! e^{i\mathbf q\cdot\mathbf d}\,\mathrm d^2q
+=\int_0^k\!\!\int_0^{2\pi}\! e^{i\,qd\cos\varphi}\,q\,\mathrm d\varphi\,\mathrm dq
 =2\pi\!\int_0^k\! J_0(qd)\,q\,\mathrm dq
 =\frac{2\pi k\,J_1(kd)}{d} .
 \end{equation}
+In the first step $\mathbf q\cdot\mathbf d=qd\cos\varphi$ was used, with
+$\varphi$ the angle between the two vectors; from there on only the lengths
+$q$ and $d$ appear.
 
 \emph{(iii) The correlation theorem.} The overlap depends only on the spot
 separation $\mathbf d=\mathbf c_{s'}-\mathbf c_s$, and since $u$ is real and
 even the correlation equals the convolution,
 \begin{equation}
-O^\mathrm{A}(d)=\int\! u(\mathbf r)\,u(\mathbf r-\mathbf d)\,\mathrm d^2r
-=\frac{1}{(2\pi)^2}\int\!\left|\tilde u(\mathbf q)\right|^2
+O^\mathrm{A}(d)=\int\! u(|\mathbf r|)\,u(|\mathbf r-\mathbf d|)\,\mathrm d^2r
+=\frac{1}{(2\pi)^2}\int\!\left|\tilde u(q)\right|^2
 e^{i\mathbf q\cdot\mathbf d}\,\mathrm d^2q .
 \end{equation}
+The shift $\mathbf r-\mathbf d$ is a vector operation, but the result again
+depends only on the distance $d=|\mathbf d|$.
 Here comes the point: the spectrum is an indicator function, so squaring it
 changes nothing, $\Theta^2=\Theta$. The autocorrelation therefore has the same
 spectrum as the mode itself, only with a different prefactor, and putting

@@ -102,9 +102,11 @@ auf diesen Punkt.
 | | f1, f2 | Teleskop (ignoriert bei *Use one lens*) |
 | Amplitudes | r_x, r_y | Außen/Innen-Verhältnis `amp_x = [r_x, 1, …, 1, r_x]`. Das sind **Intensitäts**-Gewichte, das Feld trägt die Wurzel. |
 | Pulsed operation | f_Rabi, Pulse start t_0, Coupling, light shift eta | siehe *Gepulster Betrieb* |
-| | *Move t_0 to a flat point …*, *Optimise phases and t_0 …* | siehe *Flacher Punkt statt bestem Punkt* |
+| | *Move t_0 to a flat point …* | siehe *Flacher Punkt statt bestem Punkt*. Der Optimierer-Knopf sitzt im Kasten *Tone phases* |
 | Tone phases | 0 / Schroeder / Kitayoshi / randomise | Presets für alle Tonphasen |
-| | Optimise | **was** minimiert wird: *beating at the atom* (Standard) oder *pulse area, spatial spread over a region*. Siehe *Phasen für das Atom optimieren* |
+| | max. crest factor | die einzige Stellschraube: wie hart die RF-Kette gefahren werden darf. Siehe *Phasen für das Atom optimieren* |
+| | *Optimise phases and t_0 for even illumination of the atom* | startet die Suche. Steht direkt bei den Einstellungen, die er liest |
+| | evaluation circle r | Auswertekreis für Plots, U(t) und die Nebenfenster — **nicht** für die Phasensuche |
 | | Pulse length T_p, *= pi pulse* | Pulslänge, mit der der Optimierer rechnet (Standard 1 µs). Unabhängig von f_Rabi — das Experiment legt den Puls fest, nicht die π-Bedingung |
 | | atom T, trap frequency nu_r | Atomtemperatur und radiale Fallenfrequenz → σ (angezeigt). Nur beim atomgewichteten Ziel |
 | | Target region + Radius | Zielgebiet nur des **Regions**-Ziels: Plateau, Spot centres oder Circle around the centre (Standard, 2 µm) |
@@ -330,30 +332,45 @@ R = sqrt( 2 · Σ_{d>0} |C_d · sinc(d f₀ T_p)|² ) / C_0
 den Trigger-Zeitpunkt. R = 0 hieße, der Puls liefert bei *jedem* Trigger
 dieselbe Rabi-Fläche.
 
-### Was dabei herauskommt
+### Zwei Zielgrößen, die gegeneinander ziehen
+
+R ist die richtige Größe, **wenn der Trigger unsicher ist**. Ist der Puls
+sauber getriggert, ist sie die falsche: dann friert jeder Schuss auf denselben
+Wert ein, und was zählt, ist allein, wie viel Rabi-Fläche das Atom bei diesem
+einen t₀ bekommt, also
+
+```
+peak_ratio = max_t A(t) / ⟨A⟩
+```
+
+Weil ⟨A⟩ praktisch phasenunabhängig ist (1.9128 gegen 1.9119 zwischen dem
+schlechtesten und dem besten Satz — ⟨A⟩ hängt nur über die frequenzentarteten
+Paare überhaupt von den Phasen ab), ist dieses Verhältnis zugleich der
+**absolute** Vergleich zwischen Phasensätzen: ein Faktor zwei hier ist ein
+Faktor zwei in der nötigen Laserleistung.
 
 Arbeitspunkt, T_p = 1 µs, σ = 108 nm:
 
-| Phasen | R | A(t₀)/⟨A⟩ | Crest x / y |
-|---|---|---|---|
-| alle 0 | 115 % | 4.25 | 2.45 / 2.83 |
-| Schroeder | 72 % | 2.70 | 2.16 / 2.00 |
-| Kitayoshi | 72 % | — | 2.16 / 2.00 |
-| **optimiert** | **41 %** | 1.47 | **1.82 / 2.20** |
-| mit Quadratur-Haken | 41.1 % | 1.47 | 1.82 / 2.21 |
-| ohne Quadratur | 40.1 % | 1.40 | 1.82 / 2.20 |
-| freie Spotphasen (nicht fahrbar) | 24.9 % | — | — |
+| Phasen | R | A(t₀)/⟨A⟩ | Crest x / y | 1 %-Fenster |
+|---|---|---|---|---|
+| alle 0 | 115 % | 4.25 | 2.45 / 2.83 | 277 ns |
+| Schroeder | 72 % | 2.70 | 2.16 / 2.00 | 260 ns |
+| Kitayoshi | 72 % | 2.47 | 2.16 / 2.00 | 262 ns |
+| auf **R** optimiert | **41 %** | **1.47** | 1.82 / 2.21 | 317 ns |
+| auf **A(t₀)** optimiert, C = 2.0 | 71 % | **2.89** | 1.99 / 1.99 | ≈ 260 ns |
+| freie Spotphasen (nicht fahrbar) | 24.9 % | — | — | — |
 
-Die Quadratur kostet also 1 Prozentpunkt — sie kann anbleiben.
+**Die beiden ziehen gegeneinander.** R zu minimieren senkt die Helligkeit am
+Trigger von 4.25 auf 1.47 — das Atom bekommt bei bestem Trigger dann weniger
+als die Hälfte dessen, was schon das Schroeder-Preset liefert. Deshalb ist das
+**Standardziel die Helligkeit**, und R nur die Option für den ungetriggerten
+Fall.
 
-Am Pegel ⟨A⟩ ist mit Phasen nichts zu holen: 1.9128 gegen 1.9119 zwischen dem
-schlechtesten und dem besten Satz. ⟨A⟩ hängt nur über die frequenzentarteten
-Paare überhaupt von den Phasen ab. Zu gewinnen ist ausschließlich die
-Schwebung.
+Die Quadratur kostet beim R-Ziel 1 Prozentpunkt (41.1 statt 40.1 %) — sie kann
+anbleiben.
 
-Nach der Suche wird t₀ auf das **Maximum** von A(t₀) gelegt. Dort ist
-dA/dt₀ = 0, Jitter geht also nur quadratisch ein, und das Atom bekommt mehr
-als den Zeitmittelwert statt weniger.
+In beiden Fällen wird t₀ danach auf das **Maximum** von A(t₀) gelegt. Dort ist
+dA/dt₀ = 0, Jitter geht also nur quadratisch ein.
 
 ### Abhängigkeit von der Pulslänge
 
@@ -366,25 +383,71 @@ Bemerkenswert: der Crestfaktor am Optimum ist über den ganzen Bereich
 derselbe. Der Optimierer landet unabhängig von T_p in derselben
 RF-freundlichen Ecke.
 
-### Warum es keine Crest-Nebenbedingung gibt
+### Was der Crestfaktor ist, und warum er in der Zielfunktion steht
 
-Eine Pareto-Rechnung (R minimieren unter der Auflage A(t₀)/⟨A⟩ ≥ Ziel) ergibt:
+Der AWG erzeugt je Achse die Summe der Töne,
+s(t) = Σ_n a_n cos(2π f_n t + φ_n). Der **Crestfaktor** ist Spitzenwert durch
+Effektivwert dieses Signals. Er misst, wie ungleichmäßig sich die Leistung über
+die Zeit verteilt: bei einem einzigen Ton ist er √2 = 1.414, bei N gleichen
+Tönen *mit gleicher Phase* rephasieren alle einmal pro Hüllkurvenperiode und er
+erreicht sein Maximum
 
-| A(t₀)/⟨A⟩ | 1.40 | 2.00 | 2.50 | 3.00 | 3.50 | 4.00 | 4.25 |
-|---|---|---|---|---|---|---|---|
-| R | 0.40 | 0.46 | 0.56 | 0.70 | 0.84 | 1.02 | 1.15 |
-| Crest x | 1.82 | 2.00 | 2.12 | 2.23 | 2.27 | 2.38 | 2.45 |
-| Crest y | 2.20 | 2.28 | 2.35 | 2.40 | 2.02 | 2.52 | 2.83 |
+```
+crest = √(2N)     →  2.449 bei 3 Tönen, 2.828 bei 4 Tönen
+```
 
-Der hellste Punkt ist genau der Rephasing-Fall, also alle Tonphasen gleich —
-und der treibt den Crestfaktor auf sein Maximum √(2N). **Helligkeit am Trigger
-und Belastung der RF-Kette messen beide dasselbe**, nämlich wie stark die Töne
-rephasieren; getrennt einstellbar sind sie nicht. φ = 0 ist deshalb
-gleichzeitig der hellste und der für Verstärker und AOD ungünstigste Punkt.
+Genau diese Werte stehen im GUI bei φ = 0 (2.45 / 2.83). Deshalb gibt es
+Schroeder- und Kitayoshi-Phasen überhaupt: sie drücken den Crest, ohne die
+Amplituden anzutasten.
 
-Daraus folgt: wer R minimiert, landet **von selbst** bei 1.82/2.20 und damit
-deutlich unter φ = 0 (2.45/2.83). Eine Nebenbedingung wäre nie bindend. Der
-Crestfaktor wird angezeigt, nicht erzwungen.
+**Warum das Licht kostet.** Ein Verstärker, der durch seine *Spitzenspannung*
+begrenzt ist — er geht in Kompression, nicht in Erwärmung — kann bei gegebenem
+V_max nur eine mittlere Leistung
+
+```
+P_mittel ≤ V_max² / (R · crest²)
+```
+
+liefern. Die gebeugte optische Leistung folgt der mittleren RF-Leistung, und
+ein Spot wird je Achse einmal gebeugt. Die Spotintensität trägt also
+1/(C_x²·C_y²). (Fährt man trotzdem in die Kompression, kommen
+Intermodulationsprodukte dazu: neue Frequenzen an Summen und Differenzen der
+Töne, also Geisterspots, und die Amplitudenverhältnisse verschieben sich — das
+mühsam eingestellte Profil stimmt dann nicht mehr.)
+
+**Die Konsequenz.** Der Rephasing-Peak, der die Pulsfläche hell macht, ist
+*derselbe Vorgang*, der den Crest hochtreibt — die Töne addieren sich in Phase,
+optisch wie elektrisch. Man kann nicht das eine haben und das andere nicht.
+Unter Spitzenbegrenzung kostet ein höherer Crest aber mehr mittlere Leistung,
+als der hellere Peak einbringt. Die richtige Zielgröße ist deshalb
+
+```
+F = max_t A(t) / (crest_x² · crest_y²)
+```
+
+die Rabi-Fläche **pro Volt Verstärker-Reserve**. Der Crestfaktor ist damit
+keine Nebenbedingung mehr, sondern Teil der Antwort — es gibt nichts
+einzustellen.
+
+| Phasen | F | A(t₀)/⟨A⟩ | Crest x / y | R |
+|---|---|---|---|---|
+| alle 0 | 0.089 | 4.25 | 2.45 / 2.83 | 115 % |
+| Kitayoshi | 0.133 | 2.47 | 2.16 / 2.00 | 72 % |
+| Schroeder | 0.145 | 2.70 | 2.16 / 2.00 | 72 % |
+| auf R optimiert | 0.091 | 1.47 | 1.82 / 2.21 | 41 % |
+| **auf F optimiert** | **0.239** | 2.47 | **1.82 / 1.77** | 62 % |
+
+**2.7-fache Pulsfläche gegenüber φ = 0, 1.6-fache gegenüber Schroeder**, bei
+gleichem Verstärker. Und φ = 0 ist unter dieser Normierung nicht nur ungünstig
+für die RF-Kette, sondern schlicht der schlechteste Punkt. Bemerkenswert auch:
+das R-Optimum liegt mit 0.091 kaum über φ = 0 — es erkauft Ruhe mit Helligkeit,
+und zwar teuer.
+
+> **Wäre die Kette durch die mittlere Leistung begrenzt** (thermisch limitierter
+> AOD), sähe es anders aus: der Crest wäre dann nur eine Verzerrungsgrenze, die
+> richtige Zielgröße wäre max_t A(t) allein, und man bräuchte eine
+> Crest-*Schranke*, weil die Antwort sonst immer φ = 0 lautet. Für diesen
+> Aufbau gilt das nicht.
 
 ### Was *nicht* funktioniert hat
 
@@ -413,19 +476,29 @@ die Zielfunktion, nicht in die Anzeige.
 
 ### Bedienung
 
-*Optimise* im Kasten *Tone phases* auf **beating at the atom (atom weighted)**
-(Standard), T_p, atom T und ν_r setzen, dann *Optimise phases and t_0 for the
-atom*. Dauert rund 20 Sekunden für 300 Startpunkte. Das Ergebnis steht unter
-den Phasenfeldern: R, der Vergleichswert für alle Phasen 0, t₀, A(t₀)/⟨A⟩ und
-die beiden Crestfaktoren.
+Alles zur Phasenoptimierung sitzt jetzt in **einem** Kasten, *Tone phases*:
+Presets, Zielauswahl, eine Klartextzeile, die sagt was das gewählte Ziel tut,
+die Eingaben (T_p, atom T, ν_r bzw. Zielregion), der Quadratur-Haken, der
+Optimierer-Knopf und darunter die Phasenfelder mit der Ergebniszeile. Der Knopf
+beschriftet sich nach dem Ziel um; die Felder des nicht gewählten Ziels werden
+ausgegraut. Rund 20–40 Sekunden.
 
-Das alte Ziel heißt jetzt **pulse area, spatial spread over a region** und ist
-unverändert geblieben: std/mean von θ(r) über eine harte Maske zu *einem*
-Zeitpunkt. Es beantwortet eine Kamera-Frage und bleibt für den Vergleich mit
-den inkohärenten GUIs stehen.
+* **pulse area at the atom, per amplifier headroom** — Standard, 250
+  Startpunkte. Ergebniszeile: F mit den Faktoren gegenüber φ = 0 und
+  Schroeder, dazu A(t₀)/⟨A⟩, t₀, die beiden Crestfaktoren und R.
+* **beating at the atom, minimal swing (untriggered)** — 300 Startpunkte.
+  Ergebniszeile: R mit dem Vergleichswert für alle Phasen 0, t₀, A(t₀)/⟨A⟩
+  und die Crestfaktoren.
+* **pulse area, spatial spread over a region** — das alte Ziel, unverändert:
+  std/mean von θ(r) über eine harte Maske zu *einem* Zeitpunkt. Es beantwortet
+  eine Kamera-Frage und bleibt für den Vergleich mit den inkohärenten GUIs
+  stehen.
 
-Code: `AtomBeating` und `atom_beating_at_centre` in Abschnitt 12 von
-`kern/beating_physik.py`.
+Die Eingabefelder des jeweils nicht gewählten Ziels werden ausgegraut.
+
+Code: `AtomBeating` (mit `ripple()` und `peak_ratio()`) und
+`atom_beating_at_centre` in Abschnitt 12 von `kern/beating_physik.py`,
+`CrestBasis` in Abschnitt 5.
 
 ## Wo die Unruhe sitzt: das Spektrum
 
@@ -1637,3 +1710,133 @@ Rabi-Kurven für Ω ~ I. Geändert nur die oben genannten Größen.
 Kontrolle: GUI headless gebaut und beide Ziele durchgerechnet; das
 Regions-Ziel liefert unverändert dieselben Phasen wie vorher, sofern T_p auf
 1/(2 f_Rabi) gesetzt wird.
+
+## Nachtrag 2026-09-15: Helligkeit statt Schwebung als Standardziel
+
+Der Umbau vom 14. hat auf R optimiert — die *ungetriggerte* Größe. Für einen
+getriggerten Puls ist das die falsche Zielfunktion, und zwar spürbar: das
+R-Optimum liefert A(t₀) = 1.47·⟨A⟩, das Schroeder-Preset 2.70. Der Optimierer
+machte den Puls also **dunkler als ein Preset**, um eine Schwankung zu
+unterdrücken, die ein fester Trigger ohnehin einfriert.
+
+* **Neues Standardziel** `pulse area at the atom, max at the trigger (crest
+  limited)`: maximiert `max_t A(t)/⟨A⟩` unter Crest ≤ C. Bei C = 2.0 kommt
+  2.89·⟨A⟩ heraus, also fast das Doppelte des R-Optimums und über beiden
+  Presets.
+* **Neues Eingabefeld `max. crest factor`** (Standard 2.0). Es ist die einzige
+  Nebenbedingung, die das Problem wohlgestellt macht — ohne sie ist die Antwort
+  immer φ = 0. Die Schranke ist immer bindend.
+* Das R-Ziel bleibt als `beating at the atom, minimal swing (untriggered)`
+  erhalten, das Regions-Ziel unverändert. Die Combobox hat jetzt drei Einträge.
+* **`CrestBasis`** (Abschnitt 5 von `beating_physik.py`): crest_factor mit
+  vorberechnetem Zeitraster. Schranke und Anzeige benutzen dasselbe Objekt, der
+  angezeigte Wert kann also nicht mit dem Limit streiten, gegen das optimiert
+  wurde. Gegen `crest_factor()` auf vier Stellen identisch.
+* **Zeitbasis in `AtomBeating` gecacht.** `peak_ratio()` baute vorher bei jedem
+  Aufruf eine exp-Matrix (n_t × Ordnungen) — in der Schleife der teuerste
+  Posten überhaupt. Laufzeit von 186 s auf 22 s.
+* Die Suche zielt auf C − 0.015 statt auf C: ein weicher Strafterm bleibt
+  knapp über seiner Schwelle stehen, und ein angezeigter Crest von 2.02 gegen
+  ein Limit von 2.00 ist genau die Sorte Zahl, die man nicht erklären möchte.
+
+Kontrolle: GUI headless, alle drei Ziele; C = 1.9 / 2.0 / 2.2 / 2.5 liefert
+2.65 / 2.89 / 3.36 / 3.83 bei Crest 1.89 / 1.99 / 2.19 / 2.49 — die Schranke
+wird in keinem Fall überschritten. Das R-Ziel gibt unverändert 41.1 %.
+
+## Nachtrag 2026-09-15 (2): Crestfaktor gehört in die Zielfunktion
+
+Auf die Frage, warum der Crestfaktor überhaupt relevant ist, kam heraus, dass
+die Zielfunktion vom Vormittag immer noch falsch normiert war. Sie maximierte
+A(t₀) bei *fester* optischer Leistung unter einer Crest-Schranke. Die Leistung
+ist aber nicht fest: bei einem spitzenspannungsbegrenzten Verstärker ist
+P_mittel ~ 1/crest², und beide Achsen beugen. Ein höherer Crest kostet also
+mehr, als der hellere Peak einbringt.
+
+* **Neue Zielgröße** `F = max_t A(t) / (crest_x² · crest_y²)` — Rabi-Fläche pro
+  Volt Verstärker-Reserve. Ergebnis: Crest 1.82/1.77, F = 0.239, das ist
+  2.7× φ = 0 und 1.6× Schroeder.
+* **Das Feld `max. crest factor` ist wieder verschwunden.** Es war nur nötig,
+  solange die Zielfunktion falsch normiert war — jetzt steckt der Trade-off in
+  der Zielgröße selbst und es gibt keinen freien Parameter mehr.
+* **UI aufgeräumt**: der Optimierer-Knopf sitzt jetzt im Kasten *Tone phases*
+  direkt bei den Einstellungen, die er liest (vorher zwei Kästen weiter oben in
+  *Pulsed operation*), und unter der Zielauswahl steht eine Klartextzeile, die
+  sagt, was maximiert bzw. minimiert wird.
+* Quadratur-Strafterm auf 0.10 hochgesetzt — gegen eine Zielgröße von 0.24
+  wurde er bei 0.02 einfach weggekauft.
+
+Kontrolle: 400 Startpunkte, F = 0.2385 mit Quadratur / 0.2503 ohne; GUI
+headless mit allen drei Zielen. Referenzwerte φ=0 0.0887, Schroeder 0.1451,
+Kitayoshi 0.1326, R-Optimum 0.0908.
+
+## Nachtrag 2026-09-15 (3): ein Ziel, und es ist die Gleichmäßigkeit
+
+Die drei Ziele waren verwirrend und alle drei beantworteten eine Frage, die das
+Experiment nicht stellt. Die eigentliche Frage lautet:
+
+> Sitzt der Interferenzfleck während des Pulses **mittig** auf dem Atom, und
+> ist die aufgesammelte Pulsfläche über die Ausdehnung des Atoms
+> **gleichmäßig**?
+
+Läuft der Fleck halb am Atom vorbei, ist θ auf der einen Seite der
+Aufenthaltsverteilung größer als auf der anderen. Der Drehwinkel hängt dann
+davon ab, wo das Atom gerade war — und kein Nachkalibrieren des Mittelwerts
+repariert das. Genau das misst
+
+```
+U_W = σ_W(θ) / ⟨θ⟩_W
+```
+
+Ein seitlicher Versatz erzeugt einen linearen Gradienten quer durch die Wolke,
+und ein Gradient ist das, was U_W sieht: **„gleichmäßig" und „mittig" sind
+dieselbe Bedingung**, deshalb gibt es nur eine Zahl zu minimieren. Der
+Schwerpunktversatz wird trotzdem in Nanometern ausgegeben.
+
+### Rechnung
+
+θ(r) ist linear in den Paarprodukten, θ(r) = Σ_p a_p·(g_s g_s')_p(r) mit
+a_p = Re[e^{i(φ_s−φ_s')}·c_{d(p)}]. Damit sind ⟨θ⟩_W = Σ_p a_p m_p und
+⟨θ²⟩_W = Σ_pq a_p a_q M_pq, und M ist eine feste 79×79-Matrix. Eine Auswertung
+kostet ein aᵀMa statt einer Rechnung über 961 Pixel. Geprüft gegen
+`PulseArea.theta` auf demselben Gitter: identisch in allen Stellen.
+
+### Der Zielkonflikt
+
+Der Moment, in dem die Töne rephasieren, ist der Moment, in dem der Fleck
+sauber, symmetrisch und mittig ist — genau das macht die Beleuchtung
+gleichmäßig. Dasselbe Rephasieren treibt den Crest auf √(2N). **Gleichmäßige
+Beleuchtung und schonende RF-Kette stehen direkt gegeneinander**, und die
+Crest-Schranke ist, wo man sich auf dieser Kurve platziert.
+
+| Phasen | U_W | Versatz | A(t₀)/⟨A⟩ | Crest x / y |
+|---|---|---|---|---|
+| optimiert, C = 1.9 | 0.80 % | 0.1 nm | 0.99 | 1.89 / 1.89 |
+| optimiert, C = 2.5 | 0.18 % | 0.0 nm | 1.13 | 2.45 / 2.49 |
+| alle Phasen 0 | 0.18 % | 0.0 nm | 1.35 | 2.45 / 2.83 |
+| ganz ohne Schranke | 0.09 % | 0.0 nm | 3.81 | 2.45 / 2.82 |
+| Schroeder | 18.4 % | 19.4 nm | 1.00 | 2.16 / 2.00 |
+
+Schroeder minimiert den Crest und weiß nichts von einem Atom — daher die 18 %.
+Ohne Schranke läuft die Suche in eine **lineare Phasenrampe**, und die ist
+φ = 0 seitlich verschoben: für das Atom ideal, für den Verstärker der
+schlechteste Fall. Eine Rampe ändert den Crest nämlich gar nicht, sie
+verschiebt nur die Hüllkurve in der Zeit.
+
+Nebenbedingung außerdem: A(t₀) ≥ ⟨A⟩, damit der Trigger nicht in eine Delle
+fällt. Bei C = 1.9 ist sie bindend (0.99) — die Gleichmäßigkeit möchte dort
+noch dunkler werden.
+
+### Entfernt
+
+Die Zielauswahl mit drei Einträgen, dazu *pulse area per amplifier headroom*,
+*minimal swing* und *spatial spread over a region*, sowie das Feld
+*Target region*. Ihre Zahlen stehen in den Abschnitten oben und in den
+Nachträgen (1) und (2) als Befund. Der Auswertekreis (*evaluation circle r*)
+bleibt — er gehört zu den Plots und den Nebenfenstern, nicht zur Phasensuche.
+
+### Bedienung
+
+Alles in einem Kasten, *Tone phases*: Presets, eine Klartextzeile die sagt was
+gesucht wird, T_p, **max. crest factor**, atom T und ν_r mit σ-Anzeige, der
+Auswertekreis, der Quadratur-Haken, der Knopf, darunter die Phasenfelder und
+die Ergebniszeile. Rund 2–3 Minuten für 120 Startpunkte.
