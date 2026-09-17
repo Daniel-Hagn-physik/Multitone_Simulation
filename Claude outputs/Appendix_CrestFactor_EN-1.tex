@@ -1,0 +1,922 @@
+% =====================================================================
+%  Appendix: The crest factor, the centring criterion, and diffraction
+%  Self-contained. To use as an appendix inside another document,
+%  delete everything above and below the marked block and \input it.
+% =====================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{lmodern}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\usepackage{empheq}
+\usepackage{verbatim}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[colorlinks=true,linkcolor=black,citecolor=black,urlcolor=blue]{hyperref}
+
+% ---------------------------------------------------------------------
+%  Bibliography entries. Copy these into your own .bib file; every one
+%  has been checked against Crossref / the publisher page.
+% ---------------------------------------------------------------------
+\begin{filecontents*}{appendix_refs.bib}
+@article{schroeder1970,
+  author  = {Schroeder, M. R.},
+  title   = {Synthesis of low-peak-factor signals and binary sequences
+             with low autocorrelation},
+  journal = {IEEE Transactions on Information Theory},
+  volume  = {16}, number = {1}, pages = {85--89}, year = {1970},
+  doi     = {10.1109/TIT.1970.1054411}
+}
+
+@article{boyd1986,
+  author  = {Boyd, Stephen},
+  title   = {Multitone signals with low crest factor},
+  journal = {IEEE Transactions on Circuits and Systems},
+  volume  = {33}, number = {10}, pages = {1018--1022}, year = {1986},
+  doi     = {10.1109/TCS.1986.1085837}
+}
+
+@book{cripps2006,
+  author    = {Cripps, Steve C.},
+  title     = {{RF} Power Amplifiers for Wireless Communications},
+  edition   = {2}, publisher = {Artech House}, address = {Norwood, MA},
+  year      = {2006}, isbn = {978-1-59693-018-6}
+}
+
+@book{pozar2012,
+  author    = {Pozar, David M.},
+  title     = {Microwave Engineering},
+  edition   = {4}, publisher = {Wiley}, address = {Hoboken, NJ},
+  year      = {2012}, isbn = {978-0-470-63155-3},
+  note      = {Ch.~10 (Noise and Nonlinear Distortion), Sec.~10.3}
+}
+
+@book{salehteich2019,
+  author    = {Saleh, Bahaa E. A. and Teich, Malvin Carl},
+  title     = {Fundamentals of Photonics},
+  edition   = {3}, publisher = {Wiley}, address = {Hoboken, NJ},
+  year      = {2019}, isbn = {978-1-119-50687-4},
+  note      = {Ch.~20, Acousto-Optics}
+}
+
+@article{kogelnik1969,
+  author  = {Kogelnik, H.},
+  title   = {Coupled Wave Theory for Thick Hologram Gratings},
+  journal = {Bell System Technical Journal},
+  volume  = {48}, number = {9}, pages = {2909--2947}, year = {1969},
+  doi     = {10.1002/j.1538-7305.1969.tb01198.x}
+}
+
+@article{laude2003,
+  author  = {Laude, Vincent},
+  title   = {General solution of the coupled-wave equations of acousto-optics},
+  journal = {Journal of the Optical Society of America A},
+  volume  = {20}, number = {12}, pages = {2307}, year = {2003},
+  doi     = {10.1364/JOSAA.20.002307}
+}
+
+@article{antonov2007,
+  author  = {Antonov, S. N. and Rezvov, Yu. G.},
+  title   = {Efficient multiple-beam {B}ragg acoustooptic diffraction with
+             phase optimization of a multifrequency acoustic wave},
+  journal = {Technical Physics},
+  volume  = {52}, number = {8}, pages = {1053--1060}, year = {2007},
+  doi     = {10.1134/S1063784207080154}
+}
+
+@article{endres2016,
+  author  = {Endres, M. and Bernien, H. and Keesling, A. and Levine, H. and
+             Anschuetz, E. R. and Krajenbrink, A. and Senko, C. and
+             Vuletic, V. and Greiner, M. and Lukin, M. D.},
+  title   = {Atom-by-atom assembly of defect-free one-dimensional cold atom arrays},
+  journal = {Science},
+  volume  = {354}, number = {6315}, pages = {1024--1027}, year = {2016},
+  doi     = {10.1126/science.aah3752}
+}
+
+@article{tuchendler2008,
+  author  = {Tuchendler, C. and Lance, A. M. and Browaeys, A. and
+             Sortais, Y. R. P. and Grangier, P.},
+  title   = {Energy distribution and cooling of a single atom in an optical tweezer},
+  journal = {Physical Review A},
+  volume  = {78}, number = {3}, pages = {033425}, year = {2008},
+  doi     = {10.1103/PhysRevA.78.033425}
+}
+
+@misc{aaoptonotes,
+  author       = {{AA Opto-Electronic}},
+  title        = {Acousto-Optics --- Application Notes},
+  howpublished = {\url{https://aaoptoelectronic.com/wp-content/uploads/2024/04/AA-THEORY-NOTES.pdf}},
+  note         = {accessed 17 September 2026}
+}
+
+@misc{aaaod,
+  author = {{AA Opto-Electronic}},
+  title  = {{DTSXY-400-800} two-axis acousto-optic deflector:
+            data sheet and individual test sheet S/N 3001-O211386},
+  note   = {manufacturer documentation}
+}
+
+@misc{minicircuits,
+  author       = {{Mini-Circuits}},
+  title        = {{ZHL-03-5WF+} coaxial high power amplifier, data sheet},
+  howpublished = {\url{https://www.minicircuits.com/pdfs/ZHL-03-5WF+.pdf}},
+  note         = {accessed 17 September 2026}
+}
+\end{filecontents*}
+
+\emergencystretch=1.5em
+\newcommand{\crest}{\ensuremath{C}}
+\newcommand{\Uw}{\ensuremath{U_W}}
+\newcommand{\Ptot}{\ensuremath{P_\mathrm{tot}}}
+\newcommand{\Pavg}{\ensuremath{P_\mathrm{avg}}}
+\newcommand{\Au}{\ensuremath{A_\mathrm{u}}}
+
+\title{Appendix: The Crest Factor, the Centring Criterion,\\
+       and the Diffraction Efficiency of a Multitone AOD}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+% ================= BEGIN APPENDIX BLOCK =================
+\noindent
+This appendix collects, in one place and in a single consistent notation,
+the four results the main text uses: what the crest factor is
+(Sec.~\ref{sec:defs}), why it acts as a hardware constraint
+(Sec.~\ref{sec:constraint}), why the centring criterion forces the
+\emph{worst possible} crest factor whenever an axis is driven with three
+tones (Sec.~\ref{sec:centring}), and what that costs in diffracted light
+(Secs.~\ref{sec:diffraction} and \ref{sec:price}).
+
+\paragraph{On sources.} Two kinds of statement appear below. The
+\emph{starting points} are taken from the literature and cited: the
+definition and bounds of the crest factor \cite{schroeder1970,boyd1986}, the
+back-off of a compression-limited amplifier
+\cite{cripps2006,pozar2012}, the acousto-optic diffraction law
+\cite{salehteich2019,aaoptonotes}, the coupled-wave formalism
+\cite{kogelnik1969,laude2003}, its multifrequency use
+\cite{antonov2007}, and the device data \cite{aaaod,minicircuits}. The
+\emph{derivations} that follow from them -- the centring criterion, the
+$N=3$ result, and the crest-to-efficiency relation of
+Sec.~\ref{sec:price} -- are carried out here in full and are self-contained;
+they are cited only where they rest on one of the above.
+
+\section{Definitions and conventions}\label{sec:defs}
+
+\subsection{The RF signal and its envelope}
+
+Each AOD axis is driven by one AWG channel carrying $N$ tones,
+\begin{equation}
+  s(t) \;=\; \sum_{n=0}^{N-1} a_n \cos\!\bigl(2\pi f_n t + \varphi_n\bigr) ,
+  \qquad
+  f_n \;=\; f_\mathrm{off} + n\,d ,
+  \label{eq:signal}
+\end{equation}
+with the tone spacing $d$ and the tone phases $\varphi_n$, which are free
+parameters at the AWG. Writing $\bar f$ for the mean tone frequency and
+introducing the \emph{centred tone index}
+\begin{equation}
+  \hat n \;:=\; n-\frac{N-1}{2}
+  \qquad\Longrightarrow\qquad
+  f_n - \bar f = d\,\hat n ,
+  \label{eq:nhat}
+\end{equation}
+the signal separates into a carrier at $\bar f$ and a complex envelope
+\begin{empheq}[box=\fbox]{equation}
+  s(t) = \operatorname{Re}\!\left[A(t)\,e^{\mathrm{i}2\pi\bar f t}\right] ,
+  \qquad
+  A(t) = \sum_{n=0}^{N-1} a_n\,
+         e^{\,\mathrm{i}\left(2\pi d\,\hat n\,t + \varphi_n\right)} .
+  \label{eq:envelope}
+\end{empheq}
+$A(t)$ carries everything the phases do. Its period is
+$T_\mathrm{env} = 1/d$: for odd $N$ the index $\hat n$ is an integer and
+$A$ itself is $T_\mathrm{env}$-periodic; for even $N$ it is half-integer and
+$A(t+T_\mathrm{env}) = -A(t)$, so $A$ is \emph{anti}periodic while $|A|$ is
+still periodic with $T_\mathrm{env}$. Only $|A|$ enters what follows, so the
+distinction never matters -- but the averaging window below must be
+$T_\mathrm{env}$ in both cases.
+
+\subsection{Amplitude versus power: the one convention to get right}
+
+\noindent\fbox{\parbox{0.96\textwidth}{\textbf{Two quantities in this text are
+easy to confuse, and they differ by a square root.} The profile parameters
+$r_x$ and $r_y$ are \emph{power} ratios -- they state how much diffracted
+\emph{intensity} the edge tones receive relative to the inner ones. The
+$a_n$ in Eq.~\eqref{eq:signal} are RF \emph{voltage} amplitudes. Since
+diffracted intensity scales with RF power and power scales with the square
+of voltage, the edge tones carry
+\begin{equation}
+  \varrho \;:=\; \sqrt{r_x} ,
+  \qquad
+  a \;=\; [\,\varrho,\;1,\;\dots,\;1,\;\varrho\,] ,
+  \qquad
+  P_n \;\propto\; a_n^2 .
+  \label{eq:convention}
+\end{equation}
+At the working point $r_x = 0.97$ but $\varrho = \sqrt{0.97} = 0.984886$.
+Every formula below is written in the $a_n$, i.e.\ in voltages.}}
+
+\subsection{The crest factor}
+
+\begin{equation}
+  \crest \;:=\; \frac{\max_t |s(t)|}{\mathrm{rms}_t\,[s(t)]} .
+  \label{eq:crestdef}
+\end{equation}
+This is the standard definition for multitone signals
+\cite{schroeder1970,boyd1986}; in communications engineering the square
+$\crest^2$ is the peak-to-average power ratio. It is a dimensionless
+property of the \emph{waveform}: how far the
+instantaneous voltage strays above its own effective value. Both operations
+run over a full envelope period $T_\mathrm{env}$.
+
+Because the carrier at $\bar f$ oscillates much faster than the envelope,
+the two time scales separate. Locally, a sinusoid of amplitude $|A|$
+contributes $\tfrac12|A|^2$ to the mean square, so
+$\langle s^2\rangle = \tfrac12\langle |A|^2\rangle$, while the peak of $|s|$
+is the peak of $|A|$. Hence the carrier-free form
+\begin{empheq}[box=\fbox]{equation}
+  \crest \;=\; \sqrt{2}\;\frac{\max_t|A(t)|}{\mathrm{rms}_t|A(t)|}
+         \;=\; \sqrt{2}\;\frac{\max_t|A(t)|}{\sqrt{\sum_n a_n^2}} .
+  \label{eq:crestsimple}
+\end{empheq}
+
+\paragraph{The denominator does not depend on the phases.}
+This is what makes the crest factor tractable. Expanding,
+\begin{equation}
+  \bigl\langle |A|^2 \bigr\rangle
+  = \sum_{n,m} a_n a_m \Bigl\langle
+      e^{\,\mathrm{i}\left[2\pi (f_n-f_m)t + \varphi_n-\varphi_m\right]}
+    \Bigr\rangle_T ,
+\end{equation}
+and the average of a phasor over a window of length $T$ is
+\begin{equation}
+  \bigl\langle e^{\,\mathrm{i}[2\pi\Delta f\,t+\Delta\varphi]}\bigr\rangle_T
+  = e^{\,\mathrm{i}\Delta\varphi}\,
+    \frac{e^{\,\mathrm{i}2\pi\Delta f\,T}-1}{\mathrm{i}\,2\pi\Delta f\,T} ,
+  \label{eq:phasoravg}
+\end{equation}
+which vanishes \emph{exactly} when $\Delta f\,T$ is a non-zero integer -- a
+phasor completing whole turns averages to the centre of the circle
+\emph{regardless of where it starts}, which is precisely why
+$\Delta\varphi$ drops out. With $T = T_\mathrm{env} = 1/d$ every
+$\Delta f = f_n-f_m$ is an integer multiple of $d$, so all off-diagonal
+terms vanish and
+\begin{equation}
+  \mathrm{rms}_t|A| = \sqrt{\textstyle\sum_n a_n^2} \qquad
+  \text{for \emph{every} phase set.}
+  \label{eq:rmsphase}
+\end{equation}
+\textbf{The phases act on the crest factor through $\max_t|A|$ alone.} If the
+window is chosen shorter -- a common mistake -- Eq.~\eqref{eq:phasoravg} no
+longer vanishes, the double sum survives, and the rms becomes
+phase-dependent.
+
+\paragraph{Bounds.} By the triangle inequality $|A(t)|\le\sum_n a_n$ at all
+times, and $|A|\ge$ its own rms somewhere, so
+\begin{equation}
+  \sqrt2 \;\le\; \crest \;\le\; \sqrt2\,
+  \frac{\sum_n a_n}{\sqrt{\sum_n a_n^2}} \;\xrightarrow{\;a_n\equiv1\;}\;
+  \sqrt{2N} .
+  \label{eq:bounds}
+\end{equation}
+The upper bound is attained exactly when all phasors align at some instant;
+the lower bound would require $|A|$ to be constant. Which phase sets
+approach the lower bound is a classical question: Schroeder's quadratic
+phases $\varphi_n = -\pi n^2/N$ reach $\crest\approx1.7$ for large $N$
+\cite{schroeder1970}, and the attainable minimum has been studied
+systematically in \cite{boyd1986}. \emph{None of these sets satisfies the
+centring criterion of Sec.~\ref{sec:centring}}, which is the entire tension
+this appendix is about.
+
+\section{Why the crest factor is a constraint}\label{sec:constraint}
+
+The crest factor forbids no phase set: every $\varphi_n$ is dialable at the
+AWG and the optical calculation is equally valid for all of them. What it
+limits is the \emph{average RF power} the chain can still transmit linearly.
+
+A power amplifier driven beyond its compression point clips the
+\emph{instantaneous voltage} \cite[Sec.~10.3]{pozar2012}; it does not care about the time-averaged
+power until thermal limits are reached, which happens much later. With
+$V_\mathrm{peak} = \crest\,V_\mathrm{rms}$ and
+$\Pavg = V_\mathrm{rms}^2/R$, the peak envelope power is
+$P_\mathrm{peak} = \crest^2\,\Pavg$, and demanding
+$P_\mathrm{peak} \le P_{1\mathrm{dB}}$ gives
+\begin{empheq}[box=\fbox]{equation}
+  \Pavg \;\le\; \frac{P_{1\mathrm{dB}}}{\crest^{2}} .
+  \label{eq:pavglimit}
+\end{empheq}
+The $\SI{1}{\decibel}$ compression point, not the saturated power, is the
+right threshold: linearity is exactly what the field calculation assumes.
+Backing a multitone transmitter off by its peak-to-average ratio is standard
+practice in power-amplifier design \cite{cripps2006}; Eq.~\eqref{eq:pavglimit}
+is that rule written for this chain.
+
+Three budgets must be kept apart:
+
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  Limit & belongs to & depends on \crest?\\
+  \midrule
+  \SI{2}{\watt} average RF power & AOD transducer (heating) & \textbf{no}\\
+  Compression & amplifier (peak voltage) & \textbf{yes}, $\propto1/\crest^2$\\
+  Diffraction saturation $\sin^2$ & AOD (total RF power) & no\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent With the amplifier used here \cite{minicircuits},
+$P_{1\mathrm{dB}} = \SI{3.98}{\watt}$,
+the crest factors of the working point give
+$\Pavg \le \SI{0.66}{\watt}$ on the $x$ axis and \SI{0.83}{\watt} on $y$ --
+well below the AOD's \SI{2}{\watt}. \emph{The amplifier is the limit, not the
+AOD}, and Eq.~\eqref{eq:pavglimit} says the crest factor is the exchange rate.
+
+\section{The centring criterion}\label{sec:centring}
+
+\subsection{What "centred" has to mean}
+
+The atom sits at one place, smeared by its thermal motion over
+$\sigma\approx\SI{108}{\nano\meter}$; the thermal position distribution in
+a tweezer and its measurement are described in \cite{tuchendler2008}. What harms it is not that the
+interference pattern beats, and not that the pulse is dim: it is that the
+bright spot can sit \emph{off to one side} during the pulse. The pulse area
+is then larger on one edge of the position distribution than on the other,
+the rotation angle depends on where the atom happened to be, and no
+calibration of the mean can repair it.
+
+The requirement is therefore not "the pattern is symmetric at some instant"
+but
+\begin{equation}
+  I(-\mathbf{r},t) = I(\mathbf{r},t) \qquad\text{for \emph{all} } t ,
+  \label{eq:centred}
+\end{equation}
+with the atom at $\mathbf r = 0$. This implies $\nabla I|_{0} = 0$ at all
+times: the intensity has a stationary point at the atom throughout the pulse.
+
+\subsection{The three symmetries of the profile}
+
+The field in the focal plane is a sum over the $N_x\times N_y$ spots,
+\begin{equation}
+  E(\mathbf r,t) = \sum_{n,m} a_n b_m\,
+    u(\mathbf r - \mathbf c_{nm})\,
+    e^{-\mathrm{i}2\pi (f_n+g_m)t}\,
+    e^{\,\mathrm{i}(\varphi_n+\psi_m)} ,
+  \label{eq:field}
+\end{equation}
+with $u$ the (even) single-spot envelope, $\mathbf c_{nm}$ the spot
+positions, and $g_m,\psi_m$ the $y$-axis frequencies and phases. Writing
+$\bar n := N-1-n$ for the mirror index, the profile is built symmetric in
+three independent ways:
+\begin{align}
+  \mathbf c_{\bar n\bar m} &= -\,\mathbf c_{nm}
+    &&\text{(positions: the spot grid is centred),}\label{eq:symgeo}\\
+  a_{\bar n} &= a_n , \quad b_{\bar m} = b_m
+    &&\text{(amplitudes: } [\varrho,1,\dots,1,\varrho]\text{),}\label{eq:symamp}\\
+  f_{\bar n} &= F - f_n , \quad g_{\bar m} = G - g_m
+    &&\text{(frequencies).}\label{eq:symfreq}
+\end{align}
+Equation~\eqref{eq:symfreq} follows directly from the equidistant raster:
+$f_n = f_\mathrm{off}+n\,d$ gives
+$f_n + f_{\bar n} = 2f_\mathrm{off} + (N-1)d =: F$, independent of $n$.
+
+\subsection{Derivation}
+
+Apply the three symmetries to $E(-\mathbf r,t)$. Relabel the sum by the
+mirror index, $n\to\bar n$, $m\to\bar m$ -- a permutation, so nothing is
+lost:
+\begin{align}
+  E(-\mathbf r,t)
+  &= \sum_{n,m} a_{\bar n} b_{\bar m}\,
+     u(-\mathbf r - \mathbf c_{\bar n\bar m})\,
+     e^{-\mathrm{i}2\pi (f_{\bar n}+g_{\bar m})t}\,
+     e^{\,\mathrm{i}(\varphi_{\bar n}+\psi_{\bar m})} .
+\end{align}
+Now insert the three symmetries one at a time.
+
+\paragraph{Step 1 (positions, and $u$ even).}
+By Eq.~\eqref{eq:symgeo}, $-\mathbf r-\mathbf c_{\bar n\bar m}
+= -\mathbf r+\mathbf c_{nm} = -(\mathbf r-\mathbf c_{nm})$, and since $u$ is
+even, $u(-\mathbf r-\mathbf c_{\bar n\bar m}) = u(\mathbf r-\mathbf c_{nm})$
+-- the same envelope factor as in $E(\mathbf r,t)$.
+
+\paragraph{Step 2 (amplitudes).}
+By Eq.~\eqref{eq:symamp}, $a_{\bar n}b_{\bar m} = a_n b_m$: the amplitudes
+are unchanged.
+
+\paragraph{Step 3 (frequencies).}
+This is the decisive one. By Eq.~\eqref{eq:symfreq},
+\begin{equation}
+  e^{-\mathrm{i}2\pi (f_{\bar n}+g_{\bar m})t}
+  = e^{-\mathrm{i}2\pi (F+G)t}\;
+    \underbrace{e^{+\mathrm{i}2\pi (f_n+g_m)t}}_{
+      \text{the \emph{conjugate} of the original factor}} .
+\end{equation}
+The frequency mirror does not reproduce the time factor -- it
+\emph{conjugates} it, up to one global factor $e^{-\mathrm{i}2\pi(F+G)t}$
+that is the same for every spot.
+
+\paragraph{Step 4 (collect).}
+Putting the three together,
+\begin{equation}
+  E(-\mathbf r,t) = e^{-\mathrm{i}2\pi(F+G)t}
+  \sum_{n,m} a_n b_m\, u(\mathbf r-\mathbf c_{nm})\,
+  e^{+\mathrm{i}2\pi(f_n+g_m)t}\,
+  e^{\,\mathrm{i}(\varphi_{\bar n}+\psi_{\bar m})} ,
+\end{equation}
+which is to be compared with
+\begin{equation}
+  E^{*}(\mathbf r,t) = \sum_{n,m} a_n b_m\, u(\mathbf r-\mathbf c_{nm})\,
+  e^{+\mathrm{i}2\pi(f_n+g_m)t}\,
+  e^{-\mathrm{i}(\varphi_{n}+\psi_{m})} .
+\end{equation}
+The two sums run over the same basis functions with the same real
+coefficients, and differ only in a constant phase factor per term. They are
+therefore proportional -- $E(-\mathbf r,t)=e^{\mathrm{i}\alpha(t)}
+E^{*}(\mathbf r,t)$, hence $I(-\mathbf r,t)=I(\mathbf r,t)$ -- if and only if
+\begin{equation}
+  e^{\,\mathrm{i}(\varphi_{\bar n}+\psi_{\bar m})}
+  = e^{\,\mathrm{i}\Theta}\,e^{-\mathrm{i}(\varphi_{n}+\psi_{m})}
+  \qquad\text{for all } n,m
+\end{equation}
+with a \emph{single} constant $\Theta$ independent of $n$ and $m$. Splitting
+the $n$- and $m$-dependence gives the criterion:
+\begin{empheq}[box=\fbox]{equation}
+  \varphi_n + \varphi_{N-1-n} = c \quad\text{for all } n ,
+  \qquad
+  \psi_m + \psi_{M-1-m} = c' \quad\text{for all } m .
+  \label{eq:centring}
+\end{empheq}
+
+\subsection{Conjugate, not mirrored}
+
+Equation~\eqref{eq:centring} is often misread as "the phases must be
+symmetric", $\varphi_{\bar n} = \varphi_n$. That is a \emph{different}
+condition and it does not centre the pattern. The mirror in
+Eq.~\eqref{eq:symfreq} conjugates the time factor, so the phases must
+\emph{anti}-compensate, i.e.\ sum to a constant. Numerically, mirror-symmetric
+phase sets leave centroid offsets of \SIrange{44}{84}{\nano\meter} against
+$\sigma = \SI{108}{\nano\meter}$, while conjugate-symmetric sets give
+$0.00$~nm. The two coincide only for purely real phasors,
+$\varphi_n\in\{0,\pi\}$, which is the source of the confusion.
+
+\subsection{The middle tone is its own mirror partner}\label{sec:selfpair}
+
+A natural objection: \emph{for odd $N$ the middle tone has no partner, so its
+phase is unconstrained}. It is not. The mirror acts on the indices,
+$n \mapsto \bar n = N-1-n$; this is an involution, and involutions have
+pairs \emph{and fixed points}:
+
+\begin{center}
+\begin{tabular}{cll}
+  \toprule
+  $N$ & pairing & fixed point\\
+  \midrule
+  3 & $0\!\leftrightarrow\!2$, \; $1\!\mapsto\!1$ & $n=1$\\
+  4 & $0\!\leftrightarrow\!3$, \; $1\!\leftrightarrow\!2$ & none\\
+  5 & $0\!\leftrightarrow\!4$, \; $1\!\leftrightarrow\!3$, \; $2\!\mapsto\!2$ & $n=2$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent A fixed point is not an unpaired element: it is an element paired
+\emph{with itself}. Equation~\eqref{eq:centring} is required for every $n$,
+so at the fixed point it reads $\varphi_n+\varphi_n = c$ and
+\begin{empheq}[box=\fbox]{equation}
+  \varphi_{(N-1)/2} = \frac{c}{2} \quad\text{or}\quad \frac{c}{2}+\pi
+  \qquad (N\ \text{odd}) .
+  \label{eq:midphase}
+\end{empheq}
+The two roots appear because Eq.~\eqref{eq:centring} holds modulo $2\pi$.
+
+The objection implicitly assumes each pair may carry its own constant. It may
+not: $c$ \emph{is} the single global $\Theta$ of the derivation, and a single
+$e^{\mathrm{i}\alpha(t)}$ has to serve all spots at once, or the
+contributions do not add up to a conjugated field. The middle tone sits at
+the centre frequency, so its spot lies at the mirror centre; under the mirror
+it maps onto itself, and its condition is not "none" but "with itself".
+
+\paragraph{Numerical check.} With $\varphi_x = (0,\psi,0)$ -- so $c=0$ -- and
+the $y$ phases held fixed at $(0;98;16;114)^\circ$, which satisfy their own
+criterion ($0+114 = 98+16$), the largest intensity gradient at the atom over
+a full beat period is
+
+\begin{center}
+\begin{tabular}{crrl}
+  \toprule
+  $\psi$ & $\max_t|\partial_x I|/I$ & $\max_t|\partial_y I|/I$ & \\
+  \midrule
+  $0^\circ$   & $4\cdot10^{-10}$ & $4\cdot10^{-10}$ & criterion satisfied\\
+  $10^\circ$  & $8.8\cdot10^{-4}$ & $2.6\cdot10^{-4}$ & \\
+  $30^\circ$  & $2.5\cdot10^{-3}$ & $7.4\cdot10^{-4}$ & \\
+  $90^\circ$  & $5.1\cdot10^{-3}$ & $1.5\cdot10^{-3}$ & \\
+  $180^\circ$ & $4\cdot10^{-10}$ & $4\cdot10^{-10}$ & criterion satisfied\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent The gradient vanishes (to the noise floor of the numerical
+derivative) at exactly the two values predicted by
+Eq.~\eqref{eq:midphase} and nowhere else; with $c = 60^\circ$ the zeros move
+to $\psi = 30^\circ$ and $210^\circ$. Note the third column: violating the
+criterion in $x$ also tilts the $y$ gradient. With a separable (Gaussian)
+envelope it would not; the real Airy envelope is radial and couples the axes,
+so the criterion must hold on \emph{both}.
+
+\subsection{Structure of the admissible family}
+
+Writing $\varphi_n = c/2 + \chi_n$, Eq.~\eqref{eq:centring} becomes
+\begin{equation}
+  \chi_{\bar n} = -\,\chi_n ,
+  \label{eq:antisym}
+\end{equation}
+i.e.\ a global phase plus an \emph{antisymmetric} part. Antisymmetric vectors
+in $\mathbb{R}^N$ form a subspace of dimension $\lfloor N/2\rfloor$, so
+\begin{equation}
+  \dim(\text{family}) = \Bigl\lfloor \frac{N}{2} \Bigr\rfloor
+  \qquad\text{instead of}\qquad N-1 .
+\end{equation}
+\textbf{The criterion halves the phase freedom.} One of the remaining
+dimensions is moreover crest-neutral: a \emph{ramp}
+$\chi_n = \delta\,\hat n$ is antisymmetric (since
+$\hat{\bar n} = -\hat n$), so every ramp satisfies the criterion
+automatically, and substituting it into Eq.~\eqref{eq:envelope} gives
+\begin{equation}
+  A_\delta(t) = A_{\delta=0}(t+\tau) , \qquad \tau = \frac{\delta}{2\pi d} ,
+  \label{eq:rampshift}
+\end{equation}
+a pure time shift. Maximum and rms over a full period are invariant under a
+shift, so a ramp cannot change \crest. Hence
+\begin{equation}
+  \dim(\text{crest-relevant}) = \Bigl\lfloor \frac{N}{2} \Bigr\rfloor - 1 .
+  \label{eq:dimcrest}
+\end{equation}
+For $N=3$ this is \textbf{zero}.
+
+\subsection{Why \boldmath$N=3$ always gives the worst crest factor}
+\label{sec:n3}
+
+The counting already says there is nothing left to vary, but the direct
+calculation is shorter and needs no ramp argument at all. With
+$\theta := 2\pi d\,t$ and the voltage amplitudes of
+Eq.~\eqref{eq:convention}, $a_0=a_2=\varrho$, $a_1=1$:
+\begin{equation}
+  A(t) = \varrho\,e^{\mathrm{i}(\varphi_0-\theta)} + e^{\mathrm{i}\varphi_1}
+       + \varrho\,e^{\mathrm{i}(\varphi_2+\theta)} .
+\end{equation}
+The criterion requires $\varphi_0+\varphi_2 = c$ and $2\varphi_1 = c$, so the
+two outer phases lie symmetrically about $c/2$:
+\begin{equation}
+  \varphi_0 = \frac{c}{2}-\chi , \qquad
+  \varphi_2 = \frac{c}{2}+\chi , \qquad
+  \varphi_1 = \frac{c}{2} \;\;\text{or}\;\; \frac{c}{2}+\pi ,
+\end{equation}
+with $\chi$ the only remaining parameter. Factoring out $e^{\mathrm{i}c/2}$,
+\begin{empheq}[box=\fbox]{align}
+  A(t)\,e^{-\mathrm{i}c/2}
+  &= \varrho\,e^{-\mathrm{i}(\chi+\theta)} \pm 1
+   + \varrho\,e^{+\mathrm{i}(\chi+\theta)}
+   \;=\; 2\varrho\cos(\theta+\chi) \;\pm\; 1 .
+  \label{eq:n3env}
+\end{empheq}
+The sign distinguishes the two branches for $\varphi_1$. The entire time
+dependence now sits in a \emph{real} cosine, which sweeps the full interval
+$[-1,1]$ over one period no matter what $\chi$ is -- $\chi$ only sets
+\emph{when}. Maximising over $u := \cos(\theta+\chi)\in[-1,1]$,
+\begin{align}
+  \text{branch }+:&\quad \max_u |\,2\varrho\,u+1\,| = 2\varrho+1
+    &&\text{at } u=+1 ,\\
+  \text{branch }-:&\quad \max_u |\,2\varrho\,u-1\,| = |{-}2\varrho-1| = 2\varrho+1
+    &&\text{at } u=-1 ,
+\end{align}
+so with $a_0+a_1+a_2 = 2\varrho+1$,
+\begin{equation}
+  \max_t |A| = \sum_n a_n
+  \qquad\text{for \emph{both} branches and \emph{every} } \chi,\,c .
+\end{equation}
+But $\sum_n a_n$ is the triangle-inequality bound of
+Eq.~\eqref{eq:bounds}, valid for \emph{any} phase set whatsoever. The
+admissible family therefore always attains it:
+
+\medskip
+\noindent\fbox{\parbox{0.96\textwidth}{\textbf{With three tones, the centring
+criterion fixes the crest factor at the largest value the amplitudes allow,
+for every $c$, every $\chi$ and both branches. This axis cannot be relieved
+by any choice of phase.} The reason is visible in Eq.~\eqref{eq:n3env}: the
+only free parameter appears \emph{inside} the cosine. It can move \emph{when}
+the phasors align, not \emph{whether} they do.}}
+
+\medskip
+\noindent Numerically, with $\varrho=\sqrt{0.97}=0.9848858$:
+\begin{equation}
+  \sum_n a_n = 2\varrho+1 = 2.9697716 ,
+  \qquad
+  \sqrt{\textstyle\sum_n a_n^2} = \sqrt{2r_x+1} = \sqrt{2.94} = 1.7146428 ,
+\end{equation}
+-- note that the square sum contains the \emph{power} ratio linearly, the
+square root of Eq.~\eqref{eq:convention} cancelling -- and therefore
+\begin{equation}
+  \crest_x = \sqrt2\;\frac{2.9697716}{1.7146428} = 2.4494263 .
+\end{equation}
+For exactly equal amplitudes this would be $\sqrt{2N}=\sqrt6 = 2.4494897$;
+the working point lies $6\cdot10^{-5}$ below it, so the two agree to four
+digits without being the same number.
+
+\subsection{Contrast: \boldmath$N=4$}
+
+Here Eq.~\eqref{eq:centring} leaves $\varphi_y = [0,\,b,\,c-b,\,c]$ with
+\emph{two} parameters. The ramp is the special case $b=c/3$; any other $b$ is
+an antisymmetric deviation that is not a ramp and therefore genuinely
+reshapes the envelope. The two inner tones can then no longer be aligned with
+the outer ones simultaneously, $\max|A|$ drops below $\sum_n a_n$, and with
+it the crest factor. At $c=114^\circ$:
+
+\begin{center}
+\begin{tabular}{cccl}
+  \toprule
+  $b$ & $\varphi_y$ [deg] & $\max|A|$ & $\crest_y$\\
+  \midrule
+  $38^\circ$ & $[0,38,76,114]$ & $4.154$ & $2.8265$ \quad(ramp, $=\sum a_n$)\\
+  $60^\circ$ & $[0,60,54,114]$ & $4.022$ & $2.7364$\\
+  $\mathbf{98^\circ}$ & $[0,98,16,114]$ & $\mathbf{3.228}$ & $\mathbf{2.1963}$\\
+  $114^\circ$ & $[0,114,0,114]$ & $3.639$ & $2.4761$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent That single parameter is worth \SI{65}{\percent} more average RF
+power through Eq.~\eqref{eq:pavglimit} -- and because the $x$ axis is fixed,
+it is the \emph{only} adjustment the criterion leaves. The structural reason
+is Eq.~\eqref{eq:dimcrest} together with the fixed-point argument: even $N$
+has no self-paired tone, so no individual phase is pinned.
+
+\section{From RF power to diffracted light}\label{sec:diffraction}
+
+\subsection{One grating: where the \boldmath$\sin^2$ and the \boldmath$\sqrt{P}$ come from}
+
+The RF drives a piezo transducer; the acoustic strain amplitude $S$ obeys
+$P_\mathrm{ac}\propto S^2$, and the photoelastic effect turns strain into an
+index modulation \cite[Ch.~20]{salehteich2019}
+\begin{equation}
+  \Delta n = -\tfrac12 n_0^3 p\,S \;\propto\; \sqrt{P_\mathrm{ac}} .
+  \label{eq:photoelast}
+\end{equation}
+\textbf{This is the origin of the square root} -- it lies in the conversion
+from power to amplitude, not in the diffraction. In the Bragg regime the
+incident and diffracted waves exchange amplitude periodically along the
+interaction length, giving $\eta = \sin^2\nu$ with
+$\nu = \pi\Delta n L/(\lambda\cos\theta_\mathrm{B})$, hence
+\begin{empheq}[box=\fbox]{equation}
+  \eta(P) = \sin^2\!\bigl(\kappa\sqrt{P}\bigr) ,
+  \qquad
+  \kappa = \frac{\pi}{\lambda}\sqrt{\frac{M_2 L}{2H}}\,\sqrt{\zeta} ,
+  \label{eq:etasingle}
+\end{empheq}
+with the figure of merit $M_2$, the transducer aspect ratio $L/H$ and the
+electro-acoustic conversion efficiency $\zeta$. Equation~\eqref{eq:etasingle}
+is the standard Bragg-regime result \cite[Ch.~20]{salehteich2019} and is
+quoted in exactly this form in the manufacturer's application notes
+\cite{aaoptonotes}. None of the four is known
+individually to useful accuracy, which is why $\kappa$ is \emph{measured}:
+one efficiency point at a known power replaces all of them. From the test
+sheet \cite{aaaod} ($\SI{58}{\percent}$ in order "1-1" at \SI{1.3}{\watt} per
+axis, so
+$\sqrt{0.58}=0.762$ per axis),
+\begin{equation}
+  \kappa = \frac{\arcsin\sqrt{0.762}}{\sqrt{1.3}} = \SI{0.930}{\per\sqrt\watt} .
+  \label{eq:kappa}
+\end{equation}
+
+\subsection{Many tones: the coupled-mode equations}
+
+Write the field inside the crystal as one undiffracted wave plus $N$
+diffracted ones, each with a slowly varying amplitude:
+\begin{equation}
+  E = \Au(z)\,e^{\mathrm{i}(\mathbf k_\mathrm{u}\mathbf r-\omega_0 t)}
+    + \sum_{n=0}^{N-1} A_n(z)\,e^{\mathrm{i}(\mathbf k_n\mathbf r-\omega_n t)} ,
+  \qquad \omega_n = \omega_0+\Omega_n .
+  \label{eq:ansatz}
+\end{equation}
+\emph{Notation:} \Au{} carries no number -- it belongs to no tone; $A_n$ is
+the beam diffracted by tone $n$, and every $\sum_n$ below runs over the tones
+and never includes \Au. This is the coupled-wave ansatz of \cite{kogelnik1969}, extended from one
+grating to $N$; a general treatment of the acousto-optic coupled-wave
+equations is given in \cite{laude2003}. Substituting into the Helmholtz
+equation with
+$n^2 \approx n_0^2 + 2n_0\sum_n \Delta n_n\cos(\mathbf K_n\mathbf r
+-\Omega_n t+\varphi_n)$, keeping terms that oscillate at $\omega_n$ and
+referring them to the carrier $e^{\mathrm{i}\mathbf k_n\mathbf r}$:
+\begin{align}
+  \frac{\mathrm{d}A_n}{\mathrm{d}z}
+    &= -\mathrm{i}\,\kappa_n e^{\mathrm{i}\varphi_n}\,\Au\,
+       e^{\,\mathrm{i}\Delta k_n z} ,
+  &\frac{\mathrm{d}\Au}{\mathrm{d}z}
+    &= -\mathrm{i}\sum_n \kappa_n e^{-\mathrm{i}\varphi_n} A_n\,
+       e^{-\mathrm{i}\Delta k_n z} ,
+  \label{eq:coupledgen}
+\end{align}
+with $\kappa_n = \kappa\sqrt{P_n}$ and the momentum mismatch
+$\Delta k_n = (\mathbf k_\mathrm{u}+\mathbf K_n-\mathbf k_n)\cdot\hat{\mathbf z}$.
+Three things follow immediately.
+
+\paragraph{(a) The tone phases drop out.} The substitution
+$\tilde A_n = A_n e^{-\mathrm{i}\varphi_n}$ removes $\varphi_n$ from both
+equations, and $|A_n| = |\tilde A_n|$. \textbf{The diffraction efficiency is
+exactly independent of the tone phases}; $\varphi_n$ reappears only as the
+phase of the diffracted wave, i.e.\ in the interference pattern, where it
+belongs. This is why the crest factor -- a property of the \emph{sum} $s(t)$,
+which only the broadband amplifier ever sees -- cannot appear anywhere in
+this section.
+
+\paragraph{(b) Phase matching is assumed here, not later.} Setting
+$\Delta k_n = 0$ and transforming the phases away leaves
+\begin{equation}
+  \frac{\mathrm{d}\Au}{\mathrm{d}z} = -\mathrm{i}\sum_n \kappa_n A_n ,
+  \qquad
+  \frac{\mathrm{d}A_n}{\mathrm{d}z} = -\mathrm{i}\,\kappa_n \Au ,
+  \label{eq:coupled}
+\end{equation}
+where $z$ is measured in units of the interaction length, so the crystal exit
+is at $z=1$ and $\kappa_n$ is the coupling accumulated over the whole
+crystal. For $\Delta k\neq0$ the two-wave solution acquires the detuned form
+$\eta(\xi) = \nu^2(\nu^2+\xi^2)^{-1}\sin^2\sqrt{\nu^2+\xi^2}$ with
+$\nu = \kappa\sqrt{P}$ and $\xi = \Delta k\,L/2$ \cite{kogelnik1969};
+calibrating $\xi$ against the specified \SI{36}{\mega\hertz} bandwidth
+\cite{aaaod} (half efficiency at the band edge) makes the \SI{0.37}{\mega\hertz}
+tone span of the working point worth \SI{0.007}{\percent} in efficiency,
+while an \SI{18}{\mega\hertz} span would already cost \SI{15}{\percent}.
+
+\paragraph{(c) Unequal $\Delta k_n$ would break the reduction below}, because
+carrying $e^{-\mathrm{i}\Delta k_n z}$ through the derivative produces a new
+combination with weights $\kappa_n\Delta k_n$, and the hierarchy does not
+close unless all $\Delta k_n$ are equal (or zero).
+
+\subsection{Reduction to two waves}
+
+\paragraph{Bright mode.} Define
+\begin{equation}
+  \kappa_\mathrm{eff} = \sqrt{\textstyle\sum_n \kappa_n^2} ,
+  \qquad
+  B = \frac{1}{\kappa_\mathrm{eff}}\sum_n \kappa_n A_n .
+  \label{eq:brightmode}
+\end{equation}
+Then $\mathrm{d}\Au/\mathrm{d}z = -\mathrm{i}\kappa_\mathrm{eff}B$ and
+$\mathrm{d}B/\mathrm{d}z = -\mathrm{i}\kappa_\mathrm{eff}\Au$: a closed
+two-wave system.
+
+\paragraph{Dark modes stay dark.} Any $C=\sum_n c_n A_n$ with
+$\sum_n c_n\kappa_n = 0$ obeys $\mathrm{d}C/\mathrm{d}z = 0$, and $C(0)=0$
+since nothing is diffracted at the entrance. So $C\equiv0$: of the $N$
+diffracted degrees of freedom, $N-1$ are never excited. This is what makes
+the reduction exact rather than approximate.
+
+\paragraph{Solve and return.} With $\Au(0)=1$, $B(0)=0$:
+$\Au = \cos(\kappa_\mathrm{eff}z)$, $B = -\mathrm{i}\sin(\kappa_\mathrm{eff}z)$.
+Integrating the second of Eq.~\eqref{eq:coupled} with $A_n(0)=0$, the same
+integral appears for every $n$:
+\begin{equation}
+  A_n(z) = -\mathrm{i}\,\kappa_n\!\int_0^z\!\Au(z')\,\mathrm{d}z'
+         = -\mathrm{i}\,\frac{\kappa_n}{\kappa_\mathrm{eff}}
+           \sin(\kappa_\mathrm{eff}z) ,
+\end{equation}
+so the orders differ only by the prefactor $\kappa_n$. Summing at $z=1$,
+\begin{equation}
+  \eta_\mathrm{tot} = \sum_n |A_n|^2 = \sin^2\kappa_\mathrm{eff}
+  \;=\; 1-|\Au|^2 ,
+\end{equation}
+and -- the step where the sum moves under the root --
+\begin{equation}
+  \kappa_\mathrm{eff} = \sqrt{\textstyle\sum_n \kappa_n^2}
+                      = \sqrt{\textstyle\sum_n \kappa^2 P_n}
+                      = \kappa\sqrt{\Ptot} .
+  \label{eq:keffP}
+\end{equation}
+The squares of the couplings \emph{are} the powers, so their quadratic sum is
+nothing but the ordinary sum of powers under one square root. Hence
+\begin{empheq}[box=\fbox]{equation}
+  \eta_\mathrm{tot} = \sin^2\!\bigl(\kappa\sqrt{\Ptot}\bigr) ,
+  \qquad
+  \eta_n = \frac{P_n}{\Ptot}\,\eta_\mathrm{tot} ,
+  \qquad \Ptot = \sum_n P_n .
+  \label{eq:multitone}
+\end{empheq}
+Energy is conserved exactly, $|\Au|^2+\sum_n|A_n|^2 = 1$, and for $N=1$
+Eq.~\eqref{eq:multitone} reduces to Eq.~\eqref{eq:etasingle}.
+
+\paragraph{Relation to the literature.} Multifrequency Bragg diffraction with
+optimised tone phases has been treated experimentally and theoretically by
+Antonov and Rezvov \cite{antonov2007}, who split one beam into seven equal
+channels at \SI{80}{\percent} net efficiency; the same device class underlies
+the multitone AOD tweezer arrays of \cite{endres2016}. The point relevant
+here is the following.
+
+\paragraph{The sum belongs under the root.} The $N$ gratings act as
+\emph{one} grating of strength $\sqrt{\sum_n\kappa_n^2}$: an additional tone
+does not open a new channel out of the undiffracted beam, it shares the
+existing one. The naive alternative $\sum_n\sin^2(\kappa\sqrt{P_n})$ is not
+wrong physics but the small-signal limit taken in the wrong place -- for
+$\kappa\sqrt{P}\ll1$ both expressions tend to $\kappa^2\Ptot$. They separate
+exactly where we work:
+
+\begin{center}
+\begin{tabular}{cccc}
+  \toprule
+  \Ptot & $\kappa\sqrt{\Ptot}$ & $\eta_\mathrm{tot}$ exact & naive sum (3 tones)\\
+  \midrule
+  \SI{5}{\milli\watt}   & $0.066$ & $0.00432$ & $0.00433$ \;($+0.10\,\%$)\\
+  \SI{50}{\milli\watt}  & $0.208$ & $0.0427$  & $0.0431$ \;($+0.97\,\%$)\\
+  \textbf{\SI{0.664}{\watt}} & $0.758$ & $\mathbf{0.473}$ & $0.539$ \;($\mathbf{+14.0\,\%}$)\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent A useful consequence: \emph{the total diffraction efficiency
+depends only on the total RF power, not on how it is divided among tones.}
+Splitting into a multitone profile costs no efficiency at all.
+
+\section{What the crest factor costs in diffracted light}\label{sec:price}
+
+The two halves now join. Equation~\eqref{eq:multitone} says the diffraction
+depends only on \Ptot; Eq.~\eqref{eq:pavglimit} says the crest factor caps
+\Ptot. Substituting one into the other gives the whole optical effect of the
+crest factor in a single expression:
+\begin{empheq}[box=\fbox]{equation}
+  \eta_\mathrm{axis}(\crest)
+  = \sin^2\!\left(\frac{\kappa\sqrt{P_{1\mathrm{dB}}}}{\crest}\right) ,
+  \qquad
+  \eta_\mathrm{profile} = \eta_x\,\eta_y .
+  \label{eq:etacrest}
+\end{empheq}
+With $\kappa = \SI{0.930}{\per\sqrt\watt}$ from Eq.~\eqref{eq:kappa}
+\cite{aaaod} and $P_{1\mathrm{dB}} = \SI{3.98}{\watt}$ \cite{minicircuits}
+the numerator is
+$\kappa\sqrt{P_{1\mathrm{dB}}} = 1.8559$, so $\eta_\mathrm{axis} =
+\sin^2(1.8559/\crest)$:
+
+\begin{table}[htb]
+  \centering
+  \caption{The crest factor translated into diffraction, via
+  Eq.~\eqref{eq:etacrest}.}
+  \begin{tabular}{lcccl}
+    \toprule
+    & \crest & $\Pavg = P_{1\mathrm{dB}}/\crest^2$ & $\eta_\mathrm{axis}$ & \\
+    \midrule
+    theoretical minimum & $\sqrt2 = 1.414$ & \SI{1.99}{\watt} & $0.935$ & unreachable\\
+    $x$ with $\psi=90^\circ$ & $1.822$ & \SI{1.20}{\watt} & $0.725$ & centring abandoned\\
+    $y$, $b = 98^\circ$ & $2.196$ & \SI{0.83}{\watt} & $0.559$ & working point\\
+    $\mathbf{x}$, \textbf{centred,} $\mathbf{N=3}$ & $\mathbf{2.449}$ & \textbf{\SI{0.66}{\watt}} & $\mathbf{0.472}$ & \textbf{forced, Sec.~\ref{sec:n3}}\\
+    $y$, ramp & $2.827$ & \SI{0.50}{\watt} & $0.373$ & worst case\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\noindent At the working point,
+$\eta_\mathrm{profile} = 0.472\times0.559 = \SI{26.4}{\percent}$, i.e.\
+between \SI{2.0}{\percent} and \SI{2.4}{\percent} per spot over the twelve
+spots. Had both axes reached the theoretical minimum $\crest=\sqrt2$, the
+profile efficiency would be \SI{87}{\percent} -- a factor $3.3$ more light.
+That factor is the price of the crest factor, and Sec.~\ref{sec:n3} says how
+much of it is negotiable: on the $x$ axis, none of it, as long as three tones
+are used and the pattern must stay centred on the atom.
+
+\medskip
+\noindent Three closing remarks.
+\begin{enumerate}\itemsep0.2em
+  \item \textbf{The chain is one-directional.} Phases $\to$ \crest{} $\to$
+        \Pavg{} $\to$ $\eta$ $\to$ Rabi frequency. Nowhere do the phases act
+        on $\eta$ directly; see Sec.~\ref{sec:diffraction}(a). The crest
+        factor is a budget limit of the electronics that happens to
+        propagate all the way to the atom.
+  \item \textbf{The remedy is more tones, not better phases.} By
+        Eq.~\eqref{eq:dimcrest} the crest-relevant freedom is
+        $\lfloor N/2\rfloor-1$, zero only for $N\le3$. A fourth $x$ tone
+        dissolves the conflict instead of negotiating it.
+  \item \textbf{One channel is not covered here.} Equation~\eqref{eq:etasingle}
+        assumes a linear transducer. The instantaneous strain in the crystal
+        carries the crest factor \crest{} as well, so a high \crest{} also
+        brings on acoustic nonlinearity earlier -- an effect independent of
+        the amplifier, pointing the same way, and not quantified here.
+\end{enumerate}
+% ================== END APPENDIX BLOCK ==================
+
+\bibliographystyle{unsrtnat}
+\bibliography{appendix_refs}
+
+\clearpage
+\section*{BibTeX source}
+\addcontentsline{toc}{section}{BibTeX source}
+\noindent Copy the following into your own \texttt{.bib} file. Every entry
+was checked against Crossref or the publisher's page; the two data sheets are
+manufacturer documents.
+\scriptsize
+\verbatiminput{appendix_refs.bib}
+\normalsize
+
+\end{document}

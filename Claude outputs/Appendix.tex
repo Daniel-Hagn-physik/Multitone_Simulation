@@ -1,0 +1,469 @@
+% =====================================================================
+%  Appendix fragment -- \input from the thesis.
+%  Uses only packages already loaded by the thesis:
+%  amsmath, amssymb, mathtools, siunitx, hyperref, biblatex.
+%  No booktabs, no empheq, no extra macros.
+% =====================================================================
+
+\section{Notation and conventions}
+\label{app:notation}
+
+\begin{center}
+\begin{tabular}{ll}
+\hline
+$N_x,N_y$ & number of tones per axis, indices $i,j$\\
+$W$ & frequency span per axis, tone spacing $\Delta f_{x}=W/(N_x-1)$\\
+$\phi_{x,i},\phi_{y,j}$ & tone phases, free parameters at the AWG\\
+$a_{x,i},a_{y,j}$ & tone \emph{power} weights, $A_s=\sqrt{a_{x,i}a_{y,j}}$\\
+$u(r)$ & focal mode, normalised to $u(0)=1$\\
+$f_0,\,T_0$ & fundamental beat frequency and period\\
+$k_s$ & frequency order of spot $s$, $H_m$ group field of order $m$\\
+$D_d$ & Fourier coefficient of the intensity, beat order $d$\\
+$C$ & crest factor of the RF signal per axis\\
+$\eta,\ \alpha,\ P_\mathrm{s}$ & diffraction efficiency, peak efficiency, saturation power\\
+\hline
+\end{tabular}
+\end{center}
+
+The amplitude ratios $r_x,r_y$ are \emph{power} ratios. The RF voltage
+amplitudes therefore carry the square root,
+\begin{equation}
+a=[\,\varrho,1,\dots,1,\varrho\,]\ \text{in voltage},
+\qquad
+[\,r,1,\dots,1,r\,]\ \text{in power},
+\qquad
+\varrho:=\sqrt{r} .
+\label{eq:app_conv}
+\end{equation}
+
+\section{Beating model}
+\label{app:beating}
+
+\begin{equation}
+f_s=f_{x,i}+f_{y,j}=f_{\min}+k_sf_0,
+\qquad
+f_0=\frac{W}{\operatorname{lcm}(N_x-1,N_y-1)},
+\qquad
+T_0=\frac{1}{f_0} .
+\end{equation}
+\begin{equation}
+g_s(\mathbf{r})=A_s\,u(\mathbf{r}-\mathbf{c}_s),
+\qquad
+\phi_s=\phi_{x,i}+\phi_{y,j},
+\qquad
+H_m(\mathbf{r})=\sum_{s:\,k_s=m}g_s(\mathbf{r})\,e^{i\phi_s} .
+\end{equation}
+Only $N_x+N_y$ of the $N_xN_y$ spot phases are free. Dropping the global factor
+$e^{i2\pi f_{\min}t}$, which cancels in $|E|^2$,
+\begin{equation}
+\boxed{\;
+E(\mathbf{r},t)=\sum_m H_m(\mathbf{r})\,e^{i2\pi mf_0t},
+\qquad
+I(\mathbf{r},t)=\sum_d D_d(\mathbf{r})\,e^{i2\pi df_0t}\;}
+\label{eq:app_fourier}
+\end{equation}
+\begin{equation}
+D_d(\mathbf{r})=\!\!\sum_{k_s-k_{s'}=d}\!\!
+g_s(\mathbf{r})\,g_{s'}(\mathbf{r})\,e^{i(\phi_s-\phi_{s'})},
+\qquad
+D_{-d}=D_d^{*},
+\qquad
+f_\mathrm{beat}=d\,f_0 .
+\end{equation}
+Time average over one period $T_0$:
+\begin{equation}
+\langle I\rangle_t=D_0
+=\sum_s g_s^2
++2\!\!\sum_{\substack{s<s'\\ k_s=k_{s'}}}\!\! g_s\,g_{s'}\cos(\phi_s-\phi_{s'}),
+\label{eq:app_timeavg}
+\end{equation}
+so the time average equals the incoherent sum only if every group contains a
+single spot; a degenerate pair contributes a static term that vanishes for
+$\phi_s-\phi_{s'}=\pm\pi/2$. Different orders oscillate at different
+frequencies and are orthogonal over $T_0$, so the variances add:
+\begin{equation}
+\operatorname{Var}_t[I]=\sum_{d\neq0}|D_d|^2
+=\sum_{d>0}\sigma_d^2,
+\qquad
+\sigma_d^2:=2\,|D_d|^2 ,
+\label{eq:app_parseval}
+\end{equation}
+\begin{equation}
+U_t(\mathbf{r})=\frac{\sigma_I(\mathbf{r})}{\langle I\rangle_t(\mathbf{r})},
+\qquad
+\bar U_t=\big\langle U_t^2\big\rangle_R^{1/2}
+=\Big(\sum_{d>0}\bar u_d^2\Big)^{1/2},
+\qquad
+\bar u_d=\bigg\langle\frac{\sigma_d^2}{\langle I\rangle_t^2}\bigg\rangle_R^{1/2},
+\label{eq:app_Ut}
+\end{equation}
+with $\langle\,\cdot\,\rangle_R$ the average over the spot square $R$, the same
+region as for $U_h$. The extreme order $d=k_{\max}-k_{\min}$ is produced by a
+single pair of corner spots, so $|D_{d_{\max}}|$ cannot be changed by any
+choice of tone phases.
+
+\section{Choice of the tone phases}
+\label{app:phases}
+
+\subsection{The centring criterion}
+
+The atom must see a pattern that is symmetric at \emph{every} instant, not
+merely on average:
+\begin{equation}
+I(-\mathbf{r},t)=I(\mathbf{r},t)\quad\forall\,t
+\qquad\Longleftrightarrow\qquad
+E(-\mathbf{r},t)=e^{i\alpha(t)}E^{*}(\mathbf{r},t),
+\label{eq:app_centred}
+\end{equation}
+with one and the same $\alpha(t)$ for the whole field. Starting from
+\begin{equation}
+E(\mathbf{r},t)=\sum_{n,m}a_nb_m\,u(\mathbf{r}-\mathbf{c}_{nm})\,
+e^{-i2\pi(f_n+g_m)t}\,e^{i(\varphi_n+\psi_m)},
+\end{equation}
+three symmetries of the profile enter, with the mirror index $\bar n=N-1-n$:
+\begin{align}
+\mathbf{c}_{\bar n\bar m}&=-\mathbf{c}_{nm}
+&&\text{(centred spot grid)},\label{eq:app_symgeo}\\
+a_{\bar n}&=a_n,\qquad b_{\bar m}=b_m
+&&\text{(amplitudes }[\varrho,1,\dots,1,\varrho]\text{)},\label{eq:app_symamp}\\
+f_{\bar n}&=F-f_n,\qquad g_{\bar m}=G-g_m,
+&&F=f_n+f_{\bar n}=2f_\mathrm{off}+(N-1)\Delta f .\label{eq:app_symfreq}
+\end{align}
+Evaluating $E$ at $-\mathbf{r}$ and relabelling the sum by the mirror index:
+
+\medskip
+\noindent\textbf{Step 1} (positions, $u$ even):
+$u(-\mathbf{r}-\mathbf{c}_{\bar n\bar m})
+=u\big(-(\mathbf{r}-\mathbf{c}_{nm})\big)=u(\mathbf{r}-\mathbf{c}_{nm})$,
+the envelope factor is reproduced.
+
+\noindent\textbf{Step 2} (amplitudes): $a_{\bar n}b_{\bar m}=a_nb_m$, unchanged.
+
+\noindent\textbf{Step 3} (frequencies), the decisive one:
+\begin{equation}
+e^{-i2\pi(f_{\bar n}+g_{\bar m})t}
+=e^{-i2\pi(F+G)t}\cdot e^{+i2\pi(f_n+g_m)t},
+\label{eq:app_conj}
+\end{equation}
+i.e.\ the frequency mirror does not reproduce the time factor, it
+\emph{conjugates} it, up to one global factor common to all spots.
+
+\noindent\textbf{Step 4} (collect and compare):
+\begin{align}
+E(-\mathbf{r},t)&=e^{-i2\pi(F+G)t}\sum_{n,m}a_nb_m\,
+u(\mathbf{r}-\mathbf{c}_{nm})\,e^{+i2\pi(f_n+g_m)t}\,
+e^{i(\varphi_{\bar n}+\psi_{\bar m})},\\
+E^{*}(\mathbf{r},t)&=\sum_{n,m}a_nb_m\,
+u(\mathbf{r}-\mathbf{c}_{nm})\,e^{+i2\pi(f_n+g_m)t}\,
+e^{-i(\varphi_{n}+\psi_{m})} .
+\end{align}
+Both sums run over the same basis functions with the same real coefficients and
+differ only by a constant phase per term. They are proportional, and hence
+Eq.~\eqref{eq:app_centred} holds, if and only if
+$e^{i(\varphi_{\bar n}+\psi_{\bar m})}
+=e^{i\Theta}e^{-i(\varphi_n+\psi_m)}$ for all $n,m$ with a \emph{single}
+constant $\Theta$. Separating the two axes,
+\begin{equation}
+\boxed{\;
+\varphi_n+\varphi_{N_x-1-n}=c_x\ \ \forall n,
+\qquad
+\psi_m+\psi_{N_y-1-m}=c_y\ \ \forall m \;}
+\label{eq:app_centring}
+\end{equation}
+Mirror-symmetric phases, $\varphi_{\bar n}=\varphi_n$, are a different
+condition and do not centre the pattern; they leave residual centroid offsets
+of \SIrange{44}{84}{\nano \metre} against $\sigma=\SI{108}{\nano \metre}$,
+whereas Eq.~\eqref{eq:app_centring} gives $\SI{0.00}{\nano \metre}$.
+
+\subsection{Structure of the admissible family}
+
+With $\varphi_n=c/2+\chi_n$, Eq.~\eqref{eq:app_centring} becomes
+\begin{equation}
+\chi_{\bar n}=-\chi_n
+\qquad\Longrightarrow\qquad
+\dim(\text{family})=\Big\lfloor\frac{N}{2}\Big\rfloor
+\quad\text{instead of}\quad N-1 .
+\label{eq:app_antisym}
+\end{equation}
+For odd $N$ the map $n\mapsto\bar n$ has a fixed point, so the middle tone is
+paired with \emph{itself} and its phase is pinned:
+\begin{equation}
+2\varphi_{(N-1)/2}=c
+\qquad\Longrightarrow\qquad
+\varphi_{(N-1)/2}=\frac{c}{2}\ \ \text{or}\ \ \frac{c}{2}+\pi .
+\label{eq:app_mid}
+\end{equation}
+A ramp $\chi_n=\delta\,\hat n$ with $\hat n:=n-(N-1)/2$ satisfies
+Eq.~\eqref{eq:app_antisym} automatically and is a pure time shift of the
+envelope,
+\begin{equation}
+A_\delta(t)=A_0(t+\tau),
+\qquad
+\tau=\frac{\delta}{2\pi\,\Delta f} ,
+\label{eq:app_ramp}
+\end{equation}
+hence crest neutral and redundant with the trigger $t_0$. One of the
+$\lfloor N/2\rfloor$ dimensions is therefore always inactive:
+\begin{equation}
+\dim(\text{crest-relevant})=\Big\lfloor\frac{N}{2}\Big\rfloor-1
+\ \xrightarrow{\ N=3\ }\ 0 .
+\label{eq:app_dim}
+\end{equation}
+
+\subsection{Crest factor}
+
+\begin{equation}
+C=\frac{\max_t|s(t)|}{\mathrm{rms}_t[s(t)]}
+=\sqrt{2}\,\frac{\max_t|A(t)|}{\sqrt{\sum_n a_n^2}},
+\qquad
+\sqrt{2}\le C\le\sqrt{2}\,\frac{\sum_n a_n}{\sqrt{\sum_n a_n^2}}
+\ \xrightarrow{a_n\equiv1}\ \sqrt{2N},
+\label{eq:app_crest}
+\end{equation}
+both operations taken over a full envelope period; the denominator is
+phase independent \cite{Schroeder1970,Boyd1986}. For $N_x=3$, inserting
+Eq.~\eqref{eq:app_centring} as
+$\varphi=\big(\tfrac{c}{2}-\chi,\ \tfrac{c}{2}\ \text{or}\ \tfrac{c}{2}+\pi,\
+\tfrac{c}{2}+\chi\big)$ and factoring out $e^{ic/2}$, with
+$\theta:=2\pi\Delta f_x t$,
+\begin{equation}
+\boxed{\;
+A(t)\,e^{-ic/2}
+=\varrho_x e^{-i(\chi+\theta)}\pm1+\varrho_x e^{+i(\chi+\theta)}
+=2\varrho_x\cos(\theta+\chi)\pm1 \;}
+\label{eq:app_n3}
+\end{equation}
+The only free parameter appears \emph{inside} the cosine, and $\cos$ sweeps
+$[-1,1]$ over one period regardless of $\chi$, so
+\begin{equation}
+\max_t|A|=\max_{v\in[-1,1]}\big|2\varrho_x v\pm1\big|=2\varrho_x+1=\sum_n a_n
+\qquad\text{for all }c,\chi\text{ and both branches},
+\end{equation}
+which is the upper bound of Eq.~\eqref{eq:app_crest}. With $r_x=0.97$ and
+$\varrho_x=\sqrt{r_x}=0.9848858$,
+\begin{equation}
+C_x=\sqrt{2}\,\frac{2\varrho_x+1}{\sqrt{2r_x+1}}
+=\sqrt{2}\,\frac{2.9697716}{1.7146428}=2.4494
+\qquad\big(\sqrt{2N}=\sqrt{6}=2.4495\big).
+\end{equation}
+For $N_y=4$ there is no fixed point and Eq.~\eqref{eq:app_centring} leaves
+$\psi=[0,b,c_y-b,c_y]$ with two parameters, one of them crest relevant. At
+$c_y=114^\circ$:
+
+\begin{center}
+\begin{tabular}{cccl}
+\hline
+$b$ & $\psi$ [deg] & $\max|A|$ & $C_y$\\ \hline
+$38^\circ$ & $[0,38,76,114]$ & $4.154$ & $2.8265$ \ (ramp, $=\sum_n a_n$)\\
+$60^\circ$ & $[0,60,54,114]$ & $4.022$ & $2.7364$\\
+$98^\circ$ & $[0,98,16,114]$ & $3.228$ & $2.1963$\\
+$114^\circ$ & $[0,114,0,114]$ & $3.639$ & $2.4761$\\ \hline
+\end{tabular}
+\end{center}
+
+A power amplifier clips the instantaneous voltage and reaches compression long
+before any thermal limit \cite{Pozar2012,Cripps2006}, so with
+$P_\mathrm{peak}=C^2P_\mathrm{avg}$ and
+$P_\mathrm{peak}\le P_\mathrm{1dB}$,
+\begin{equation}
+\boxed{\;
+P_\mathrm{avg}\le\frac{P_\mathrm{1dB}}{C^{2}}\;}
+\qquad
+P_\mathrm{1dB}=\SI{36}{\decibelmilliwatt}=\SI{3.98}{\watt}
+\ \text{\cite{MiniCircuitsZHL}} .
+\label{eq:app_backoff}
+\end{equation}
+
+\begin{center}
+\begin{tabular}{lccc}
+\hline
+& $C$ & $C^2$ & $P_\mathrm{avg}\le P_\mathrm{1dB}/C^2$\\ \hline
+$x$ axis, $N_x=3$, forced by Eq.~\eqref{eq:app_dim}
+ & $2.4494$ & $6.00$ & \SI{0.66}{\watt}\\
+$y$ axis, $N_y=4$, $b=98^\circ$, minimum in the family
+ & $2.1963$ & $4.82$ & \SI{0.83}{\watt}\\ \hline
+\end{tabular}
+\end{center}
+
+\section{Pulse area for a given profile power}
+\label{app:pulsearea}
+
+The optical power $P$ in the profile fixes the scale $s$ in
+$I=s\tilde I$, where $\tilde I=|E|^2$ is the simulated intensity in units of
+$u(0)=1$:
+\begin{equation}
+P=\int\langle I\rangle_t\,\mathrm{d}^2r=s\,\tilde P_\mathrm{prof},
+\qquad
+\tilde P_\mathrm{prof}=\sum_s a_sP_1
++2\!\!\sum_{\substack{s<s'\\ k_s=k_{s'}}}\!\!A_sA_{s'}
+\cos(\phi_s-\phi_{s'})\,O(\varrho_{ss'}),
+\label{eq:app_scale}
+\end{equation}
+with the single-spot power $P_1=\int u^2\,\mathrm{d}^2r$ and the mode
+autocorrelation $O$ evaluated at the spot separation $\varrho_{ss'}$
+\cite{Goodman2017,BornWolf1999,DLMF}:
+\begin{equation}
+P_1^\mathrm{G}=\frac{\pi w_0^2}{2},
+\quad
+O^\mathrm{G}(\varrho)=P_1^\mathrm{G}\,e^{-\varrho^2/2w_0^2};
+\qquad
+P_1^\mathrm{A}=\frac{4\pi}{k^2},
+\quad
+O^\mathrm{A}(\varrho)=P_1^\mathrm{A}\,u(\varrho),
+\label{eq:app_overlap}
+\end{equation}
+$k=3.8317/(1.4830\,w_0)$. The Airy autocorrelation is the mode itself, sign
+included. Adiabatic elimination of the $5P$ manifold, with signed dipole
+matrix elements and hyperfine shifts from ARC \cite{ARC2017,SteckRb85} and the
+far detuned scaling of \cite{Grimm2000}, makes all three atomic quantities
+linear in intensity:
+\begin{equation}
+\Omega=C_\mathrm{rabi}I,
+\qquad
+\delta_\mathrm{LS}=C_\mathrm{shift}I,
+\qquad
+\Gamma_\mathrm{sc}=C_\mathrm{scatter}I,
+\qquad
+\varepsilon_\mathrm{LS}=\frac{\delta_\mathrm{LS}}{\Omega}=\text{const} .
+\end{equation}
+The area of a rectangular pulse on $[t_0,t_0+T_p]$ is therefore
+\begin{equation}
+\boxed{\;
+\theta(\mathbf{r},t_0)=C_\mathrm{rabi}\,P\,
+\frac{\displaystyle\int_{t_0}^{t_0+T_p}\tilde I(\mathbf{r},t)\,\mathrm{d}t}
+     {\displaystyle\int\langle\tilde I\rangle_t\,\mathrm{d}^2r}\;}
+\label{eq:app_area}
+\end{equation}
+in which the arbitrary mode normalisation cancels. Inserting
+Eq.~\eqref{eq:app_fourier} and integrating each order over the window,
+\begin{equation}
+\int_{t_0}^{t_0+T_p}\!\!e^{i2\pi df_0t}\,\mathrm{d}t
+=T_p\,\operatorname{sinc}(d f_0T_p)\,e^{i2\pi df_0(t_0+T_p/2)},
+\label{eq:app_sinc}
+\end{equation}
+\begin{equation}
+\theta(\mathbf{r},t_0)=\frac{C_\mathrm{rabi}PT_p}{\tilde P_\mathrm{prof}}
+\bigg[D_0+2\sum_{d>0}|D_d|\,\operatorname{sinc}(df_0T_p)\,
+\cos\!\Big(2\pi df_0\big(t_0+\tfrac{T_p}{2}\big)+\arg D_d\Big)\bigg].
+\label{eq:app_areaclosed}
+\end{equation}
+For $T_p\gg T_0$ every $d\neq0$ is damped and the pulse sees the time average;
+for $T_p\ll T_0$ the sinc is unity and the pulse samples the beating, so
+$\theta$ depends on the trigger $t_0$. Averaging over the atom, with
+$W(\mathbf{r})$ the thermal position distribution of width
+$\sigma^2=\frac{\hbar}{2m\omega_r}\coth\frac{\hbar\omega_r}{2k_BT}$
+\cite{Tuchendler2008},
+\begin{equation}
+c_d=\int W\,D_d\,\mathrm{d}^2r,
+\qquad
+U(\theta)=\frac{\sigma_W(\theta)}{\langle\theta\rangle_W},
+\qquad
+\langle p_\uparrow\rangle_W=\int W\sin^2\frac{\theta}{2}\,\mathrm{d}^2r
+\ \neq\ \sin^2\frac{\langle\theta\rangle_W}{2} .
+\label{eq:app_atom}
+\end{equation}
+Since $\theta$ is linear in the $D_d$, a full scan over $t_0$ is a single
+matrix-vector product in the $c_d$.
+
+\begin{center}
+\begin{tabular}{lr@{\qquad}lr}
+\hline
+$\tilde P_\mathrm{prof}$ & \SI{2.615e-11}{\metre\squared}
+ & $\langle\theta\rangle_W$ at best trigger & $11.54\,\pi$\\
+$C_\mathrm{rabi}$ & \SI{11.66}{\radian\per\second}/(W/m$^2$)
+ & $U(\theta)$ there & \SI{0.72}{\percent}\\
+$\varepsilon_\mathrm{LS}$ & $-0.061$
+ & $P$ for a \SI{1}{\micro \second} $\pi$ pulse & \SI{0.87}{\micro \watt}\\
+\hline
+\end{tabular}
+\end{center}
+
+\noindent Working point: $3\times4$, Airy mode, $w_0=\SI{1.04}{\micro \metre}$,
+$r_x/r_y=0.97/1.16$, $\Delta=+\SI{50}{\giga \hertz}$,
+$P=\SI{10}{\micro \watt}$ in the profile, $T_p=\SI{1}{\micro \second}$,
+$\sigma=\SI{108}{\nano \metre}$.
+
+\section{Diffraction efficiency and profile power}
+\label{app:eta}
+
+Single grating in the Bragg regime, with
+$\Delta n\propto\sqrt{P_\mathrm{ac}}$ from the photoelastic effect
+\cite{Korpel1981,SalehTeich2019,AAOptoTheory}:
+\begin{equation}
+\eta(P)=\alpha(\nu)\,
+\sin^2\!\bigg(\frac{\pi}{2}\sqrt{\frac{P}{P_\mathrm{s}(\nu)}}\bigg),
+\qquad
+\kappa=\frac{\pi}{\lambda}\sqrt{\frac{M_2L}{2H}}\sqrt{\zeta},
+\qquad
+P_\mathrm{s}=\Big(\frac{\pi}{2\kappa}\Big)^{2} .
+\label{eq:app_etasingle}
+\end{equation}
+With $N$ tones the gratings share one undiffracted wave; the coupled wave
+equations \cite{Kogelnik1969,Laude2003} reduce exactly to a two wave problem
+and give \cite{msc:mittenbuehler,Antonov2007}
+\begin{equation}
+\boxed{\;
+\eta_\mathrm{tot}=\alpha\,
+\sin^2\!\bigg(\frac{\pi}{2}\sqrt{\frac{P_\mathrm{tot}}{P_\mathrm{s}}}\bigg),
+\qquad
+\eta_n=\frac{P_n}{P_\mathrm{tot}}\,\eta_\mathrm{tot},
+\qquad
+P_\mathrm{tot}=\sum_n P_n \;}
+\label{eq:app_multitone}
+\end{equation}
+so the total efficiency depends only on the total RF power and not on its
+distribution among the tones, and the tone phases do not enter at all.
+Combining with Eq.~\eqref{eq:app_backoff},
+\begin{equation}
+\boxed{\;
+\eta_\mathrm{axis}(C)=\alpha\,
+\sin^2\!\bigg(\frac{\pi}{2C}\sqrt{\frac{P_\mathrm{1dB}}{P_\mathrm{s}}}\bigg),
+\qquad
+\eta_\mathrm{profile}=\eta_x\,\eta_y\,\Xi \;}
+\label{eq:app_etacrest}
+\end{equation}
+with the measured cross axis term
+\begin{equation}
+\Xi_{ij}=\Big(1-\xi_0\big(\nu^{(x)}_i-\xi_x\big)^2
+\big(\nu^{(y)}_j-\xi_y\big)^2\Big)^{2},
+\qquad
+\xi_x=\SI{108.0}{\mega \hertz},
+\quad
+\xi_y=\SI{102.3}{\mega \hertz},
+\label{eq:app_xi}
+\end{equation}
+which falls to $0.80$ in the corners of the full scan range but is common to
+all twelve spots over the \SI{0.37}{\mega \hertz} span used here
+\cite{msc:mittenbuehler}. With the parameters measured on this device family,
+$\alpha\approx0.92$ per axis and
+$P_\mathrm{s}\approx\SI{1.70}{\watt}$ resp.\ $\SI{1.62}{\watt}$ near
+\SI{100}{\mega \hertz} \cite{msc:mittenbuehler}:
+
+\begin{center}
+\begin{tabular}{lccc}
+\hline
+& $C$ & $P_\mathrm{avg}$ & $\eta_\mathrm{axis}$\\ \hline
+$x$ axis, 3 tones, centred, forced & $2.449$ & \SI{0.66}{\watt} & $0.636$\\
+$y$ axis, 4 tones, $b=98^\circ$ & $2.196$ & \SI{0.83}{\watt} & $0.746$\\
+$y$ axis, ramp, worst in the family & $2.827$ & \SI{0.50}{\watt} & $0.538$\\
+hypothetical $C=\sqrt{2}$ & $1.414$ & \SI{1.99}{\watt} & $0.905$\\ \hline
+\multicolumn{3}{l}{$\eta_\mathrm{profile}=\eta_x\eta_y$ at the working point}
+ & \SI{47.4}{\percent}\\
+\multicolumn{3}{l}{at $C=\sqrt{2}$ on both axes, a factor $1.71$}
+ & \SI{80.9}{\percent}\\
+\multicolumn{3}{l}{laser power for \SI{10}{\micro \watt} in the profile}
+ & \SI{21.1}{\micro \watt}\\
+\multicolumn{3}{l}{for the \SI{0.87}{\micro \watt} of a $\pi$ pulse}
+ & \SI{1.8}{\micro \watt}\\ \hline
+\end{tabular}
+\end{center}
+
+\noindent Assumptions: common Bragg matching for all tones, the
+\SI{0.37}{\mega \hertz} span costing \SI{0.007}{\percent} against the
+\SI{36}{\mega \hertz} bandwidth by the detuned two wave solution
+\cite{Kogelnik1969}; first order only; a linear transducer, the instantaneous
+strain carrying the crest factor as well, so that a high $C$ also brings on
+acoustic nonlinearity; isotropic diffraction, whereas the device is
+anisotropic and birefringent, the two agreeing qualitatively \cite{Chang1995};
+and a two tone estimate for the intermodulation, which is optimistic once many
+tones contribute to the same bin.

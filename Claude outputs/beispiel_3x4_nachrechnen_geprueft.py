@@ -33,13 +33,6 @@ Wo dieselben Groessen im GUI-Code stehen:
                                                      Spotzentren), _target_mask()
     Atom-Gewicht W(r)    kern/beating_physik.py  ->  atom_local_stack(), sigma_thermal()
 
-Die Abschnitte 10-14 pruefen zusaetzlich die Zahlen des Anhangs nach:
-Zentrierungskriterium der Tonphasen, Crestfaktor je Achse, Leistungsbudget am
-P_1dB des Verstaerkers samt Beugungseffizienz, Moden- und Ueberlappintegrale,
-sowie U_t als Feld ueber dem Spot-Rechteck.  Der Arbeitspunkt dieser Arbeit
-(phi_x = [0, 12.5, 25] deg, phi_y = [0, 98, 16, 114] deg) laeuft ueberall als
-dritter Phasensatz mit.
-
 Start:  python beispiel_3x4_nachrechnen.py
 Braucht numpy und scipy. Laeuft ab Python 3.9.
 """

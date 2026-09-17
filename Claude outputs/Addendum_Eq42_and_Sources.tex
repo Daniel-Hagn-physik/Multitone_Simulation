@@ -1,0 +1,275 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}\usepackage[utf8]{inputenc}\usepackage[english]{babel}
+\usepackage{lmodern}\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}\usepackage{siunitx}\usepackage{booktabs}
+\usepackage{empheq}\usepackage{verbatim}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[colorlinks=true,linkcolor=black,citecolor=black,urlcolor=blue]{hyperref}
+\emergencystretch=1.5em
+
+\begin{filecontents*}{pulsearea_refs.bib}
+@book{goodman2017,
+  author    = {Goodman, Joseph W.},
+  title     = {Introduction to Fourier Optics},
+  edition   = {4}, publisher = {W. H. Freeman / Macmillan Learning},
+  address   = {New York}, year = {2017}, isbn = {978-1-319-11916-4},
+  note      = {Fourier conventions, convolution and correlation theorems,
+               Parseval's theorem; band-limited imaging}
+}
+
+@book{bornwolf1999,
+  author    = {Born, Max and Wolf, Emil},
+  title     = {Principles of Optics},
+  edition   = {7 (expanded)}, publisher = {Cambridge University Press},
+  address   = {Cambridge}, year = {1999}, isbn = {978-0-521-64222-4},
+  note      = {Sec.~8.5, the Airy pattern of a circular aperture}
+}
+
+@misc{dlmf,
+  author       = {{NIST}},
+  title        = {{NIST} Digital Library of Mathematical Functions,
+                  Chapter~10 (Bessel Functions), \S10.22 (Integrals)},
+  howpublished = {\url{https://dlmf.nist.gov/10.22}},
+  note         = {Release 1.2.4; accessed 17 September 2026}
+}
+
+@article{sibalic2017,
+  author  = {\v{S}ibali\'{c}, N. and Pritchard, J. D. and Adams, C. S. and
+             Weatherill, K. J.},
+  title   = {{ARC}: An open-source library for calculating properties of
+             alkali {R}ydberg atoms},
+  journal = {Computer Physics Communications},
+  volume  = {220}, pages = {319--331}, year = {2017},
+  doi     = {10.1016/j.cpc.2017.06.015}
+}
+
+@article{grimm2000,
+  author  = {Grimm, Rudolf and Weidem\"{u}ller, Matthias and
+             Ovchinnikov, Yurii B.},
+  title   = {Optical Dipole Traps for Neutral Atoms},
+  journal = {Advances in Atomic, Molecular, and Optical Physics},
+  volume  = {42}, pages = {95--170}, year = {2000},
+  doi     = {10.1016/S1049-250X(08)60186-X},
+  note    = {also \url{https://arxiv.org/abs/physics/9902072}}
+}
+
+@misc{steckrb85,
+  author       = {Steck, Daniel A.},
+  title        = {Rubidium 85 {D} Line Data},
+  howpublished = {\url{https://steck.us/alkalidata}},
+  note         = {accessed 17 September 2026}
+}
+\end{filecontents*}
+
+\newcommand{\dd}{\mathrm d}
+\title{Addendum: the correlation theorem behind the overlap integral,\\
+       and sources for the pulse-area section}
+\author{}\date{}
+\begin{document}\maketitle
+
+\section{Equation (42) in full}
+
+The step in question is
+\begin{equation}
+O(\mathbf d)\;=\;\int\! u(|\mathbf r|)\,u(|\mathbf r-\mathbf d|)\,\dd^2r
+\;=\;\frac{1}{(2\pi)^2}\int\!\bigl|\tilde u(q)\bigr|^2\,
+      e^{\mathrm i\mathbf q\cdot\mathbf d}\,\dd^2q .
+\label{eq:corr}
+\end{equation}
+It was quoted as "the correlation theorem''. Written out it is five lines, and
+three of them are the ones that actually do work: the choice of Fourier
+convention, the symmetry of $u$, and the interchange of the two integrations.
+
+\paragraph{Convention.} The factor $1/(2\pi)^2$ in Eq.~\eqref{eq:corr} is not
+universal -- it is fixed by where one puts it in the transform pair. Throughout,
+\begin{equation}
+\tilde u(\mathbf q)=\int\! u(\mathbf r)\,e^{-\mathrm i\mathbf q\cdot\mathbf r}\,\dd^2r ,
+\qquad
+u(\mathbf r)=\frac{1}{(2\pi)^2}\int\!\tilde u(\mathbf q)\,
+             e^{+\mathrm i\mathbf q\cdot\mathbf r}\,\dd^2q ,
+\label{eq:conv}
+\end{equation}
+i.e.\ the whole $1/(2\pi)^2$ sits in the back transform \cite[Ch.~2]{goodman2017}.
+This is the same convention used for $\tilde u(q)=(4\pi/k^2)\,\Theta(k-q)$ in
+step~(i), so the two are consistent.
+
+\paragraph{Step 1: replace the shifted factor by its transform.}
+Only the second factor is expanded; the first is left alone.
+\begin{equation}
+u(\mathbf r-\mathbf d)
+=\frac{1}{(2\pi)^2}\int\!\tilde u(\mathbf q)\,
+ e^{\mathrm i\mathbf q\cdot(\mathbf r-\mathbf d)}\,\dd^2q
+=\frac{1}{(2\pi)^2}\int\!\tilde u(\mathbf q)\,
+ e^{\mathrm i\mathbf q\cdot\mathbf r}\,e^{-\mathrm i\mathbf q\cdot\mathbf d}\,\dd^2q .
+\end{equation}
+The shift has become a pure phase factor $e^{-\mathrm i\mathbf q\cdot\mathbf d}$
+-- this is the only property of the Fourier transform the derivation needs.
+
+\paragraph{Step 2: insert and exchange the order of integration.}
+\begin{align}
+O(\mathbf d)
+&=\int\!\dd^2r\; u(\mathbf r)\,\frac{1}{(2\pi)^2}
+  \int\!\dd^2q\;\tilde u(\mathbf q)\,e^{\mathrm i\mathbf q\cdot\mathbf r}\,
+  e^{-\mathrm i\mathbf q\cdot\mathbf d}\\[2pt]
+&=\frac{1}{(2\pi)^2}\int\!\dd^2q\;\tilde u(\mathbf q)\,
+  e^{-\mathrm i\mathbf q\cdot\mathbf d}\;
+  \underbrace{\int\!\dd^2r\; u(\mathbf r)\,e^{+\mathrm i\mathbf q\cdot\mathbf r}}
+            _{\textstyle =\;\tilde u(-\mathbf q)} .
+\label{eq:step2}
+\end{align}
+The inner integral is the defining transform \eqref{eq:conv} evaluated at
+$-\mathbf q$, because the sign in the exponent is the opposite one.
+Interchanging the two integrations is legitimate here: $u$ is bounded and
+square integrable and $\tilde u$ has compact support, so the double integral
+converges absolutely and Fubini's theorem applies. (For a Gaussian mode the
+same statement is immediate; for the Airy mode it is the compact support of
+$\tilde u$ that saves it, since $u$ itself decays only as $r^{-3/2}$.)
+
+\paragraph{Step 3: the symmetry of the mode.} Two properties are needed, and
+the mode has both:
+\begin{align}
+u \ \text{real} \quad&\Longrightarrow\quad
+  \tilde u(-\mathbf q)=\tilde u^{*}(\mathbf q) &&\text{(Hermitian symmetry),}\\
+u \ \text{even},\ u(-\mathbf r)=u(\mathbf r) \quad&\Longrightarrow\quad
+  \tilde u(-\mathbf q)=\tilde u(\mathbf q) &&\text{(substitute } \mathbf r\to-\mathbf r).
+\end{align}
+A radially symmetric mode is automatically even, and both the Gaussian and
+$2J_1(kr)/(kr)$ are real. Taken together, $\tilde u$ is itself real and even --
+as the explicit result $\tilde u=(4\pi/k^2)\Theta(k-q)$ shows. Therefore
+\begin{equation}
+\tilde u(\mathbf q)\,\tilde u(-\mathbf q)
+=\tilde u(\mathbf q)\,\tilde u^{*}(\mathbf q)
+=\bigl|\tilde u(\mathbf q)\bigr|^{2} ,
+\end{equation}
+and Eq.~\eqref{eq:step2} becomes
+\begin{equation}
+O(\mathbf d)=\frac{1}{(2\pi)^2}\int\!\bigl|\tilde u(\mathbf q)\bigr|^{2}\,
+             e^{-\mathrm i\mathbf q\cdot\mathbf d}\,\dd^2q .
+\label{eq:step3}
+\end{equation}
+
+\paragraph{Step 4: the sign in the exponent does not matter.}
+Equation~\eqref{eq:step3} carries $e^{-\mathrm i\mathbf q\cdot\mathbf d}$ while
+Eq.~\eqref{eq:corr} was written with $e^{+\mathrm i\mathbf q\cdot\mathbf d}$.
+Both are right: $|\tilde u|^2$ is even in $\mathbf q$, so the substitution
+$\mathbf q\to-\mathbf q$ leaves the measure and the weight unchanged and only
+flips the exponent. Equivalently: $O$ is the transform of a real even function
+and is therefore itself real and even, $O(-\mathbf d)=O(\mathbf d)$ -- which is
+also physically obvious, since the overlap of two spots cannot depend on which
+one is called the first.
+
+\paragraph{Why "correlation'' and "convolution'' coincide here.}
+In general the two differ,
+\begin{equation}
+(u\star v)(\mathbf d)=\int\! u(\mathbf r)\,v(\mathbf r-\mathbf d)\,\dd^2r ,
+\qquad
+(u * v)(\mathbf d)=\int\! u(\mathbf r)\,v(\mathbf d-\mathbf r)\,\dd^2r ,
+\end{equation}
+and only the convolution turns into a plain product of transforms. For an
+\emph{even} $v$ one has $v(\mathbf d-\mathbf r)=v(\mathbf r-\mathbf d)$ and the
+two integrals are identical \cite[Ch.~2]{goodman2017}. That is the one line the
+phrase "since $u$ is real and even the correlation equals the convolution''
+stands for.
+
+\paragraph{Step 5: the check at \boldmath$\mathbf d=0$.}
+Setting $\mathbf d=0$ in Eq.~\eqref{eq:corr} reduces it to Parseval's theorem
+in this convention,
+\begin{equation}
+O(0)=\int\! u^2\,\dd^2r
+    =\frac{1}{(2\pi)^2}\int\!|\tilde u|^2\,\dd^2q \;=\;P_1 ,
+\end{equation}
+so the normalisation of Eq.~\eqref{eq:corr} is fixed by a quantity already
+computed independently in step~(a). This is the cheapest available test of the
+prefactor and it passes.
+
+\paragraph{Evaluation for the Airy mode.}
+Now the special structure enters. An indicator function is idempotent,
+$\Theta^2=\Theta$, and that is what makes the Airy case as easy as it is. With
+$\tilde u(q)=(4\pi/k^2)\,\Theta(k-q)$,
+\begin{align}
+O^{\mathrm A}(d)
+&=\frac{1}{(2\pi)^2}\left(\frac{4\pi}{k^2}\right)^{\!2}
+  \int_{|\mathbf q|<k}\! e^{\mathrm i\mathbf q\cdot\mathbf d}\,\dd^2q
+&&\text{Eq.~\eqref{eq:step3}, }\Theta^2=\Theta\\
+&=\frac{1}{4\pi^{2}}\cdot\frac{16\pi^{2}}{k^{4}}
+  \cdot\frac{2\pi k\,J_1(kd)}{d}
+&&\text{disc integral, step (ii)}\\
+&=\frac{4}{k^{4}}\cdot\frac{2\pi k\,J_1(kd)}{d}
+ \;=\;\frac{8\pi\,J_1(kd)}{k^{3}d}\\
+&=\underbrace{\frac{4\pi}{k^{2}}}_{P_1^{\mathrm A}}
+  \cdot\underbrace{\frac{2J_1(kd)}{kd}}_{u(d)} .
+\end{align}
+\begin{empheq}[box=\fbox]{equation}
+  O^{\mathrm A}(d)=P_1^{\mathrm A}\,u(d)
+\end{empheq}
+The autocorrelation of the Airy mode is the mode itself. The reason is visible
+in the first line and nowhere else: the spectrum is flat inside the cutoff, so
+squaring it does nothing, and a function whose spectrum equals that of $u$ up
+to a constant \emph{is} $u$ up to that constant. No such statement holds for
+the Gaussian, whose squared spectrum is narrower by $\sqrt2$ -- which is
+exactly why $O^{\mathrm G}(d)=P_1^{\mathrm G}e^{-d^2/2w_0^2}$ carries
+$2w_0^2$ in the exponent instead of $w_0^2$.
+
+\paragraph{Numerical confirmation.}
+On a $2048^2$ grid over \SI{40}{\micro\meter} with $w_0=\SI{1.04}{\micro\meter}$:
+$O(0)$ reproduces $P_1$ to machine precision (as it must, both being the same
+sum), the analytic $P_1^{\mathrm A}=4\pi/k^2$ is met to \SI{1.2}{\percent}, and
+$O(d)$ agrees with $P_1^{\mathrm A}u(d)$ to \SI{1.1}{\percent} of the peak over
+$d = 0.2\dots\SI{6}{\micro\meter}$ -- the residual being the grid truncating the
+outer Airy rings, consistent with the \SI{5}{\percent} truncation quoted in the
+main text. At the working-point separation $d=\SI{3.305}{\micro\meter}$ one gets
+$u(d)=+0.06308$.
+
+\section{Suggested citations for the pulse-area section}
+
+None of the derivations need a source; the starting points do. In the order
+they appear:
+
+\begin{center}
+\begin{tabular}{p{0.44\textwidth}p{0.48\textwidth}}
+\toprule
+Place in the text & Citation\\
+\midrule
+"$\int_0^\infty J_\nu^2(x)\,\dd x/x = 1/(2\nu)$'' (Airy spot power) &
+\verb|\cite{dlmf}| -- Weber--Schafheitlin type, DLMF \S10.22\\[4pt]
+"$\int_0^\infty J_1(x)\,\dd x = 1$'' (prefactor of $\tilde u$) &
+\verb|\cite{dlmf}|\\[4pt]
+"$\int_0^X J_0(t)\,t\,\dd t = X J_1(X)$'' (disc integral) &
+\verb|\cite{dlmf}|; equivalently one line from
+$\frac{\dd}{\dd z}\!\left[zJ_1(z)\right]=zJ_0(z)$\\[4pt]
+"the focal field is the Fourier transform of the pupil field'' and the
+Airy form $2J_1(kr)/(kr)$ &
+\verb|\cite[Ch.~4,~6]{goodman2017}|, \verb|\cite[Sec.~8.5]{bornwolf1999}|\\[4pt]
+the correlation theorem, Eq.~(42), and Parseval &
+\verb|\cite[Ch.~2]{goodman2017}|\\[4pt]
+"the excited states are eliminated adiabatically'' and the two-photon
+Rabi frequency &
+\verb|\cite{grimm2000}| for the light shift and scattering rate in the same
+far-detuned limit\\[4pt]
+signed dipole matrix elements, hyperfine shifts, line centroids, lifetimes &
+\verb|\cite{sibalic2017}| (ARC), cross-checked against \verb|\cite{steckrb85}|\\[4pt]
+the thermal width
+$\sigma^2=\frac{\hbar}{2m\omega_r}\coth\frac{\hbar\omega_r}{2k_BT}$ &
+\verb|\cite{tuchendler2008}| (already in the appendix bibliography)\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Two remarks on what \emph{not} to cite. The boxed pulse-area formula
+and the cancellation of $A_\mathrm{eff}$ against $\tilde P_\mathrm{prof}$ are
+bookkeeping carried out here in full -- a reference would suggest the result is
+someone else's. The same holds for the sinc: it is the Fourier transform of the
+integration window and is derived in three lines in the text.
+
+\bibliographystyle{unsrtnat}
+\bibliography{pulsearea_refs}
+
+\clearpage
+\section*{BibTeX source (additional entries)}
+\noindent These are new; \texttt{tuchendler2008} is already in the appendix
+bibliography.
+\scriptsize
+\verbatiminput{pulsearea_refs.bib}
+\normalsize
+
+\end{document}

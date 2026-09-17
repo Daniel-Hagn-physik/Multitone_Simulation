@@ -1,0 +1,200 @@
+
+==============================================================================
+1. Toene und Grundfrequenz
+==============================================================================
+f_x,i [MHz]: 100.000, 100.185, 100.370
+f_y,j [MHz]: 100.000, 100.123, 100.247, 100.370
+Delta f_x = W_x/2 = 185.00 kHz
+Delta f_y = W_y/3 = 123.33 kHz
+f_0 = ggT aller Differenzen = 61.6667 kHz   ->  T_0 = 16.216 us
+Probe Formel: W / lcm(2,3) = W/6 = 61.6667 kHz  ->  stimmt
+Delta f_x = 3 f_0,   Delta f_y = 2 f_0
+dr/df = 6.316 nm/kHz
+p_x = 1.1685 um,  p_y = 0.7790 um,  Ausdehnung x/y = 2.3370 / 2.3370 um
+
+==============================================================================
+2. Frequenzordnungen k_s und Gruppen S_m
+==============================================================================
+k_ij = 3 i + 2 j,   f_ij = 200 MHz + k_ij f_0
+
+         j=0    j=1    j=2    j=3  
+  i=0    0      2      4      6    
+  i=1    3      5      7      9    
+  i=2    6      8      10     12   
+
+12 Spots in 11 Gruppen, leere Ordnungen: [1, 11]
+  H_0  = z_0,0
+  H_2  = z_0,1
+  H_3  = z_1,0
+  H_4  = z_0,2
+  H_5  = z_1,1
+  H_6  = z_0,3 + z_2,0
+  H_7  = z_1,2
+  H_8  = z_2,1
+  H_9  = z_1,3
+  H_10 = z_2,2
+  H_12 = z_2,3
+entartet: Ordnung 6: [(0, 3), (2, 0)], Abstand 3.305 um
+
+==============================================================================
+3. Statische Interferenz  <I>_t - sum g_s^2
+==============================================================================
+
+phi = 0:
+  Paar (0, 3)-(2, 0): A^2 = 1.1252, Phasendifferenz = +0.0000 pi (+0.0 deg), cos = +1.0000
+  max |<I>_t - inkoh.| / max(inkoh.) = 7.16 %   bei x = 2.41 um, y = -0.02 um
+  Beitrag zur Gesamtleistung: +1.12 %
+  Probe sum|H_m|^2 - sum g_s^2 gegen 2 g g' cos(dphi): max Abweichung 5.0e-16
+
+Schroeder:
+  Paar (0, 3)-(2, 0): A^2 = 1.1252, Phasendifferenz = -0.8333 pi (-150.0 deg), cos = -0.8660
+  max |<I>_t - inkoh.| / max(inkoh.) = 6.20 %   bei x = 2.41 um, y = -0.02 um
+  Beitrag zur Gesamtleistung: -0.97 %
+  Probe sum|H_m|^2 - sum g_s^2 gegen 2 g g' cos(dphi): max Abweichung 5.2e-16
+
+Arbeitspkt:
+  Paar (0, 3)-(2, 0): A^2 = 1.1252, Phasendifferenz = +0.4944 pi (+89.0 deg), cos = +0.0175
+  max |<I>_t - inkoh.| / max(inkoh.) = 0.12 %   bei x = -0.07 um, y = 2.36 um
+  Beitrag zur Gesamtleistung: +0.02 %
+  Probe sum|H_m|^2 - sum g_s^2 gegen 2 g g' cos(dphi): max Abweichung 5.3e-16
+
+==============================================================================
+4. Beat-Ordnungen d = k_s - k_s'
+==============================================================================
+Auswertebereich: Spot-Rechteck 2.34 x 2.34 um
+
+d = 3 Delta_i + 2 Delta_j
+
+  d  f_beat[kHz]  Paare  (Di,Dj)            Abstand[um]      phi = 0  Schroeder Arbeitspkt
+------------------------------------------------------------------------------------------
+  0          0.0      1  (-2,3)             3.31                  --         --         --
+  1         61.7     10  (1,-1), (-1,2)     1.40, 1.95          28.1       29.7       19.9
+  2        123.3     11  (0,1), (2,-2)      0.78, 2.81          82.1       66.0       40.4
+  3        185.0     10  (1,0), (-1,3)      1.17, 2.61          46.9       57.4       51.8
+  4        246.7      9  (0,2), (2,-1)      1.56, 2.46          15.9       23.8       20.4
+  5        308.3      6  (1,1)              1.40                28.0       32.2       18.8
+  6        370.0      7  (0,3), (2,0)       2.34, 2.34          18.9       13.0       16.1
+  7        431.7      4  (1,2)              1.95                 7.0       12.0        6.9
+  8        493.3      3  (2,1)              2.46                 9.6        6.8        3.2
+  9        555.0      2  (1,3)              2.61                 6.2        5.6        6.2
+ 10        616.7      2  (2,2)              2.81                 5.4        3.8        5.4
+ 11        678.3      0  --                 --                    --         --         --
+ 12        740.0      1  (2,3)              3.31                 1.8        1.8        1.8
+
+Summe der Paare: 66  (erwartet S(S-1)/2 = 66)
+
+Gesamtschwankung sigma_I/<I>_t (gewichtetes rms, Spot-Rechteck 2.34 x 2.34 um):
+  phi = 0   : 106.5 %   (Wurzel der Summe der Quadrate: 106.5 %, 2116 Pixel im Bereich)
+  Schroeder : 102.7 %   (Wurzel der Summe der Quadrate: 102.7 %, 2116 Pixel im Bereich)
+  Arbeitspkt: 76.6 %   (Wurzel der Summe der Quadrate: 76.6 %, 2116 Pixel im Bereich)
+
+Zum Vergleich, dieselbe Groesse ueber andere Bereiche:
+  Bereich                                         phi = 0    Schroeder   Arbeitspkt
+  Plateau <I>_t > 0.5 max                            95.7         91.4         71.6
+  Spot-Rechteck 2.34 x 2.34 um                      106.5        102.7         76.6
+  Kreis r = 1.00 um                                 113.9        107.0         73.6
+  Atom-Gewicht sigma = 108 nm (T = 17 uK)           119.7         83.3         74.8
+
+==============================================================================
+5. Probe: Fourier-Koeffizienten gegen Zeitreihe I(r,t)
+==============================================================================
+  phi = 0   : max|mean_t I - D_0|/max D_0 = 1.7e-15,  max|var_t I - sum 2|D_d|^2|/max var = 2.9e-15
+  Schroeder : max|mean_t I - D_0|/max D_0 = 1.5e-15,  max|var_t I - sum 2|D_d|^2|/max var = 1.7e-15
+  Arbeitspkt: max|mean_t I - D_0|/max D_0 = 1.4e-15,  max|var_t I - sum 2|D_d|^2|/max var = 3.2e-15
+  Grad des Polynoms K = 12  ->  25 Abtastpunkte pro Periode reichen exakt
+
+==============================================================================
+6. D_1 und D_12, untere Schranke
+==============================================================================
+D_1 hat 10 Zeiger:
+   z_1,0 z_0,1^* + z_0,2 z_1,0^* + z_1,1 z_0,2^* + z_0,3 z_1,1^* + z_1,2 z_0,3^* + z_2,0 z_1,1^* + z_1,2 z_2,0^* + z_2,1 z_1,2^* + z_1,3 z_2,1^* + z_2,2 z_1,3^*
+D_12 hat 1 Zeiger: z_2,3 z_0,0^*
+untere Schranke (freie Paarphasen, Spot-Rechteck 2.34 x 2.34 um): 21.2 %
+
+==============================================================================
+7. Linien neben den Fallenresonanzen, Puls
+==============================================================================
+  nu_r   =   60.4 kHz: naechste Linie d = 1 bei 61.7 kHz, Abstand 1.27 kHz (2.1 %)
+  2 nu_r =  120.8 kHz: naechste Linie d = 2 bei 123.3 kHz, Abstand 2.53 kHz (2.1 %)
+  pi-Puls bei f_Rabi = 1 MHz: t_pi = 0.50 us, spektrale Breite ~ 1/t_pi = 2.0 MHz, Fallenperiode 1/nu_r = 16.6 us
+
+==============================================================================
+8. Tabellenzeilen fuer LaTeX
+==============================================================================
+% sigma_d als gewichtetes rms ueber: Spot-Rechteck 2.34 x 2.34 um
+0 & 0.0 & 1 & $(-2,3)$ & 3.31 & -- & -- & --\\
+1 & 61.7 & 10 & $(1,-1)$, $(-1,2)$ & 1.40, 1.95 & 28.1 & 29.7 & 19.9\\
+2 & 123.3 & 11 & $(0,1)$, $(2,-2)$ & 0.78, 2.81 & 82.1 & 66.0 & 40.4\\
+3 & 185.0 & 10 & $(1,0)$, $(-1,3)$ & 1.17, 2.61 & 46.9 & 57.4 & 51.8\\
+4 & 246.7 & 9 & $(0,2)$, $(2,-1)$ & 1.56, 2.46 & 15.9 & 23.8 & 20.4\\
+5 & 308.3 & 6 & $(1,1)$ & 1.40 & 28.0 & 32.2 & 18.8\\
+6 & 370.0 & 7 & $(0,3)$, $(2,0)$ & 2.34, 2.34 & 18.9 & 13.0 & 16.1\\
+7 & 431.7 & 4 & $(1,2)$ & 1.95 & 7.0 & 12.0 & 6.9\\
+8 & 493.3 & 3 & $(2,1)$ & 2.46 & 9.6 & 6.8 & 3.2\\
+9 & 555.0 & 2 & $(1,3)$ & 2.61 & 6.2 & 5.6 & 6.2\\
+10 & 616.7 & 2 & $(2,2)$ & 2.81 & 5.4 & 3.8 & 5.4\\
+11 & 678.3 & 0 & -- & -- & -- & -- & --\\
+12 & 740.0 & 1 & $(2,3)$ & 3.31 & 1.8 & 1.8 & 1.8\\
+
+==============================================================================
+10. Zentrierungskriterium
+==============================================================================
+  phi = 0   : c_x = [0. 0. 0.] -> erfuellt | c_y = [0. 0. 0. 0.] -> erfuellt
+  Schroeder : c_x = [240.   0. 240.] -> VERLETZT | c_y = [ 90. 270. 270.  90.] -> VERLETZT
+  Arbeitspkt: c_x = [25. 25. 25.] -> erfuellt | c_y = [114. 114. 114. 114.] -> erfuellt
+  max_t |dI/dx| / <I> am Atomort (nur x-Achse variiert, phi_y = Arbeitspunkt):
+    psi =   0.0 deg ->  6.29e-10 pro nm
+    psi =  30.0 deg ->  3.34e-03 pro nm
+    psi =  90.0 deg ->  3.45e-03 pro nm
+    psi = 180.0 deg ->  6.32e-10 pro nm
+
+==============================================================================
+11. Crestfaktor
+==============================================================================
+  Spannungsamplituden x: [0.9848858 1.        0.9848858]   y: [1.077033 1.       1.       1.077033]
+  sum a_n (x) = 2.9697716   rms = 1.7146428   -> C_max = 2.4494263   (sqrt(6) = 2.4494897)
+  sum a_n (y) = 4.1540659   rms = 2.0784610   -> C_max = 2.8264839
+
+  C_x fuer die x-Phasen (Zentrierung erzwingt C = C_max):
+    phi = 0   : max|A| = 2.96977  C_x = 2.4494
+    Schroeder : max|A| = 2.61721  C_x = 2.1586
+    Arbeitspkt: max|A| = 2.96977  C_x = 2.4494
+
+  C_y als Funktion von b bei c_y = 114 deg:
+    b =   38.0 deg -> max|A| = 4.1541   C_y = 2.8265
+    b =   60.0 deg -> max|A| = 4.0217   C_y = 2.7364
+    b =   98.0 deg -> max|A| = 3.2279   C_y = 2.1963
+    b =  114.0 deg -> max|A| = 3.6392   C_y = 2.4761
+
+  Rampen sind crestneutral (x-Achse):
+    delta =    0.0 deg/Ton -> C_x = 2.449426   (tau = 0.0000 us)
+    delta =   12.5 deg/Ton -> C_x = 2.449426   (tau = 0.1877 us)
+    delta =   25.0 deg/Ton -> C_x = 2.449426   (tau = 0.3754 us)
+    delta =   90.0 deg/Ton -> C_x = 2.449426   (tau = 1.3514 us)
+    delta =  180.0 deg/Ton -> C_x = 2.449426   (tau = 2.7027 us)
+    delta =  270.0 deg/Ton -> C_x = 2.449426   (tau = 4.0541 us)
+
+==============================================================================
+12. Leistungsbudget und Beugungseffizienz
+==============================================================================
+  P_1dB = 3.98 W = 36.0 dBm
+    x, zentriert   C = 2.4494  P_avg = 0.663 W  eta = 0.636
+    y, b=98 deg    C = 2.1963  P_avg = 0.825 W  eta = 0.746
+    y, Rampe       C = 2.8265  P_avg = 0.498 W  eta = 0.538
+    C = sqrt(2)    C = 1.4142  P_avg = 1.990 W  eta = 0.905
+  eta_profil = 0.636 * 0.746 = 47.4 %   |  bei C = sqrt(2) beidseitig: 80.9 %  (Faktor 1.71)
+  Laserleistung fuer 10 uW im Profil: 21.1 uW ; fuer 0.87 uW (pi-Puls): 1.83 uW
+
+==============================================================================
+13. Moden- und Ueberlappintegrale
+==============================================================================
+  P_1^A = 4 pi / k^2 = 2.035985e-12 m^2 ;  P_1^G = pi w^2/2 = 1.698973e-12 m^2
+  Verhaeltnis Airy/Gauss = 1.1984
+  u(3.305 um) = +0.06308   -> O(d)/P_1 = derselbe Wert (Autokorrelation = Mode)
+  Beitrag des Eckenpaars bei phi = 0: +1.12 %   (sum a_s = 12.7008)
+
+==============================================================================
+14. U_t als Feld ueber dem Spot-Rechteck (Arbeitspunkt)
+==============================================================================
+  min 43.2 %   Median 74.1 %   Mittel 75.3 %   rms 76.6 %   max 99.4 %
+  lineares Mittel der Einzelordnungen, quadratisch summiert: 71.4 %   (gegen rms 76.6 %)

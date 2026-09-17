@@ -45,7 +45,6 @@ import numpy as np
 
 import matplotlib.patheffects as pe
 from matplotlib.figure import Figure
-from matplotlib.patches import ConnectionPatch, Ellipse
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 from PyQt5.QtCore import QTimer
@@ -575,12 +574,19 @@ class PulseTimingDialog(QDialog):
         return 1e9, "ns"
 
     def _panel_intensity(self, ax, L, title=True):
+        # ONE beat period. Everything after it repeats, and the panel below
+        # scans exactly that period - the two now share an axis.
         end = float(L["t_trace"][-1])
+        T0 = float(L["T0"])
+        if np.isfinite(T0) and 0.0 < T0 < end:
+            end = T0
+        keep = L["t_trace"] <= end
+        t_tr, g_tr = L["t_trace"][keep], L["g_trace"][keep]
         u, ul = self._t_unit(end)
         # Many oscillations in one axis turn into a solid band; thinning the
         # line keeps the envelope - which is what matters there - readable.
         lw = 0.9 if L["n_beat"] <= 6 else (0.6 if L["n_beat"] <= 20 else 0.4)
-        ax.plot(L["t_trace"] * u, L["g_trace"], lw=lw, color="#1f77b4")
+        ax.plot(t_tr * u, g_tr, lw=lw, color="#1f77b4")
         ax.axhline(1.0, color="#888", lw=0.7, ls="--")
         # Repeats of the pulse are only worth drawing while it is short enough
         # that more than one fits into the window.
@@ -602,7 +608,7 @@ class PulseTimingDialog(QDialog):
                         xy=(0.985, 0.06), xycoords="axes fraction",
                         ha="right", va="bottom", fontsize=8, color="#d62728")
         ax.set_xlim(0, end * u)
-        ax.set_xlabel(r"$t$ [%s]" % ul)
+        ax.set_xlabel(r"$t$ (%s)" % ul)
         gname = "I" if L["law"] == "I" else r"\sqrt{I}"
         ax.set_ylabel(r"$%s(t)\,/\,\langle %s\rangle_t$" % (gname, gname))
         if title:
@@ -615,42 +621,29 @@ class PulseTimingDialog(QDialog):
         ax.plot(L["t_scan"] * u, L["th_scan"] / np.pi, lw=0.9, color="#1f77b4")
         ax.axvline(L["t_opt"] * u, color="#d62728", lw=1.1)
         ax.set_xlim(0, L["T0"] * u)
-        ax.set_xlabel(r"pulse start $t_0$ [%s]" % ul)
+        ax.set_xlabel(r"pulse start $t_0$ (%s)" % ul)
         ax.set_ylabel(r"$\langle\theta\rangle\,/\,\pi$")
         if title:
             ax.set_title("Mean pulse area over one beat period", fontsize=10)
         ax.grid(alpha=0.25)
-        # A pulse longer than the beat period averages the modulation away
-        # (the boxcar sinc kills order d at d f0 T_p = 1). The absolute area
-        # then sits on a huge offset and the swing is invisible - so give the
-        # panel the same relative axis the delay scan has.
-        m = float(np.mean(L["th_scan"]))
-        if m > 0:
-            axr = ax.twinx()
-            axr.set_ylim((np.array(ax.get_ylim()) / (m / np.pi) - 1.0) * 100.0)
-            axr.set_ylabel("deviation from\nmean [%]", fontsize=8)
-            axr.tick_params(labelsize=8)
-            pp = (L["th_scan"].max() - L["th_scan"].min()) / m * 100.0
-            # left-aligned: the magnifier lens sits around t_opt, usually to
-            # the right, and the two would overlap.
-            ax.annotate("peak-to-peak %.3g %%" % pp, xy=(0.015, 0.06),
-                        xycoords="axes fraction", ha="left", va="bottom",
-                        fontsize=8, color="#555")
-            return axr
+        # No second y axis and no peak-to-peak number here any more: with a
+        # pulse longer than the beat period the swing rides on a large offset
+        # and is hard to read off the absolute axis - the relative figures are
+        # in the report next to the file, and the panel below shows the swing
+        # around t_0 directly.
 
     def _panel_zoom(self, ax, L):
         u, ul = self._t_unit(2.0 * L["half"])
         d = L["delays"] * u
         ax.plot(d, L["th_delay"] / np.pi, lw=1.6, color="#1f77b4")
         ax.axvline(0.0, color="#888", lw=0.8)
-        ax.plot([0.0], [L["th0"] / np.pi], "o", color="#d62728", ms=5)
         ax.set_xlim(d[0], d[-1])
-        ax.set_xlabel(r"trigger error [%s]" % ul)
+        ax.set_xlabel(r"trigger error (%s)" % ul)
         ax.set_ylabel(r"$\langle\theta\rangle\,/\,\pi$")
         ax.grid(alpha=0.25)
         axr = ax.twinx()
         axr.set_ylim((np.array(ax.get_ylim()) / (L["th0"] / np.pi) - 1.0) * 100.0)
-        axr.set_ylabel("deviation [%]")
+        axr.set_ylabel("deviation (%)")
         return axr
 
     def _panel_map(self, fig, ax, L, title=True):
@@ -703,11 +696,11 @@ class PulseTimingDialog(QDialog):
             ax.contour(x * sc, y * sc, L["mask"].astype(float), levels=[0.5],
                        colors="white", linewidths=1.4)
         if atom:
-            ax.set_xlabel(r"$x - x_{\mathrm{atom}}$ [nm]")
-            ax.set_ylabel(r"$y - y_{\mathrm{atom}}$ [nm]")
+            ax.set_xlabel(r"$x - x_{\mathrm{atom}}$ (nm)")
+            ax.set_ylabel(r"$y - y_{\mathrm{atom}}$ (nm)")
         else:
-            ax.set_xlabel(r"x [$\mu$m]")
-            ax.set_ylabel(r"y [$\mu$m]")
+            ax.set_xlabel(r"x ($\mu$m)")
+            ax.set_ylabel(r"y ($\mu$m)")
         if title:
             ax.set_title(ttl, fontsize=10)
 
@@ -723,7 +716,6 @@ class PulseTimingDialog(QDialog):
         self._panel_intensity(axI, L, titles)
         self._panel_period(axP, L, titles)
         self._panel_zoom(axZ, L)
-        self._magnifier(fig, axP, axZ, L)
         return axI, axP, axZ
 
     def _draw(self, fig, a4, suptitle):
@@ -752,7 +744,6 @@ class PulseTimingDialog(QDialog):
         self._panel_intensity(axI, L)
         self._panel_period(axP, L)
         self._panel_zoom(axZ, L)
-        self._magnifier(fig, axP, axZ, L)
         self._panel_map(fig, axM, L)
         if suptitle:
             gname = "I" if L["law"] == "I" else r"\sqrt{I}"
@@ -763,34 +754,6 @@ class PulseTimingDialog(QDialog):
                 % (s["N_x"], s["N_y"], s["width_x"] * 1e-6, s["width_y"] * 1e-6,
                    L["f_rabi"] * 1e-6, L["t_p"] * 1e6, gname, L["region"]),
                 fontsize=9.5, y=0.985)
-
-    def _magnifier(self, fig, ax_from, ax_to, L):
-        """Lens around the zoom window plus two lines down to the panel below.
-
-        Without it the two panels show the same curve twice and nothing says
-        that one is a detail of the other."""
-        # Must use the SAME unit as the panel it draws on, or the lens lands
-        # somewhere else entirely once that panel switches to ms.
-        u, _ = self._t_unit(L["T0"])
-        # The lens only means something while the zoom really is a small
-        # detail of the panel above; past about a third of the period it grows
-        # over the whole axis and says nothing.
-        if 2.0 * L["half"] > 0.35 * L["T0"]:
-            return
-        lo, hi = (L["t_opt"] - L["half"]) * u, (L["t_opt"] + L["half"]) * u
-        x0, x1 = ax_from.get_xlim()
-        y0, y1 = ax_from.get_ylim()
-        cx = 0.5 * (lo + hi)
-        wx = max(hi - lo, 0.03 * (x1 - x0))
-        lens = Ellipse((cx, 0.5 * (y0 + y1)), 1.6 * wx, 0.95 * (y1 - y0),
-                       fill=False, ec="#d62728", lw=1.4, zorder=5)
-        lens.set_clip_on(False)          # the window may sit at the period edge
-        ax_from.add_patch(lens)
-        for xa, xb in ((cx - 0.8 * wx, 0.0), (cx + 0.8 * wx, 1.0)):
-            fig.add_artist(ConnectionPatch(
-                xyA=(np.clip(xa, x0, x1), y0), coordsA=ax_from.transData,
-                xyB=(xb, 1.0), coordsB=ax_to.transAxes,
-                color="#d62728", lw=0.9, ls="--", alpha=0.75))
 
     # ---------------------------------------------------------- text
     def _write_info(self):
@@ -962,9 +925,9 @@ class PulseTimingDialog(QDialog):
             ("f_0 / T_0", "%.6f kHz / %.4f us" % (L["f0"] * 1e-3, L["T0"] * 1e6)),
             ("grid / frames / periods", "%d^2 / %d / %d"
              % (s["grid_n"], s["frames_per_period"], s["n_periods"])),
-            ("tone phases x [deg]", ", ".join("%.2f" % v for v in
+            ("tone phases x (deg)", ", ".join("%.2f" % v for v in
                                               np.degrees(s["phase_x"]))),
-            ("tone phases y [deg]", ", ".join("%.2f" % v for v in
+            ("tone phases y (deg)", ", ".join("%.2f" % v for v in
                                               np.degrees(s["phase_y"]))),
         ])
         P += ["", "## Evaluation region", ""]
@@ -1033,11 +996,10 @@ class PulseTimingDialog(QDialog):
               "Neither PDF carries a title; this is what the panels show.", "",
               "**`_curves.pdf`**, three panels top to bottom:", "",
               "1. Profile intensity `I(t)` divided by its own time average, over "
-              "three beat periods. The red line marks the pulse **start** t_0, "
+              "ONE beat period. The red line marks the pulse **start** t_0, "
               "the shading the pulse duration T_p.",
               "2. Mean pulse area `<theta>/pi` versus the pulse start t_0, over "
-              "one full beat period. The red ellipse is the magnifier for "
-              "panel 3.",
+              "the same beat period.",
               "3. The same curve zoomed around the chosen t_0. x is the trigger "
               "error, the right axis the deviation from the area at zero error.",
               "",

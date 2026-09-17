@@ -1,0 +1,2827 @@
+% Crestfaktor als Randbedingung der Tonphasenwahl
+% Selbstaendig kompilierbar; laesst sich ebenso per \input als Abschnitt einbinden.
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[ngerman]{babel}
+\usepackage{lmodern}
+\usepackage[a4paper,margin=2.5cm]{geometry}   % \textwidth = 16 cm
+\usepackage{amsmath,amssymb}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\usepackage{empheq}
+\usepackage{graphicx}
+\usepackage[colorlinks=true,linkcolor=black,citecolor=black,urlcolor=blue]{hyperref}
+
+\sisetup{output-decimal-marker={,}, per-mode=symbol, separate-uncertainty=true}
+
+\emergencystretch=1.5em   % faengt die letzten Overfull-Boxen ab
+
+\newcommand{\crest}{\ensuremath{C}}
+\newcommand{\Uw}{\ensuremath{U_W}}
+
+\title{Der Crestfaktor als Randbedingung bei der Wahl der Tonphasen}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+Die Tonphasen der beiden AODs sind freie Parameter: Jeder Wert ist am AWG
+einstellbar, und die optische Rechnung ist für jeden Wert gleichermaßen
+gültig. Der Crestfaktor verbietet also keinen Phasensatz. Er begrenzt
+etwas anderes, nämlich die mittlere HF-Leistung, die eine
+spitzenspannungsbegrenzte Verstärkerkette bei gegebenem Phasensatz noch
+linear überträgt. Damit ist er kein Term der Physik des Interferenzprofils,
+sondern eine Budgetgrenze der Hardware -- und genau als solche eine
+legitime Nebenbedingung der Parameterwahl. Dieser Text stellt die Kette vom
+HF-Signal zum Atom her, begründet die Nebenbedingung quantitativ und grenzt
+den Crestfaktor gegen die optische Spitzenintensität ab, mit der er leicht
+verwechselt wird.
+\end{abstract}
+
+\section{Definition und Berechnung}
+
+Jede AOD-Achse wird mit der Summe ihrer Töne getrieben,
+\begin{equation}
+  s(t) \;=\; \sum_{n=0}^{N-1} a_n \cos\!\bigl(2\pi f_n t + \varphi_n\bigr),
+  \qquad
+  f_n \;=\; f_\mathrm{off} + \Delta f\, \frac{n}{N-1}.
+  \label{eq:rf}
+\end{equation}
+Darin ist $f_n$ die Frequenz des $n$-ten Tons \emph{dieser Achse}; auf der
+$x$-Achse also $f_0 = \SI{100.000}{\mega\hertz}$,
+$f_1 = \SI{100.185}{\mega\hertz}$, $f_2 = \SI{100.370}{\mega\hertz}$. Der
+Offset $f_\mathrm{off}$ ist der unterste Ton, $\Delta f$ die Spanne vom
+untersten zum obersten.
+
+\begin{table}[htb]
+  \centering
+  \caption{Die Symbole dieses Textes auf einen Blick.}
+  \label{tab:symbols}
+  \begin{tabular}{@{}p{0.09\textwidth}p{0.38\textwidth}p{0.45\textwidth}@{}}
+    \toprule
+    Symbol & Bedeutung & Wert am Arbeitspunkt\\
+    \midrule
+    $N$ & Zahl der Töne \emph{einer} Achse & $N_x=3$, $N_y=4$ (nie 12)\\
+    $n$, $m$ & Tonindex der $x$- bzw.\ $y$-Achse & $0\dots N-1$\\
+    $f_n$ & Frequenz des $n$-ten Tons & \SIrange{100.000}{100.370}{\mega\hertz}\\
+    $f_\mathrm{off}$ & unterster Ton & \SI{100}{\mega\hertz}\\
+    $\Delta f$ & Spanne, oberster minus unterster Ton & \SI{0.37}{\mega\hertz}\\
+    $f_\mathrm{c}$ & \emph{frei wählbare} Bezugsfrequenz &
+      hier $\bar f$, der Mittelwert der $f_n$\\
+    $f_\mathrm{env}$ & ggT der Tonabstände (Mittelungsfenster) &
+      \SI{0.1850}{\mega\hertz} ($x$), \SI{0.1233}{\mega\hertz} ($y$)\\
+    $f_0$, $T_0$ & Grundfrequenz/-periode der \emph{optischen} Schwebung &
+      \SI{61.67}{\kilo\hertz}, \SI{16.216}{\micro\second}\\
+    $a_n$ & Spannungsamplitude des $n$-ten Tons & $\sqrt{r}$-Muster\\
+    $\varphi_n$ & Phase des $n$-ten Tons & die gesuchten Größen\\
+    $A(t)$ & komplexe Einhüllende des HF-Signals & Gl.~\eqref{eq:envdef}\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Zu \boldmath$f_\mathrm{c}$.}
+$f_\mathrm{c}$ ist keine physikalische Größe des Aufbaus, sondern eine reine
+Rechenhilfe: Sie sagt, welche schnelle Schwingung man aus dem Signal
+herausziehen möchte, um die langsame Einhüllende sichtbar zu machen
+(Gl.~\eqref{eq:envdef}). Die Wahl ist beliebig, denn ein anderes
+$f_\mathrm{c}'$ multipliziert $A(t)$ nur mit
+$e^{-\mathrm{i}2\pi(f_\mathrm{c}'-f_\mathrm{c})t}$, einem Faktor vom Betrag
+eins -- $|A(t)|$ und damit der Crestfaktor bleiben unberührt. Numerisch
+geprüft für $f_\mathrm{c} = 0$, $\bar f$, $f_0$, $f_{N-1}$,
+\SI{100.5}{\mega\hertz} und \SI{1}{\giga\hertz}: in allen sechs Fällen
+$\max|A| = 2{,}969772$, $\mathrm{rms}|A| = 1{,}714643$,
+$\crest = 2{,}449426$. Im Code steht $f_\mathrm{c} = \bar f$, weil das die
+Zahlen in der Rechnung klein hält.
+
+Nicht zu verwechseln: $f_\mathrm{off}$ ist der unterste \emph{reale} Ton,
+$f_\mathrm{c}$ eine gedachte Bezugslinie. Am Arbeitspunkt liegen sie mit
+\SI{100.000}{\mega\hertz} und \SI{100.185}{\mega\hertz} zufällig dicht
+beieinander.
+
+Der \emph{Crestfaktor} dieses Signals ist das Verhältnis von Spitzenwert zu
+Effektivwert,
+\begin{equation}
+  \crest \;=\; \frac{\max_t |s(t)|}{\sqrt{\bigl\langle s(t)^2\bigr\rangle_t}} .
+  \label{eq:crestdef}
+\end{equation}
+Die folgenden Abschnitte bauen das in kleinen Schritten auf: was der
+Effektivwert ist, wie man ihn bei vielen Tönen praktisch ausrechnet, und
+warum die Phasen nur auf den Zähler wirken.
+
+\subsection{Was der Effektivwert ist, und warum gerade er}
+
+\paragraph{Schritt 1: Effektivwert.}
+Der Effektivwert (englisch \emph{rms}, root mean square) einer Spannung
+$s(t)$ ist
+\begin{equation}
+  V_\mathrm{rms} \;=\; \sqrt{\bigl\langle s(t)^2 \bigr\rangle_t}
+  \;=\; \sqrt{\frac{1}{T}\int_0^{T} s(t)^2\,\mathrm{d}t} .
+  \label{eq:rmsdef}
+\end{equation}
+Erst quadrieren, dann mitteln, dann die Wurzel -- daher der Name. Der
+gewöhnliche Mittelwert $\langle s\rangle$ wäre nutzlos, er ist bei jedem
+Wechselsignal null.
+
+Der Effektivwert ist die physikalisch richtige Mittelung, weil die Leistung
+in einem Widerstand quadratisch von der Spannung abhängt:
+$P(t) = s(t)^2/R$. Die mittlere Leistung ist damit
+\begin{equation}
+  P_\mathrm{mittel} = \frac{\langle s^2\rangle}{R} = \frac{V_\mathrm{rms}^2}{R} ,
+\end{equation}
+also genau Gl.~\eqref{eq:powerbudget}. Anschaulich: $V_\mathrm{rms}$ ist die
+Gleichspannung, die im selben Widerstand dieselbe Wärme erzeugen würde.
+
+\paragraph{Schritt 2: der Einzelton als Eichfall.}
+Für $s(t) = a\cos(2\pi f t)$ ist die Spitze offensichtlich $a$, und wegen
+$\langle\cos^2\rangle = 1/2$ ist $V_\mathrm{rms} = a/\sqrt{2}$. Also
+\begin{equation}
+  \crest_\text{Einzelton} \;=\; \frac{a}{a/\sqrt{2}} \;=\; \sqrt{2} \;\approx\; 1{,}414 .
+\end{equation}
+Numerisch bestätigt: $1{,}414213$. Das ist der kleinstmögliche Wert überhaupt
+-- ein einzelner Ton ist das gleichmäßigste Signal, das es gibt.
+
+\paragraph{Schritt 3: viele Töne -- zwei Zeitskalen.}
+Bei mehreren Tönen dicht beieinander (\SI{100}{\mega\hertz} Träger,
+Tonabstände von \SI{0.1}{\mega\hertz}) trennen sich zwei Zeitskalen sauber:
+eine schnelle Schwingung mit $\approx\SI{100}{\mega\hertz}$ und eine langsame
+\emph{Einhüllende} mit einigen Mikrosekunden. Man schreibt das als
+\begin{equation}
+  s(t) \;=\; \mathrm{Re}\!\left[e^{\,\mathrm{i}2\pi f_\mathrm{c}t}\,A(t)\right],
+  \qquad
+  A(t) = \sum_n a_n\, e^{\,\mathrm{i}\left[2\pi (f_n-f_\mathrm{c})t+\varphi_n\right]} .
+  \label{eq:envdef}
+\end{equation}
+$|A(t)|$ ist die momentane Amplitude: Über ein paar Trägerperioden ändert sie
+sich praktisch nicht, das Signal schwingt dort also \emph{lokal} wie ein
+Einzelton der Amplitude $|A(t)|$.
+
+\paragraph{Schritt 4: das Signal ist ein langsam modulierter Kosinus.}
+Schreibt man die Einhüllende in Betrag und Phase, $A(t)=|A(t)|\,e^{\mathrm{i}\theta(t)}$,
+so wird aus Gl.~\eqref{eq:envdef}
+\begin{equation}
+  s(t) \;=\; \mathrm{Re}\!\left[|A|\,e^{\,\mathrm{i}(2\pi f_\mathrm{c}t+\theta)}\right]
+       \;=\; |A(t)|\,\cos\!\bigl(2\pi f_\mathrm{c}t+\theta(t)\bigr) .
+  \label{eq:sascos}
+\end{equation}
+Das Signal \emph{ist} also ein Kosinus, dessen Amplitude $|A|$ und Phase
+$\theta$ sich langsam ändern. Damit ist die Spitze sofort klar: Sie wird
+erreicht, wenn $|A|$ am größten ist und der Kosinus gerade durch $\pm1$ läuft,
+\begin{equation}
+  \max_t|s| \;=\; \max_t|A| .
+\end{equation}
+
+\paragraph{Schritt 5: woher der Faktor \boldmath$1/2$ kommt.}
+Für den Effektivwert quadriert man Gl.~\eqref{eq:sascos} und benutzt die
+exakte Identität $\cos^2 x = \tfrac12\left(1+\cos 2x\right)$:
+\begin{equation}
+  s(t)^2 \;=\; |A|^2\cos^2\!\bigl(2\pi f_\mathrm{c}t+\theta\bigr)
+  \;=\; \underbrace{\tfrac12\,|A|^2}_{\text{langsam}}
+      \;+\; \underbrace{\tfrac12\,|A|^2\cos\!\bigl(4\pi f_\mathrm{c}t+2\theta\bigr)}_{\text{schnell, } \approx 2f_\mathrm{c}} .
+  \label{eq:s2split}
+\end{equation}
+Das ist noch exakt -- punktweise gegen das direkt aufsummierte Signal
+geprüft, Abweichung $3\cdot10^{-12}$.
+
+Gemittelt wird nun über die Zeit. Der erste Summand ist die gesuchte Größe.
+Der zweite schwingt mit der doppelten Trägerfrequenz: Ausmultipliziert sitzen
+seine Frequenzen genau bei den Summen $f_n+f_m$, am Arbeitspunkt also
+zwischen \SI{200.000}{\mega\hertz} und \SI{200.740}{\mega\hertz}. Über ein
+Fenster, das lang gegen $1/(2f_\mathrm{c}) \approx \SI{5}{\nano\second}$ ist,
+mittelt er weg. \textbf{Das ist die einzige Näherung im ganzen Abschnitt}, und
+sie ist die Trennung der beiden Zeitskalen aus Schritt~3. Der Rest ist durch
+\begin{equation}
+  \left|\bigl\langle \tfrac12|A|^2\cos(4\pi f_\mathrm{c}t+2\theta)\bigr\rangle\right|
+  \;\lesssim\; \frac{1}{\pi\,2f_\mathrm{c}\,T}
+\end{equation}
+beschränkt; am Arbeitspunkt mit $T=\SI{5.405}{\micro\second}$ sind das
+$2{,}9\cdot10^{-4}$. Es bleibt also
+\begin{equation}
+  \bigl\langle s^2 \bigr\rangle \;=\; \tfrac12\bigl\langle |A|^2\bigr\rangle .
+\end{equation}
+
+Nachgerechnet an der $x$-Achse, volles Signal inklusive
+\SI{100}{\mega\hertz}-Träger auf $4\cdot10^{7}$ Stützstellen:
+\begin{center}
+\begin{tabular}{@{}lr@{}}
+  \toprule
+  $\langle s^2\rangle$ & $1{,}470243863$\\
+  $\tfrac12\langle|A|^2\rangle$ & $1{,}470000000$\\
+  Restterm & $2{,}44\cdot10^{-4}$ \quad(relativ $1{,}7\cdot10^{-4}$)\\
+  \midrule
+  $\max|s|$ & $2{,}969765$\\
+  $\max|A|$ & $2{,}969772$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+Der Restterm liegt unter der Schranke. Er verschwindet sogar ganz, wenn das
+Fenster zusätzlich ein ganzzahliges Vielfaches der halben Trägerperiode ist:
+Mit $T = 1083/(2f_\mathrm{c}) = \SI{5.4050}{\micro\second}$ statt
+\SI{5.4054}{\micro\second} bleibt nur noch $4\cdot10^{-8}$. Der winzige Rest
+rührt also allein daher, dass $2f_\mathrm{c}/f_\mathrm{env} = 1083{,}08$
+keine ganze Zahl ist.
+
+Eingesetzt in die Definition ergibt sich
+\begin{equation}
+  \crest \;=\; \frac{\max_t|s|}{\sqrt{\langle s^2\rangle}}
+  \;=\; \frac{\max_t|A|}{\sqrt{\tfrac12\langle |A|^2\rangle}}
+  \;=\; \sqrt{2}\;\frac{\max_t |A(t)|}{\mathrm{rms}_t |A(t)|} ,
+  \label{eq:crestenv}
+\end{equation}
+und der \SI{100}{\mega\hertz}-Träger muss nie abgetastet werden. Probe am
+Einzelton: $|A| = a$ konstant, also $\crest = \sqrt{2}\,a/a = \sqrt{2}$.
+Gegen die direkte Abtastung des vollen Signals geprüft: relative Abweichung
+$\le 2\cdot10^{-4}$.
+
+\subsection{Der Effektivwert der Einhüllenden ist phasenunabhängig}\label{sec:rmsphase}
+
+Jetzt der Schritt, der alles Weitere erklärt. Setzt man Gl.~\eqref{eq:envdef}
+in $\langle|A|^2\rangle$ ein und multipliziert aus,
+\begin{equation}
+  \bigl\langle |A|^2 \bigr\rangle
+  = \sum_n a_n^2
+  + \sum_{n\neq m} a_n a_m
+    \bigl\langle e^{\,\mathrm{i}\left[2\pi(f_n-f_m)t+\varphi_n-\varphi_m\right]}\bigr\rangle ,
+\end{equation}
+so bleiben von der Doppelsumme nur die Diagonalterme $n=m$ übrig. Das ist
+der Schritt, der eine Begründung verdient, denn er gilt \emph{nicht} über ein
+beliebiges Fenster.
+
+\paragraph{Wann genau der Mischterm null ist.}
+Jeder Mischterm ist ein Zeiger, der mit $\delta\! f = f_n-f_m$ umläuft. Sein
+Mittel über ein Fenster $[0,T]$ lässt sich exakt ausrechnen:
+\begin{equation}
+  \bigl\langle e^{\,\mathrm{i}2\pi \delta\! f\, t}\bigr\rangle_{[0,T]}
+  = \frac{1}{T}\int_0^{T} e^{\,\mathrm{i}2\pi \delta\! f\, t}\,\mathrm{d}t
+  = \frac{e^{\,\mathrm{i}2\pi \delta\! f\, T}-1}{\mathrm{i}\,2\pi \delta\! f\, T} .
+  \label{eq:phasoravg}
+\end{equation}
+Der Zähler verschwindet genau dann, wenn $\delta\! f\,T$ eine ganze Zahl ist
+-- wenn der Zeiger also \emph{volle} Umläufe macht. Anschaulich: Ein voller
+Umlauf mittelt zum Kreismittelpunkt, und wo der Zeiger dabei startet, ist
+gleichgültig. \textbf{Genau deshalb fällt auch die konstante Phasendifferenz
+$\varphi_n-\varphi_m$ heraus} -- sie dreht nur den Startwinkel.
+
+Und die Bedingung ist erfüllt, weil $f_\mathrm{env}$ als größter gemeinsamer
+Teiler der Tonabstände definiert ist: Jede Differenz $f_n-f_m$ ist ein
+ganzzahliges Vielfaches davon. Auf der $x$-Achse etwa
+\begin{equation}
+  f_1-f_0 = \SI{0.185}{\mega\hertz} = 1\cdot f_\mathrm{env},\quad
+  f_2-f_0 = \SI{0.370}{\mega\hertz} = 2\cdot f_\mathrm{env},\quad
+  f_2-f_1 = \SI{0.185}{\mega\hertz} = 1\cdot f_\mathrm{env},
+\end{equation}
+also $\delta\! f\,T \in \{1,2\}$ für $T=1/f_\mathrm{env}$ und damit
+Gl.~\eqref{eq:phasoravg} exakt null.
+
+\paragraph{Mit falschem Fenster gilt nichts davon.}
+Nimmt man stattdessen $T=1/\Delta f = \SI{2.703}{\micro\second}$, so wird
+$\delta\! f\,T = \tfrac12$ für die beiden Nachbarpaare -- ein \emph{halber}
+Umlauf, und Gl.~\eqref{eq:phasoravg} liefert $\mp0{,}6366\,\mathrm{i}$ statt
+null. Dann überlebt die Doppelsumme, und mit ihr die Phasenabhängigkeit:
+\begin{center}
+\begin{tabular}{lcc}
+  \toprule
+  $\varphi_x$ & $\mathrm{rms}|A|$, $T=1/f_\mathrm{env}$ & $\mathrm{rms}|A|$, $T=1/\Delta f$\\
+  \midrule
+  $[0;\,0;\,0]^\circ$        & $1{,}714643$ & $1{,}714646$\\
+  $[0;\,12{,}5;\,25]^\circ$  & $1{,}714643$ & $1{,}548283$\\
+  $[0;\,200;\,80]^\circ$     & $1{,}714643$ & $2{,}110658$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+Links steht dreimal $\sqrt{\sum a_n^2}=1{,}714643$, rechts dreimal etwas
+anderes. Das ist derselbe Fehler wie im Abschnitt über das Mittelungsfenster,
+nur von der anderen Seite betrachtet -- und er erklärt ihn: Mit dem falschen
+Fenster hängt schon der Nenner von den Phasen ab, und der Crestfaktor misst
+nicht mehr, was er messen soll.
+
+\medskip
+\noindent Mit dem richtigen Fenster bleibt also
+\begin{equation}
+  \mathrm{rms}|A| = \sqrt{\textstyle\sum_n a_n^2}
+  \qquad\text{unabhängig von allen } \varphi_n ,
+\end{equation}
+numerisch bestätigt (drei völlig verschiedene Phasensätze, identischer
+Effektivwert auf sechs Stellen: $1{,}714643$). Damit vereinfacht sich
+Gl.~\eqref{eq:crestenv} zu
+\begin{empheq}[box=\fbox]{equation}
+  \crest \;=\; \sqrt{2}\;\frac{\max_t |A(t)|}{\sqrt{\sum_n a_n^2}} .
+  \label{eq:crestsimple}
+\end{empheq}
+\textbf{Die Phasen beeinflussen den Crestfaktor ausschließlich über
+$\max_t|A|$.} Sie können den Effektivwert nicht ändern, nur die Spitze --
+nämlich dadurch, wie gut sich die Zeiger zu irgendeinem Zeitpunkt ausrichten
+lassen. Am Arbeitspunkt:
+\begin{center}
+\begin{tabular}{lccc}
+  \toprule
+  & $\sqrt{\sum a_n^2}$ & $\max|A|$ & $\crest$\\
+  \midrule
+  $x$-Achse, $\varphi_x=[0;\,12{,}5;\,25]^\circ$ & $1{,}7146$ & $2{,}9698$ & $2{,}4494$\\
+  $y$-Achse, $\varphi_y=[0;\,98;\,16;\,114]^\circ$ & $2{,}0785$ & $3{,}2279$ & $2{,}1963$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Die beiden Schranken.}
+Daraus folgen sofort beide Grenzen:
+\begin{align}
+  \max|A| \;&\le\; \sum_n a_n
+  &&\text{(Dreiecksungleichung; Gleichheit, wenn alle Zeiger ausgerichtet sind)},\\
+  \max|A| \;&\ge\; \mathrm{rms}|A|
+  &&\text{(ein Maximum liegt nie unter dem Effektivwert)} .
+\end{align}
+Eingesetzt in Gl.~\eqref{eq:crestsimple} und für gleiche Amplituden
+($a_n = a$, $\sum a_n = Na$, $\sqrt{\sum a_n^2} = \sqrt{N}a$):
+\begin{equation}
+  \sqrt{2} \;\le\; \crest \;\le\; \sqrt{2}\,\frac{Na}{\sqrt{N}a} \;=\; \sqrt{2N} .
+  \label{eq:sqrt2n}
+\end{equation}
+Numerisch bestätigt: $N=3\rightarrow 2{,}4495$, $N=4\rightarrow 2{,}8284$
+(und, zur Einordnung, $N=13\rightarrow 5{,}0990$); am Arbeitspunkt mit
+$r_x=0{,}97$ ergibt sich $\sum a_n = 2{,}970$ und
+$\sqrt{\sum a_n^2}=1{,}715$, also $\crest_{\max}=2{,}4494$.
+
+\paragraph{Amplitudenkonvention.}
+Die Gewichte $r$ der Simulation sind \emph{Intensitäts}gewichte, also
+HF-\emph{Leistungs}verhältnisse. In Gl.~\eqref{eq:rf} stehen Spannungen,
+folglich $a_n \propto \sqrt{r}$.
+
+\paragraph{Rezept.}
+\begin{enumerate}\itemsep0.15em
+  \item Tonfrequenzen $f_n$, Spannungsamplituden $a_n=\sqrt{r_n}$ und Phasen
+        $\varphi_n$ zusammenstellen.
+  \item $f_\mathrm{env}$ als größten gemeinsamen Teiler der Tonabstände
+        bestimmen und ein Raster über \emph{eine} Periode $1/f_\mathrm{env}$ legen.
+  \item $A(t)$ nach Gl.~\eqref{eq:envdef} auswerten ($f_\mathrm{c}$ beliebig,
+        hier der Mittelwert -- eine gemeinsame Frequenzverschiebung ändert
+        $|A|$ nicht).
+  \item $\crest = \sqrt{2}\,\max|A| \big/ \sqrt{\sum a_n^2}$.
+\end{enumerate}
+Im Code ist das \texttt{CrestBasis} in Abschnitt~5 von
+\texttt{kern/beating\_physik.py}: Die Matrix
+$a_n e^{\mathrm{i}2\pi(f_n-f_\mathrm{c})t_j}$ wird einmal vorberechnet,
+danach kostet eine Auswertung nur noch ein Matrix-Vektor-Produkt mit
+$e^{\mathrm{i}\varphi}$.
+
+\paragraph{Der Crestfaktor ist eine Größe \emph{je Achse}.}
+Das ist die häufigste Verwechslung, deshalb explizit: Es gibt in diesem
+Aufbau \emph{kein} Zwölfton-Signal. Der AWG treibt zwei getrennte Kanäle mit
+\begin{align}
+  N_x &= 3 \text{ Tönen bei } [\,100{,}000;\;100{,}185;\;100{,}370\,]\,\si{\mega\hertz},\\
+  N_y &= 4 \text{ Tönen bei } [\,100{,}0000;\;100{,}1233;\;100{,}2467;\;100{,}3700\,]\,\si{\mega\hertz}.
+\end{align}
+Jeder Kanal hat seinen eigenen Verstärker, seinen eigenen AOD und damit
+seinen eigenen Crestfaktor. Die zwölf Spots entstehen erst \emph{optisch}:
+Jeder Spot ist nach Gl.~\eqref{eq:spotphase} das Produkt eines $x$-Tons mit
+einem $y$-Ton, $3\times4 = 12$. Die HF-Ketten sehen davon nichts. In
+Gl.~\eqref{eq:sqrt2n} ist $N$ deshalb $3$ bzw.\ $4$ -- niemals $12$.
+
+\paragraph{Mittelungsfenster.}
+Der Effektivwert ist über \emph{eine Periode der Einhüllenden der jeweiligen
+Achse} zu bilden, $1/f_\mathrm{env}$ mit $f_\mathrm{env}$ dem größten
+gemeinsamen Teiler der Tonabstände dieser Achse -- nicht über $1/\Delta f$
+mit der Spanne $\Delta f$. Am Arbeitspunkt:
+\begin{align}
+  \text{$x$-Achse:}\quad & f_\mathrm{env} = \SI{0.1850}{\mega\hertz}
+    && \rightarrow\; \text{Fenster } \SI{5.405}{\micro\second},\\
+  \text{$y$-Achse:}\quad & f_\mathrm{env} = \SI{0.1233}{\mega\hertz}
+    && \rightarrow\; \text{Fenster } \SI{8.108}{\micro\second},
+\end{align}
+gegenüber $1/\Delta f = \SI{2.703}{\micro\second}$ bei Verwendung der Spanne.
+Ein zu kurzes Fenster erwischt einen unrepräsentativen Ausschnitt der
+Einhüllenden; der Fehler ist erheblich und nicht einmal
+vorzeichenbeständig:
+\begin{center}
+\begin{tabular}{lccc}
+  \toprule
+  & richtig ($1/f_\mathrm{env}$) & falsch ($1/\Delta f$) & Fehler\\
+  \midrule
+  $\crest_x$ & $2{,}4494$ & $2{,}6699$ & $+\SI{9.0}{\percent}$\\
+  $\crest_y$ & $2{,}1963$ & $3{,}3679$ & $+\SI{53.3}{\percent}$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+(In einer anderen Konfiguration mit 13 Tönen auf einer Achse liefert derselbe
+Fehler $\crest = 2{,}19$ statt korrekt $5{,}099$ -- dort liegt das zu kurze
+Fenster vollständig im Rephasierungsmaximum, der Effektivwert kommt zu groß
+und der Crestfaktor zu klein heraus. Die Richtung des Fehlers hängt davon ab,
+welchen Ausschnitt man erwischt.)
+
+\paragraph{Drei Perioden, die nicht dasselbe sind.}
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  HF-Einhüllende $x$ & \SI{5.405}{\micro\second} & Mittelungsfenster für $\crest_x$\\
+  HF-Einhüllende $y$ & \SI{8.108}{\micro\second} & Mittelungsfenster für $\crest_y$\\
+  optische Schwebung $T_0$ & \SI{16.216}{\micro\second} & Intensitätsmuster, beide Achsen zusammen\\
+  \bottomrule
+\end{tabular}
+\end{center}
+$T_0$ ist das kleinste gemeinsame Vielfache der beiden Achsenperioden
+($16{,}216 = 3\cdot5{,}405 = 2\cdot8{,}108$). Der Trigger $t_0$ und alle
+optischen Größen beziehen sich auf $T_0$, der Crestfaktor dagegen auf die
+Periode seiner eigenen Achse.
+
+\paragraph{Amplitudenkonvention.}
+Die Gewichte $r$ der Simulation sind \emph{Intensitäts}gewichte, also
+HF-\emph{Leistungs}verhältnisse. In Gl.~\eqref{eq:rf} stehen Spannungen,
+folglich $a_n \propto \sqrt{r}$.
+
+\section{Die Kopplung: eine Phase, zwei Wirkungen}
+
+Der AOD überträgt Frequenz \emph{und} Phase des akustischen Gitters auf das
+gebeugte Licht. Die $\varphi_n$ aus Gl.~\eqref{eq:rf} sind deshalb dieselben
+Größen, die im optischen Feld die Interferenz bestimmen. Ein Spot wird je
+einmal in $x$ und in $y$ gebeugt, sein Feld trägt also das Produkt beider
+Spannungen und die Summe beider Phasen,
+\begin{equation}
+  E_{nm} \;\propto\; V_x(n)\,V_y(m),
+  \qquad
+  \varphi_{nm} \;=\; \varphi_x(n) + \varphi_y(m).
+  \label{eq:spotphase}
+\end{equation}
+Hierin liegt der gesamte Zusammenhang: \emph{ein} Satz Zahlen legt
+gleichzeitig das Interferenzmuster am Atom und die Kurvenform am Verstärker
+fest. Beide lassen sich nicht unabhängig voneinander einstellen.
+
+Wichtig für die Einordnung: Der Crestfaktor ist kein Term der Feldrechnung.
+Diese setzt voraus, dass jeder Ton genau seine Amplitude erhält, dass die
+Beugung linear ist und dass keine Intermodulation auftritt. Der Crestfaktor
+prüft, ob diese Voraussetzung in der realen Kette Bestand hat. Er ist eine
+Gültigkeitsbedingung, keine Zutat zum Modell.
+
+\section{Warum daraus eine Nebenbedingung wird}
+
+Der Ausgangspunkt ist die Definition Gl.~\eqref{eq:crestdef}, nach Spitzen-
+und Effektivwert aufgelöst,
+\begin{equation}
+  V_\mathrm{peak} \;=\; \crest \cdot V_\mathrm{rms} .
+  \label{eq:peakrms}
+\end{equation}
+Ist der Verstärker durch seine \emph{Spitzenspannung} begrenzt -- er geht in
+Kompression bzw.\ Begrenzung, nicht in thermische Sättigung --, so lautet die
+Hardwarebedingung $V_\mathrm{peak}\le V_{\max}$, nach
+Gl.~\eqref{eq:peakrms} also $V_\mathrm{rms}\le V_{\max}/\crest$. Die an einer
+reellen Last $R$ umgesetzte \emph{mittlere} Leistung ist
+$P_\mathrm{mittel}=V_\mathrm{rms}^2/R$, und damit
+\begin{equation}
+  P_\mathrm{mittel} \;=\; \frac{V_\mathrm{rms}^{2}}{R}
+  \;\le\; \frac{V_{\max}^2}{R\,\crest^{2}} .
+  \label{eq:powerbudget}
+\end{equation}
+Mehr als die Definition des Crestfaktors und $P=V_\mathrm{rms}^2/R$ steckt
+nicht darin. Gleichwertig in Leistungen ausgedrückt: Die
+Spitzenhüllkurvenleistung ist $P_\mathrm{peak}=\crest^{2}P_\mathrm{mittel}$,
+und verträgt die Kette $P_\mathrm{peak}\le P_\mathrm{sat}$, so folgt
+$P_\mathrm{mittel}\le P_\mathrm{sat}/\crest^{2}$. Die Systemimpedanz $R$
+kürzt sich aus jedem Vergleich zweier Phasensätze heraus; nur das Verhältnis
+$1/\crest^{2}$ bleibt stehen.
+
+Die Annahme dahinter ist eine \emph{harte} Spannungsgrenze mit linearem
+Verhalten bis dorthin. Reale Verstärker komprimieren allmählich, und der
+angegebene $\SI{1}{\deci\bel}$-Kompressionspunkt bezieht sich üblicherweise
+auf einen Einzelton im Dauerstrich; für ein Mehrtonsignal ist die
+Spitzenhüllkurvenleistung die maßgebliche Größe. Gl.~\eqref{eq:powerbudget}
+ist damit eine obere Abschätzung, kein Ersatz für eine gemessene
+Kompressionskurve.
+Die gebeugte optische Leistung folgt im linearen Bereich der mittleren
+HF-Leistung, und nach Gl.~\eqref{eq:spotphase} wird jeder Spot zweimal
+gebeugt. Für die Spotintensität gilt daher
+\begin{equation}
+  I \;\propto\; P_x\,P_y \;\propto\; \frac{1}{\crest_x^{2}\,\crest_y^{2}} .
+  \label{eq:intensity}
+\end{equation}
+Ein hoher Crestfaktor kostet also Licht, ohne dass die Simulation davon etwas
+merkt. Wird die Grenze überschritten, treten zusätzlich
+Intermodulationsprodukte auf: neue Frequenzen bei Summen und Differenzen der
+Töne, also Geisterspots, und die Amplitudenverhältnisse verschieben sich --
+das eingestellte Profil ist dann nicht mehr das gerechnete.
+
+\section{Der Zielkonflikt}
+
+Die für das Atom maßgebliche Größe ist die Gleichmäßigkeit der
+aufgesammelten Pulsfläche über die Aufenthaltsverteilung $W(r)$ des Atoms,
+\begin{equation}
+  \Uw \;=\; \frac{\sigma_W(\theta)}{\langle\theta\rangle_W},
+  \qquad
+  \theta(r) \;=\; \int_{t_0}^{t_0+T_p} \Omega(r,t)\,\mathrm{d}t .
+  \label{eq:uw}
+\end{equation}
+Ein seitlich versetzter Interferenzfleck erzeugt einen linearen Gradienten
+quer durch die Atomwolke; ein Gradient ist genau das, was $\Uw$ misst.
+„Gleichmäßig beleuchtet`` und „mittig auf dem Atom`` sind damit dieselbe
+Bedingung.
+
+Der Konflikt entsteht dadurch, dass der Zeitpunkt, zu dem der Fleck sauber,
+symmetrisch und mittig steht, derselbe ist, zu dem die Töne rephasieren --
+und Rephasieren treibt den Crestfaktor nach Gl.~\eqref{eq:sqrt2n} an sein
+Maximum. Gleichmäßige Beleuchtung und schonende HF-Kette stehen also direkt
+gegeneinander. Die Crest-Schranke ist der Punkt, an dem man sich auf dieser
+Kurve platziert.
+
+\section{Das Zentrierungskriterium}\label{sec:zentrierung}
+
+\subsection{Warum „alles ist symmetrisch`` nicht genügt}
+
+Der Aufbau ist in mehrfacher Hinsicht spiegelsymmetrisch. Legt man den
+Ursprung in den Profilmittelpunkt und schreibt für die Spiegelung der Indizes
+\begin{equation}
+  \bar n \;\equiv\; N-1-n , \qquad \bar m \;\equiv\; M-1-m ,
+  \label{eq:barindex}
+\end{equation}
+so gelten drei voneinander unabhängige Aussagen:
+\begin{align}
+  \text{Positionen:}&&  c_{\bar n\bar m} &= -\,c_{nm} , \label{eq:symgeo}\\
+  \text{Amplituden:}&&  A_{\bar n} &= A_n , \qquad B_{\bar m} = B_m
+     \qquad\text{(Muster } [r,1,\dots,1,r]\text{)} , \label{eq:symamp}\\
+  \text{Frequenzen:}&&  f_{\bar n} &= F - f_n , \qquad g_{\bar m} = G - g_m .
+     \label{eq:symfreq}
+\end{align}
+
+\paragraph{Nachweis von Gl.~\eqref{eq:symfreq}.}
+Aus $f_n = f_\mathrm{off}+\Delta f\,\dfrac{n}{N-1}$ folgt
+\begin{equation}
+  f_{\bar n} \;=\; f_\mathrm{off}+\Delta f\,\frac{N-1-n}{N-1}
+             \;=\; f_\mathrm{off}+\Delta f-\Delta f\,\frac{n}{N-1} ,
+\end{equation}
+und damit für die Summe
+\begin{equation}
+  f_n + f_{\bar n}
+  \;=\; \Bigl(f_\mathrm{off}+\Delta f\,\tfrac{n}{N-1}\Bigr)
+      + \Bigl(f_\mathrm{off}+\Delta f-\Delta f\,\tfrac{n}{N-1}\Bigr)
+  \;=\; 2f_\mathrm{off}+\Delta f .
+  \label{eq:sumproof}
+\end{equation}
+Der Index $n$ fällt heraus, die Summe ist also für \emph{jedes} Spiegelpaar
+dieselbe. Ihr Wert ist zugleich der des äußersten Paares,
+\begin{equation}
+  F \;\equiv\; f_0 + f_{N-1}
+    \;=\; f_\mathrm{off} + \bigl(f_\mathrm{off}+\Delta f\bigr)
+    \;=\; 2f_\mathrm{off}+\Delta f ,
+\end{equation}
+womit $f_{\bar n}=F-f_n$ gezeigt ist; $G$ für die $y$-Achse analog. Am
+Arbeitspunkt ($f_\mathrm{off}=\SI{100}{\mega\hertz}$,
+$\Delta f=\SI{0.37}{\mega\hertz}$) ist
+$F=G=\SI{200.37}{\mega\hertz}$, auf beiden Achsen und für jedes Paar
+numerisch bestätigt.
+
+Wichtig ist, was Gl.~\eqref{eq:symfreq} \emph{nicht} sagt: $F$ ist keine
+Frequenz des Signals, sondern die doppelte Mittenfrequenz. Die Aussage lautet,
+dass die Töne \emph{paarweise symmetrisch um die Bandmitte} $F/2$ liegen -- der
+Spiegelpartner ist genauso weit oberhalb der Mitte, wie der Ton unterhalb
+liegt.
+
+Der springende Punkt ist Gl.~\eqref{eq:symfreq}: Die Frequenz spiegelt
+\emph{um die Mittenfrequenz}, sie kippt also relativ dazu ihr Vorzeichen. Der
+Zeitfaktor $e^{\,\mathrm{i}2\pi f_n t}$ geht dabei in
+$e^{\,\mathrm{i}2\pi F t}\,e^{-\mathrm{i}2\pi f_n t}$ über, also bis auf einen
+gemeinsamen Faktor in sein \emph{Konjugiertes}. Die geometrische Spiegelung
+ist damit keine gewöhnliche Spiegelung, sondern eine \textbf{konjugierende}
+Operation. Genau deshalb reicht es nicht, dass „alles symmetrisch`` ist: Die
+Phasen müssen die Konjugation \emph{mitmachen}, sonst laufen die
+gespiegelten Anteile gegeneinander.
+
+\subsection{Herleitung}
+
+Der Ursprung liege im Profilmittelpunkt. Das Feld ist
+\begin{equation}
+  E(r,t) \;=\; \sum_{n=0}^{N-1}\sum_{m=0}^{M-1} A_n B_m\, u(r-c_{nm})\,
+  e^{\,\mathrm{i}\left[2\pi (f_n+g_m)t \,+\, \varphi_n+\psi_m\right]},
+  \label{eq:field}
+\end{equation}
+mit reellem, radialsymmetrischem Einzelspotprofil $u$, also $u(-\rho)=u(\rho)$.
+Die Indexspiegelung $\bar n$, $\bar m$ ist in Gl.~\eqref{eq:barindex} definiert.
+
+\paragraph{Schritt 1: Ort spiegeln.}
+Einsetzen von $-r$ in Gl.~\eqref{eq:field} ändert nur das Argument von $u$:
+\begin{equation}
+  E(-r,t) \;=\; \sum_{n,m} A_n B_m\, u(-r-c_{nm})\,
+  e^{\,\mathrm{i}\left[2\pi (f_n+g_m)t + \varphi_n+\psi_m\right]}.
+  \label{eq:step1}
+\end{equation}
+
+\paragraph{Schritt 2: Summationsindizes umbenennen.}
+Dies ist ein reiner Variablenwechsel, noch ohne Physik. Da
+$n\mapsto\bar n$ eine Bijektion von $\{0,\dots,N-1\}$ auf sich ist, darf in
+Gl.~\eqref{eq:step1} $n$ durch $\bar p$ und $m$ durch $\bar q$ ersetzt werden;
+$p$ und $q$ durchlaufen dann denselben Bereich:
+\begin{equation}
+  E(-r,t) \;=\; \sum_{p,q} A_{\bar p} B_{\bar q}\, u(-r-c_{\bar p\bar q})\,
+  e^{\,\mathrm{i}\left[2\pi (f_{\bar p}+g_{\bar q})t
+  + \varphi_{\bar p}+\psi_{\bar q}\right]}.
+  \label{eq:step2}
+\end{equation}
+Jetzt tragen \emph{alle} Faktoren gespiegelte Indizes -- das ist der Punkt, an
+dem die Symmetrien angesetzt werden können.
+
+\paragraph{Schritt 3: die drei Symmetrien einsetzen.}
+Auf Gl.~\eqref{eq:step2} angewandt, jeweils mit dem laufenden Index $p$
+bzw.\ $q$:
+\begin{align}
+  A_{\bar p} B_{\bar q} &= A_p B_q
+  && \text{nach Gl.~\eqref{eq:symamp},}\\[2pt]
+  u(-r-c_{\bar p\bar q}) &= u(-r+c_{pq}) = u\bigl(-(r-c_{pq})\bigr) = u(r-c_{pq})
+  && \text{nach Gl.~\eqref{eq:symgeo} und } u(-\rho)=u(\rho),\\[2pt]
+  f_{\bar p}+g_{\bar q} &= (F+G) - (f_p+g_q)
+  && \text{nach Gl.~\eqref{eq:symfreq}.}
+\end{align}
+Die Phasen bleiben dabei unberührt -- über sie ist noch nichts vorausgesetzt,
+sie behalten ihre gespiegelten Indizes. Damit wird aus Gl.~\eqref{eq:step2}
+\begin{equation}
+  E(-r,t) \;=\; e^{\,\mathrm{i}2\pi (F+G) t}
+  \sum_{p,q} A_p B_q\, u(r-c_{pq})\,
+  e^{-\mathrm{i}2\pi (f_p+g_q)t}\,
+  e^{\,\mathrm{i}\left(\varphi_{\bar p}+\psi_{\bar q}\right)} .
+  \label{eq:step3}
+\end{equation}
+Das Vorzeichen im Zeitfaktor ist gekippt: Der gespiegelte Spot läuft zeitlich
+rückwärts.
+
+\paragraph{Schritt 4: mit dem konjugierten Feld vergleichen.}
+Das konjugierte Feld am ursprünglichen Ort lautet, aus Gl.~\eqref{eq:field}
+durch komplexe Konjugation und mit demselben Summationsbuchstaben,
+\begin{equation}
+  E^{*}(r,t) \;=\; \sum_{p,q} A_p B_q\, u(r-c_{pq})\,
+  e^{-\mathrm{i}2\pi (f_p+g_q)t}\,
+  e^{-\mathrm{i}\left(\varphi_{p}+\psi_{q}\right)} .
+  \label{eq:step4}
+\end{equation}
+Gl.~\eqref{eq:step3} und Gl.~\eqref{eq:step4} haben dieselben Basisfunktionen
+$A_p B_q\,u(r-c_{pq})\,e^{-\mathrm{i}2\pi(f_p+g_q)t}$ und unterscheiden sich
+ausschließlich im konstanten Phasenfaktor jedes Terms. Sie sind daher
+proportional zueinander, sobald
+\begin{equation}
+  e^{\,\mathrm{i}\left(\varphi_{\bar p}+\psi_{\bar q}\right)}
+  \;=\; e^{\,\mathrm{i}\Theta}\,
+  e^{-\mathrm{i}\left(\varphi_{p}+\psi_{q}\right)}
+  \qquad\text{für alle } p,q
+\end{equation}
+mit einer einzigen, von $p$ und $q$ unabhängigen Konstanten $\Theta$, also
+\begin{equation}
+  \underbrace{\bigl(\varphi_p + \varphi_{N-1-p}\bigr)}_{\text{hängt nur von } p\text{ ab}}
+  \;+\;
+  \underbrace{\bigl(\psi_q + \psi_{M-1-q}\bigr)}_{\text{hängt nur von } q\text{ ab}}
+  \;=\; \Theta \pmod{2\pi}.
+  \label{eq:separates}
+\end{equation}
+Eine Summe aus einem reinen $p$- und einem reinen $q$-Term ist genau dann für
+alle Indexpaare konstant, wenn jeder Summand für sich konstant ist. Damit
+folgt das Kriterium, und zwar \emph{je Achse getrennt}:
+\begin{empheq}[box=\fbox]{equation}
+  \varphi_n + \varphi_{N-1-n} \;=\; c_x ,
+  \qquad
+  \psi_m + \psi_{M-1-m} \;=\; c_y ,
+  \qquad c_x + c_y = \Theta .
+  \label{eq:centering}
+\end{empheq}
+Ist es erfüllt, so ist nach Gl.~\eqref{eq:step3} und Gl.~\eqref{eq:step4}
+\begin{equation}
+  E(-r,t) \;=\; \underbrace{e^{\,\mathrm{i}\left[2\pi (F+G)t+\Theta\right]}}_{\textstyle e^{\,\mathrm{i}\alpha(t)}}\;E^{*}(r,t)
+  \quad\Longrightarrow\quad
+  I(-r,t) = I(r,t)
+  \quad\Longrightarrow\quad
+  \nabla\theta\big|_{r=0} = 0
+  \label{eq:nograd}
+\end{equation}
+zu \emph{jedem} Zeitpunkt. Der Vorfaktor hängt nur von $t$ ab, nicht vom Ort,
+und fällt beim Betragsquadrat heraus.
+
+Gl.~\eqref{eq:centering} ist hinreichend. Sie ist auch notwendig, solange die
+Basisfunktionen linear unabhängig sind -- was für getrennte Spotpositionen
+generisch der Fall ist; bei zusätzlichen Entartungen der Anordnung wären
+weitere Lösungen denkbar.
+
+\paragraph{Numerische Kontrolle.}
+Geprüft wurde nicht nur die Folgerung, sondern Gl.~\eqref{eq:nograd} selbst.
+Bei festem $t$ und über verschiedene Orte $r$ muss der Quotient
+$E(-r,t)/E^{*}(r,t)$ betragsmäßig eins und in der Phase ortsunabhängig sein:
+
+\begin{center}
+\begin{tabular}{lcc}
+  \toprule
+  Phasensatz & $\bigl|E(-r,t)/E^{*}(r,t)\bigr|$ & Streuung von $\arg$ über $r$\\
+  \midrule
+  konjugiert, $c_x=c_y=90^\circ$ & $1{,}000000$ & $2{,}7\cdot10^{-6}\,\mathrm{rad}$\\
+  gewählter Arbeitspunkt         & $1{,}000000$ & $2{,}5\cdot10^{-7}\,\mathrm{rad}$\\
+  nur gespiegelt                 & $0{,}91 \pm 0{,}55$ & $7{,}5\,\mathrm{rad}$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+Ebenso bestätigt sind die drei Voraussetzungen am Arbeitspunkt:
+$x_n+x_{N-1-n}=0$ und $y_m+y_{M-1-m}=0$ bis auf
+\SI{5e-8}{\micro\meter} Gitterauflösung, $A_n=[0{,}985;\,1;\,0{,}985]$ und
+$B_m=[1{,}077;\,1;\,1;\,1{,}077]$ symmetrisch, sowie
+$f_n+f_{N-1-n} = g_m+g_{M-1-m} = \SI{200.37}{\mega\hertz}$ konstant.
+
+\subsection{Der entscheidende Unterschied: konjugiert, nicht gespiegelt}
+
+\paragraph{Die beiden Begriffe.}
+Für ein Spiegelpaar $(n,\bar n)$ stehen zwei Bedingungen zur Wahl:
+\begin{align}
+  \text{\emph{gespiegelt}:}&&  \varphi_{\bar n} &= \varphi_n
+  &&\Longleftrightarrow&& e^{\,\mathrm{i}\varphi_{\bar n}} &= e^{\,\mathrm{i}\varphi_{n}} ,\\
+  \text{\emph{konjugiert}:}&&  \varphi_{\bar n} &= c - \varphi_n
+  &&\Longleftrightarrow&& e^{\,\mathrm{i}\varphi_{\bar n}} &= e^{\,\mathrm{i}c}\bigl(e^{\,\mathrm{i}\varphi_{n}}\bigr)^{*} .
+\end{align}
+Komplexe Konjugation spiegelt einen Zeiger in der Zahlenebene an der reellen
+Achse, $\varphi\rightarrow-\varphi$; der Faktor $e^{\mathrm{i}c}$ dreht diese
+Spiegelachse auf den Winkel $c/2$. Schreibt man
+$\varphi_n = c/2 + \chi_n$, so lautet die Bedingung schlicht
+\begin{equation}
+  \chi_{\bar n} \;=\; -\,\chi_n ,
+\end{equation}
+die beiden Zeiger eines Spiegelpaares stehen also \emph{gleich weit vom
+Mittenwinkel $c/2$ entfernt, nur nach entgegengesetzten Seiten}. Kurz:
+\begin{center}
+\begin{tabular}{@{}p{0.20\textwidth}p{0.72\textwidth}@{}}
+  \toprule
+  \textbf{gespiegelt} & gleicher Winkel\\
+  \textbf{konjugiert} & gleicher \emph{Abstand} zu einem Bezugswinkel,
+  entgegengesetztes Vorzeichen\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+Am gewählten Arbeitspunkt sieht das so aus:
+\begin{align}
+  \varphi_y &= [\,0;\;98;\;16;\;114\,]^\circ,
+  & c_y &= 114^\circ,
+  & c_y/2 &= 57^\circ, \nonumber\\
+  \chi_y    &= [\,-57;\;+41;\;-41;\;+57\,]^\circ
+  &&&& \text{antisymmetrisch.}
+\end{align}
+Gespiegelt ist dieser Satz gerade \emph{nicht} ($0^\circ \neq 114^\circ$).
+Auf der $x$-Achse ist $\varphi_x=[\,0;\;12{,}5;\;25\,]^\circ$ mit
+$c_x/2 = 12{,}5^\circ$ und $\chi_x=[\,-12{,}5;\;0;\;+12{,}5\,]^\circ$ -- bei
+ungeradem $N$ sitzt der mittlere Ton notwendig auf dem Mittenwinkel, er ist
+sein eigener Spiegelpartner.
+
+\paragraph{Warum gerade die Konjugation.}
+Der Grund steckt in Gl.~\eqref{eq:symfreq}. Die Frequenzspiegelung bedeutet
+\begin{equation}
+  e^{\,\mathrm{i}2\pi f_{\bar n}t}
+  \;=\; e^{\,\mathrm{i}2\pi F t}\,\bigl(e^{\,\mathrm{i}2\pi f_{n}t}\bigr)^{*} ,
+\end{equation}
+die \emph{dynamische} Phase des Spiegelpartners konjugiert sich also von
+selbst. Damit der gesamte Partnerterm das Konjugierte des Originals wird --
+und nur dann kommt $|E(-r,t)|=|E(r,t)|$ heraus --, muss die \emph{statische}
+Phase dasselbe tun. Genau das fordert Gl.~\eqref{eq:centering}.
+
+\paragraph{Der Sonderfall, der beides erfüllt.}
+Eine reelle Zahl ist gleich ihrem Konjugierten. Für
+$\varphi\in\{0,\pi\}$ fallen beide Bedingungen deshalb zusammen -- daher die
+Verwechslungsgefahr. Die naheliegende Vermutung, dass allgemein
+\emph{spiegelsymmetrische} Phasen $\varphi_{\bar n} = \varphi_n$ genügen, ist
+falsch, und der Unterschied ist messbar. Tabelle~\ref{tab:mirror} stellt beides gegenüber.
+
+\begin{table}[htb]
+  \centering
+  \caption{Maximaler Schwerpunktversatz des Interferenzflecks über eine volle
+  Grundperiode, $\sigma = \SI{108}{\nano\meter}$.}
+  \label{tab:mirror}
+  \begin{tabular}{llc}
+    \toprule
+    Phasensatz (Grad) & Eigenschaft & max.\ Versatz\\
+    \midrule
+    $\varphi_x=[0,90,0]$, $\varphi_y=[0,90,90,0]$      & gespiegelt             & \SI{43.65}{\nano\meter}\\
+    $\varphi_x=[0,120,0]$, $\varphi_y=[0,50,50,0]$     & gespiegelt             & \SI{83.95}{\nano\meter}\\
+    $\varphi_x=[0,45,90]$, $\varphi_y=[0,30,60,90]$    & konjugiert ($c=90$)    & \SI{0.00}{\nano\meter}\\
+    $\varphi_x=[0,60,120]$, $\varphi_y=[0,140,-40,100]$& konjugiert ($120/100$) & \SI{0.00}{\nano\meter}\\
+    $\varphi_x=[0,180,0]$, $\varphi_y=[0,180,180,0]$   & beides (reelle Zeiger) & \SI{0.00}{\nano\meter}\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Der letzte Fall erklärt, warum die Verwechslung naheliegt: Für
+$\varphi\in\{0,\pi\}$ ist der Zeiger reell, Spiegelung und Konjugation fallen
+zusammen, und beide Bedingungen sind gleichzeitig erfüllt. Sobald eine Phase
+einen anderen Wert annimmt, trennen sich die Begriffe.
+
+\paragraph{Anschaulich, am Spotpaar.}
+Die Intensität ist die Summe der Kreuzterme aller Spotpaare,
+\begin{equation}
+  2\,A_s A_{s'}\, u(r-c_s)\,u(r-c_{s'})\,
+  \cos\!\bigl(2\pi \Delta f\, t + \Delta\varphi\bigr),
+  \qquad
+  \Delta f = f_s - f_{s'},\;\; \Delta\varphi = \varphi_s-\varphi_{s'} .
+\end{equation}
+Der Ortsanteil ist um den Mittelpunkt $(c_s+c_{s'})/2$ zentriert, also im
+Allgemeinen \emph{nicht} um den Ursprung. Er wird erst dadurch ausgeglichen,
+dass es das gespiegelte Paar $(\bar s,\bar s')$ gibt, dessen Ortsanteil das
+Spiegelbild ist. Die beiden Lappen heben sich aber nur dann gegenseitig zu
+einem symmetrischen Muster auf, wenn sie \emph{im Gleichtakt} atmen. Für das
+gespiegelte Paar ist $\Delta f \rightarrow -\Delta f$, und
+\begin{itemize}\itemsep0.2em
+  \item mit Gl.~\eqref{eq:centering}: $\Delta\varphi\rightarrow-\Delta\varphi$,
+        also $\cos(-2\pi\Delta f t-\Delta\varphi)=\cos(2\pi\Delta f t+\Delta\varphi)$
+        -- \textbf{identischer} Zeitverlauf, die Lappen steigen und fallen
+        gemeinsam;
+  \item bei bloßer Spiegelung: $\Delta\varphi\rightarrow+\Delta\varphi$, also
+        $\cos(2\pi\Delta f t-\Delta\varphi)\neq\cos(2\pi\Delta f t+\Delta\varphi)$
+        -- die beiden Lappen laufen \emph{gegeneinander}, und das Muster
+        schwappt seitlich hin und her.
+\end{itemize}
+Nur für $\Delta\varphi\in\{0,\pi\}$ stimmen beide überein -- wieder der
+Sonderfall reeller Zeiger.
+
+\subsection{Struktur der Familie}
+
+Mit $\varphi_n = c_x/2 + \chi_n$ geht Gl.~\eqref{eq:centering} über in
+\begin{equation}
+  \chi_n \;=\; -\,\chi_{N-1-n},
+  \label{eq:antisym}
+\end{equation}
+die Phasen sind also eine globale Phase plus einen \emph{antisymmetrischen}
+Anteil. Jeder Ton ist damit genauso weit von der Mittenphase $c_x/2$ entfernt
+wie sein Spiegelpartner, nur in die andere Richtung -- das Gegenstück zur
+Frequenzspiegelung aus Gl.~\eqref{eq:symfreq}. Die antisymmetrischen Vektoren
+im $\mathbb{R}^N$ bilden einen Unterraum der Dimension $\lfloor N/2\rfloor$;
+nach Abzug der global irrelevanten Phase bleiben
+\begin{equation}
+  \dim(\text{Familie}) = \Bigl\lfloor \tfrac{N}{2} \Bigr\rfloor
+  \quad\text{statt}\quad
+  N-1 .
+\end{equation}
+\textbf{Das Kriterium halbiert die Phasenfreiheit.} Bei ungeradem $N$
+scheint eine diskrete Wahl hinzuzukommen, weil
+$\chi_{(N-1)/2}=-\chi_{(N-1)/2}$ modulo $2\pi$ die beiden Lösungen $0$ und
+$\pi$ zulässt. Sie ist jedoch keine zusätzliche Dimension: Verschiebt man die
+Rampensteigung um $2\pi/(N-1)$, so bleibt $c$ modulo $2\pi$ unverändert,
+während sich die mittlere Phase um genau $\pi$ ändert. Die beiden Lösungen
+liegen also bereits auf demselben stetigen Ast
+(Abschnitt~\ref{sec:crestback}).
+
+Numerisch geprüft: zwölf zufällige Sätze aus dieser Familie ergeben über die
+gesamte Grundperiode einen Schwerpunktversatz unter
+$1{,}2\cdot10^{-4}\,\mathrm{nm}$; wird Gl.~\eqref{eq:centering} auf nur einer
+Achse verletzt, sind es \SIrange{16}{74}{\nano\meter}.
+
+\subsection{Der mittlere Ton ist sein eigener Spiegelpartner}
+\label{sec:selfpair}
+
+Gegen Gl.~\eqref{eq:centering} lässt sich ein naheliegender Einwand
+erheben, und er ist wichtig genug für einen eigenen Abschnitt:
+
+\begin{center}
+\emph{„Der mittlere Ton hat doch gar keinen Partner -- also gibt es für
+seine Phase auch keine Bedingung.``}
+\end{center}
+
+\noindent Der Einwand ist falsch, aber aus einem Grund, den man leicht
+übersieht. Die Spiegelung wirkt auf den \emph{Indizes}:
+\begin{equation}
+  n \;\longmapsto\; \bar n = N-1-n .
+\end{equation}
+Das ist eine Involution ($\bar{\bar n} = n$) auf der Menge
+$\{0,\dots,N-1\}$, und Involutionen haben nicht nur Paare, sondern
+möglicherweise auch \emph{Fixpunkte}:
+
+\begin{center}
+\begin{tabular}{cll}
+  \toprule
+  $N$ & Zuordnung $n\mapsto\bar n$ & Fixpunkt\\
+  \midrule
+  3 & $0\!\leftrightarrow\!2$, \; $1\!\mapsto\!1$ & $n=1$\\
+  4 & $0\!\leftrightarrow\!3$, \; $1\!\leftrightarrow\!2$ & keiner\\
+  5 & $0\!\leftrightarrow\!4$, \; $1\!\leftrightarrow\!3$, \; $2\!\mapsto\!2$ & $n=2$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Ein Fixpunkt ist \emph{kein partnerloses} Element -- er ist ein
+Element, das mit \emph{sich selbst} gepaart ist. Und Gl.~\eqref{eq:centering}
+verlangt die Bedingung für \emph{jedes} $n$, den Fixpunkt eingeschlossen.
+Dort liest sie sich
+\begin{equation}
+  \varphi_{\bar n} + \varphi_n \;=\; \varphi_n + \varphi_n \;=\; 2\varphi_n \;=\; c
+  \qquad\text{für } n = \tfrac{N-1}{2} ,
+\end{equation}
+und damit ist die mittlere Phase festgelegt:
+\begin{empheq}[box=\fbox]{equation}
+  \varphi_{(N-1)/2} = \frac{c}{2} \quad\text{oder}\quad \frac{c}{2}+\pi
+  \qquad (N \text{ ungerade}).
+  \label{eq:midphase}
+\end{empheq}
+Die zwei Lösungen kommen daher, dass Gl.~\eqref{eq:centering} modulo $2\pi$
+gilt; $2\varphi = c$ hat dann eben zwei Wurzeln. Beide gehören zur Familie --
+und sie sind nicht so getrennt, wie sie aussehen: Bei festem $c$ liegen sie
+$\pi$ auseinander, aber $c$ selbst ist ein Parameter, und ein Weg durch die
+Familie führt stetig von der einen Wurzel zur anderen
+(Abschnitt~\ref{sec:crestback}).
+
+\paragraph{Warum die Bedingung nicht entfallen kann.}
+Der Kern des Einwands ist die stillschweigende Annahme, jedes Paar dürfe
+seine eigene Konstante haben. Genau das ist nicht der Fall. Zurück zum
+Ursprung: Verlangt war
+\begin{equation}
+  E(-\mathbf{r},t) = e^{\mathrm{i}\alpha(t)}\,E^{*}(\mathbf{r},t) ,
+\end{equation}
+mit \emph{einem einzigen} Faktor $e^{\mathrm{i}\alpha(t)}$ für das
+\emph{ganze} Feld. In der Herleitung wird der Beitrag des Spots $s$ auf der
+linken Seite gegen den Beitrag des Spiegelspots $\bar s$ auf der rechten
+gehalten; daraus wird $\varphi_s + \varphi_{\bar s} = c$. Der Wert $c$ ist
+dabei nichts anderes als $\alpha$ -- und $\alpha$ ist für alle Spots
+dasselbe, sonst addierten sich die Beiträge gar nicht erst zu einem
+konjugierten Feld.
+
+Der mittlere Ton sitzt bei der Mittenfrequenz $\bar f = F/2$, sein Spot also
+genau im Spiegelzentrum. Unter der Spiegelung geht er in sich selbst über,
+und seine Bedingung lautet daher nicht „keine``, sondern „mit sich selbst``:
+Sein Beitrag muss gleich seinem eigenen Konjugierten mal demselben
+$e^{\mathrm{i}\alpha}$ sein. Das ist eine Gleichung, und sie bindet
+$\varphi_{(N-1)/2}$ an dasselbe $c$ wie alle anderen. \emph{Hätte} jedes Paar
+seine eigene Konstante, wäre der mittlere Ton tatsächlich frei -- dann wäre
+aber auch die Symmetrie des Feldes dahin.
+
+\paragraph{Gegenprobe am Rechner.}
+Das lässt sich unmittelbar prüfen. Ist das Kriterium erfüllt, so ist der
+Intensitätsgradient am Atomort zu \emph{jedem} Zeitpunkt null
+(Gl.~\eqref{eq:nograd}). Mit $\varphi_x = (0,\psi,0)$ ist $c = 0$, das
+Kriterium verlangt also $\psi = 0$ oder $180^\circ$. Die $y$-Phasen bleiben
+dabei unverändert auf $(0;98;16;114)$, erfüllen ihr eigenes Kriterium
+($0+114 = 98+16$) und werden nicht angetastet:
+
+\begin{table}[htb]
+  \centering
+  \caption{Größter Intensitätsgradient am Atomort über eine volle
+  Grundperiode, normiert auf die mittlere Intensität. Die Werte bei
+  $\psi = 0$ und $180^\circ$ sind das Rauschen der numerischen Ableitung.}
+  \label{tab:midphase}
+  \begin{tabular}{crrl}
+    \toprule
+    $\psi$ & $\max_t|\partial_x I|/I$ & $\max_t|\partial_y I|/I$ & \\
+    \midrule
+    $0^\circ$   & $4\cdot10^{-10}$ & $4\cdot10^{-10}$ & Kriterium erfüllt\\
+    $10^\circ$  & $8{,}8\cdot10^{-4}$ & $2{,}6\cdot10^{-4}$ & \\
+    $30^\circ$  & $2{,}5\cdot10^{-3}$ & $7{,}4\cdot10^{-4}$ & \\
+    $60^\circ$  & $4{,}4\cdot10^{-3}$ & $1{,}3\cdot10^{-3}$ & \\
+    $90^\circ$  & $5{,}1\cdot10^{-3}$ & $1{,}5\cdot10^{-3}$ & \\
+    $150^\circ$ & $2{,}5\cdot10^{-3}$ & $7{,}4\cdot10^{-4}$ & \\
+    $180^\circ$ & $4\cdot10^{-10}$ & $4\cdot10^{-10}$ & Kriterium erfüllt\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\noindent Der Gradient verschwindet exakt bei den beiden von
+Gl.~\eqref{eq:midphase} vorhergesagten Werten und bei keinem anderen. Mit
+$c = 60^\circ$ statt $0$, also $\varphi_x = (0,\psi,60^\circ)$, wandern die
+Nullstellen mit auf $\psi = 30^\circ$ und $210^\circ$ -- genau $c/2$ und
+$c/2+\pi$. Von „keiner Bedingung`` kann also keine Rede sein; es ist eine
+Bedingung mit zwei Lösungen.
+
+\paragraph{Nebenbefund: die Achsen sind nicht unabhängig.}
+Auffällig an Tabelle~\ref{tab:midphase} ist die dritte Spalte. Verletzt wird
+das Kriterium nur in $x$ -- die $y$-Phasen bleiben unverändert --, und
+trotzdem kippt auch der $y$-Gradient. Der Grund ist die Einhüllende: Mit
+einem Gaußprofil faktorisiert das Feld in $X(x,t)\,Y(y,t)$, und dann bleibt
+$\partial_y I|_0 = 0$ tatsächlich erhalten (nachgerechnet: $3\cdot10^{-10}$
+in allen Zeilen). Die reale Airy-Einhüllende ist \emph{radial} und damit
+nicht separabel; sie koppelt die Achsen. Das Kriterium muss deshalb auf
+\emph{beiden} Achsen gelten -- eine Verletzung in $x$ lässt sich nicht durch
+die $y$-Phasen heilen.
+
+\paragraph{Und was bei geradem \boldmath$N$ anders ist.}
+Für gerades $N$ gibt es keinen Fixpunkt: Jeder Index hat einen von ihm
+verschiedenen Partner, und keine einzelne Phase wird gebunden. Das ist der
+strukturelle Grund für den Unterschied, der sich durch den ganzen Text zieht
+-- bei $N_x = 3$ ist die mittlere Phase durch Gl.~\eqref{eq:midphase}
+vergeben und der Crestfaktor damit festgenagelt
+(Abschnitt~\ref{sec:psi}), während bei $N_y = 4$ ein freier Parameter bleibt,
+mit dem sich $\crest_y$ von $2{,}83$ auf $2{,}20$ drücken lässt.
+
+\subsection{Was die Symmetrie leistet}
+
+Entwickelt man die Pulsfläche um den Atomort,
+\begin{equation}
+  \theta(r) \;\approx\; \theta(0) \;+\; \nabla\theta\big|_0\cdot r
+  \;+\; \tfrac{1}{2}\,r^{\mathsf{T}} H\, r ,
+  \label{eq:taylor}
+\end{equation}
+so liefert der lineare Term über eine Wolke der Breite $\sigma$ den Beitrag
+$\Uw \approx |\nabla\theta|\,\sigma/\theta(0)$, der quadratische erst einen
+Beitrag der Ordnung $\sigma^{2}$. Gl.~\eqref{eq:nograd} eliminiert den
+linearen Term \emph{exakt und zu allen Zeiten}. Die Symmetrie beseitigt damit
+genau den dominanten Beitrag zur Inhomogenität -- sie ist das eigentliche
+Werkzeug, nicht ein Nebenaspekt.
+
+Das lässt sich direkt nachweisen, indem man $\Uw$ als Funktion der Atomgröße
+aufträgt: Ein linearer Gradient ergibt $\Uw\propto\sigma$, reine Krümmung
+$\Uw\propto\sigma^{2}$.
+
+\begin{table}[htb]
+  \centering
+  \caption{$\Uw$ gegen die Atomgröße. Der symmetrische Satz zeigt reine
+  Krümmungsskalierung, der unsymmetrische Gradientenskalierung.}
+  \label{tab:scaling}
+  \begin{tabular}{ccc}
+    \toprule
+    $\sigma$ [\si{\nano\meter}] & symmetrisch (gewählter Punkt) & Schroeder\\
+    \midrule
+     27 & \SI{0.0123}{\percent} & \SI{3.55}{\percent}\\
+     54 & \SI{0.0495}{\percent} & \SI{9.14}{\percent}\\
+    108 & \SI{0.2063}{\percent} & \SI{17.92}{\percent}\\
+    216 & \SI{1.0073}{\percent} & \SI{32.98}{\percent}\\
+    \midrule
+    Exponent $p$ in $\Uw\propto\sigma^{p}$ & $\mathbf{2{,}11}$ & $\mathbf{1{,}06}$\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Der gemessene Exponent bestätigt Gl.~\eqref{eq:nograd} unmittelbar: $p=1{,}06$
+ohne Symmetrie, $p=2{,}11$ mit. Bei der tatsächlichen Atomgröße von
+\SI{108}{\nano\meter} entspricht das einem Faktor $87$ in der Homogenität.
+
+\subsection{Was die Symmetrie \emph{nicht} leistet: ein helles Zentrum}
+
+Gl.~\eqref{eq:nograd} sagt, dass der Atomort ein \emph{stationärer} Punkt von
+$\theta(r)$ ist -- nicht, dass er ein Maximum ist. Symmetrie schließt den
+linearen Gradienten aus, unterscheidet aber nicht zwischen Maximum, Minimum
+und Sattelpunkt. Tatsächlich durchläuft das Zentrum im Lauf einer
+Grundperiode alle drei Fälle, wie Tabelle~\ref{tab:hell} am gewählten
+Phasensatz zeigt.
+
+\begin{table}[htb]
+  \centering
+  \caption{Das Zentrum bleibt stationär, wechselt aber im Lauf der Periode
+  zwischen hell und dunkel. Ausgewählte Trigger-Zeitpunkte des gewählten
+  Phasensatzes.}
+  \label{tab:hell}
+  \begin{tabular}{cccl}
+    \toprule
+    $t_0$ [\si{\micro\second}] & $A(t_0)/\langle A\rangle$ & $\Uw$ [\si{\percent}] & Zentrum ist\\
+    \midrule
+    $1{,}622$  & $2{,}69$ & $1{,}30$  & Sattelpunkt\\
+    $9{,}730$  & $0{,}74$ & $0{,}62$  & Maximum\\
+    $12{,}973$ & $1{,}17$ & $0{,}26$  & Maximum\\
+    $6{,}486$  & $0{,}15$ & $48{,}99$ & \textbf{Minimum}\\
+    $14{,}595$ & $0{,}09$ & $42{,}38$ & \textbf{Minimum}\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Über die gesamte Periode schwankt $A(t_0)$ zwischen $0{,}067$ und
+$2{,}808\,\langle A\rangle$. Sitzt der Trigger auf einem Minimum, so ist der
+Gradient zwar weiterhin exakt null, das Atom bekommt aber kaum Licht, und
+$\Uw$ steigt auf knapp \SI{50}{\percent} -- nicht wegen eines Gradienten,
+sondern wegen der \emph{Krümmung}: An einem schmalen Minimum wächst $\theta$
+nach allen Seiten steil an, und über $\pm\sigma$ ist die Streuung
+entsprechend groß. An einem breiten Maximum ist die Krümmung klein und $\Uw$
+bleibt bei einigen Zehntelprozent. Im Mittel über die Periode beträgt $\Uw$
+bei $A\ge\langle A\rangle$ nur \SI{2.4}{\percent}, andernfalls
+\SI{11.1}{\percent}.
+
+Daraus ergibt sich die Arbeitsteilung zwischen den beiden Parametergruppen:
+\begin{center}
+\begin{tabular}{@{}p{0.22\textwidth}p{0.70\textwidth}@{}}
+  \toprule
+  \textbf{Tonphasen} & legen die Symmetrie fest, also kein Gradient -- und
+  das zu allen Zeiten\\
+  \textbf{Trigger $t_0$} & wählt aus, \emph{welcher} stationäre Punkt: helles
+  flaches Maximum statt dunkles Minimum\\
+  \bottomrule
+\end{tabular}
+\end{center}
+Deshalb führt die Optimierung die Nebenbedingung $A(t_0)\ge\langle A\rangle$
+mit: Sie schließt die dunklen Extrema aus, die die Symmetrie allein nicht
+verhindert.
+
+\subsection{Rückwirkung auf den Crestfaktor}\label{sec:crestback}
+
+Mit Gl.~\eqref{eq:crestsimple} lässt sich jetzt genau sagen, was die
+Zentrierungsbedingung der HF-Kette antut. Der Nenner ist ohnehin
+phasenunabhängig; zu klären ist allein, wie sich $\max_t|A|$ innerhalb der
+Familie verhält. Für die $x$-Achse des Arbeitspunkts, $N=3$, geht das in
+fünf Zeilen -- und das Ergebnis ist die zentrale Aussage dieses Abschnitts,
+deshalb steht es zuerst.
+
+\paragraph{\boldmath$N=3$: der Crestfaktor ist immer der schlechtestmögliche.}
+Die Einhüllende dreier Töne ist nach
+Gl.~\eqref{eq:envdef}, mit $\theta := 2\pi d\,t$ und den
+\emph{Spannungs}amplituden
+\begin{equation}
+  a_0 = a_2 = \varrho := \sqrt{r_x} , \qquad a_1 = 1
+  \qquad\text{(Konvention: } r_x \text{ ist ein \emph{Leistungs}verhältnis),}
+  \label{eq:rhodef}
+\end{equation}
+\begin{equation}
+  A(t) = \varrho\,e^{\mathrm{i}(\varphi_0-\theta)} + e^{\mathrm{i}\varphi_1}
+       + \varrho\,e^{\mathrm{i}(\varphi_2+\theta)} .
+\end{equation}
+Das Zentrierungskriterium verlangt $\varphi_0+\varphi_2 = c$ und
+$2\varphi_1 = c$ (Abschnitt~\ref{sec:selfpair}). Die erste Bedingung heißt,
+dass die beiden Außentöne symmetrisch um $c/2$ liegen; man schreibt sie als
+\begin{equation}
+  \varphi_0 = \tfrac{c}{2}-\chi , \qquad
+  \varphi_2 = \tfrac{c}{2}+\chi , \qquad
+  \varphi_1 = \tfrac{c}{2} \;\;\text{oder}\;\; \tfrac{c}{2}+\pi ,
+\end{equation}
+mit $\chi$ als einzigem weiteren Parameter. Einsetzen und $e^{\mathrm{i}c/2}$
+ausklammern:
+\begin{align}
+  A(t)\,e^{-\mathrm{i}c/2}
+  &= \varrho\,e^{-\mathrm{i}(\chi+\theta)} \;\pm\; 1 \;+\; \varrho\,e^{+\mathrm{i}(\chi+\theta)}\\
+  &= 2\varrho\cos(\theta+\chi) \;\pm\; 1 .
+  \label{eq:n3direct}
+\end{align}
+Das Vorzeichen unterscheidet die beiden Zweige für $\varphi_1$. Und jetzt
+steht alles da: $|A| = |\,2\varrho\cos(\theta+\chi)\pm1\,|$ hängt von $t$ nur noch
+über den \emph{reellen} Kosinus ab, und der durchläuft über eine volle
+Periode das ganze Intervall $[-1,1]$ -- unabhängig davon, was $\chi$ ist
+($\chi$ legt nur fest, \emph{wann}). Das Maximum ist damit eine
+Maximierung über $u := \cos(\theta+\chi) \in [-1,1]$:
+\begin{align}
+  \text{Zweig }+:&\quad \max_{u\in[-1,1]} |\,2\varrho\,u + 1\,| = |\,2\varrho+1\,| = 2\varrho+1
+    &&\text{bei } u=+1 ,\\
+  \text{Zweig }-:&\quad \max_{u\in[-1,1]} |\,2\varrho\,u - 1\,| = |\!-\!2\varrho-1\,| = 2\varrho+1
+    &&\text{bei } u=-1 .
+\end{align}
+Beide Zweige liefern denselben Wert; der Minus-Zweig erreicht ihn nur am
+anderen Ende des Intervalls. Mit $a_0=a_2=\varrho$ und $a_1=1$ ist
+$2\varrho+1 = a_0+a_1+a_2$, also
+\begin{equation}
+  \max_t |A| = 2\varrho+1 = \sum_n a_n
+  \qquad\text{für \emph{beide} Zweige und \emph{jedes} } \chi, c .
+\end{equation}
+Nach der Dreiecksungleichung ist $|A(t)|\le\sum_n a_n$ aber für
+\emph{jeden überhaupt möglichen} Phasensatz die obere Schranke. Die
+zentrierte Familie nimmt sie also stets an, und mit
+Gl.~\eqref{eq:crestsimple} folgt
+\begin{equation}
+  \crest_x = \sqrt2\,\frac{\sum_n a_n}{\sqrt{\sum_n a_n^2}} .
+  \label{eq:crestn3}
+\end{equation}
+
+\medskip
+\noindent\textbf{Woher die Zahlen kommen.} Der Parameter $r_x = 0{,}97$ des
+Arbeitspunkts ist ein \emph{Leistungs}verhältnis -- er gibt an, wie viel
+Beugungsleistung die Randtöne gegenüber den inneren bekommen. Die
+HF-\emph{Spannung} trägt davon die Wurzel (Abschnitt~\ref{sec:abgrenzung}),
+und in die Einhüllende gehen Spannungen ein:
+\begin{equation}
+  \varrho = \sqrt{r_x} = \sqrt{0{,}97} = 0{,}9848858 ,
+  \qquad a = [\,\varrho,\;1,\;\varrho\,] .
+\end{equation}
+Damit
+\begin{align}
+  \sum_n a_n &= 2\varrho+1 = 2{,}9697716 ,\\
+  \sum_n a_n^2 &= 2\varrho^2+1 = 2\,r_x + 1 = 2{,}94
+    \qquad\Longrightarrow\qquad
+  \sqrt{\textstyle\sum_n a_n^2} = 1{,}7146428 ,
+\end{align}
+und eingesetzt in Gl.~\eqref{eq:crestn3}
+\begin{equation}
+  \crest_x = \sqrt2\;\frac{2{,}9697716}{1{,}7146428} = 2{,}4494263 .
+\end{equation}
+Bemerkenswert ist die Quadratsumme: $\sum a_n^2 = 2r_x+1$ enthält das
+Leistungsverhältnis \emph{linear}, die Wurzel hebt sich weg -- der
+Effektivwert ist also direkt die Wurzel aus der Gesamtleistung, wie es sein
+muss.
+
+\medskip
+\noindent\textbf{Und nein, das ist nicht \boldmath$\sqrt6$.} Bei exakt
+gleichen Amplituden wäre $\crest_x = \sqrt{2N} = \sqrt6 = 2{,}4494897$, der
+Höchstwert aus Gl.~\eqref{eq:sqrt2n}. Der Arbeitspunkt liegt mit
+$2{,}4494263$ um $6\cdot10^{-5}$ darunter, also \SI{0.003}{\percent} -- die
+leichte Randabsenkung $r_x=0{,}97$ senkt Zähler und Nenner fast im gleichen
+Maß. Auf vier Stellen gerundet sind beide $2{,}4494$; dass sie verschieden
+sind, sieht man erst in der fünften. Der Unterschied ist physikalisch
+bedeutungslos, aber er erklärt, warum hier $2{,}4494$ und nicht $\sqrt6$
+steht.
+
+\medskip
+\noindent\fbox{\parbox{0.96\textwidth}{\textbf{Bei drei Tönen ist der
+Crestfaktor unter der Zentrierungsbedingung immer der schlechtestmögliche --
+unabhängig von $c$, von $\chi$ und vom Zweig. Diese Achse lässt sich durch
+keine Phasenwahl entlasten.} Der Grund steht in Gl.~\eqref{eq:n3direct}: Der
+einzige freie Parameter $\chi$ taucht nur \emph{innerhalb} des Kosinus auf.
+Er kann verschieben, wann die Zeiger sich ausrichten, aber nicht
+\emph{ob}.}}
+
+\medskip
+\noindent Damit ist die Frage für die $x$-Achse beantwortet, ohne jede
+weitere Maschinerie. Der Rest dieses Abschnitts klärt, warum es bei $N=4$
+anders ist und was der allgemeine Grund dahinter ist -- nämlich dass der
+Parameter $\chi$ nichts anderes als eine \emph{Zeitverschiebung} ist und
+solche Verschiebungen den Crestfaktor grundsätzlich nicht berühren.
+
+\paragraph{\boldmath$N=4$: eine echte Freiheit bleibt.}
+
+Hier liefert Gl.~\eqref{eq:centering} $\varphi_y=[\,0,\,b,\,c-b,\,c\,]$ mit
+\emph{zwei} Parametern. Die Rampe ist der Sonderfall $b=c/3$; jedes andere
+$b$ ist eine antisymmetrische Abweichung, die \emph{keine} Rampe ist und die
+Einhüllende deshalb wirklich umformt. Die beiden inneren Töne lassen sich
+dann nicht mehr gleichzeitig mit den äußeren ausrichten, $\max|A|$ sinkt unter
+$\sum a_n$, und mit ihm der Crestfaktor. Bei $c=114^\circ$:
+
+\begin{center}
+\begin{tabular}{cccl}
+  \toprule
+  $b$ & $\varphi_y$ [Grad] & $\max|A|$ & $\crest_y$\\
+  \midrule
+  $38^\circ$ & $[0,\,38,\,76,\,114]$ & $4{,}154$ & $2{,}8265$ \quad(Rampe, $=\sum a_n$)\\
+  $60^\circ$ & $[0,\,60,\,54,\,114]$ & $4{,}022$ & $2{,}7364$\\
+  $\mathbf{98^\circ}$ & $[0,\,98,\,16,\,114]$ & $\mathbf{3{,}228}$ & $\mathbf{2{,}1963}$\\
+  $114^\circ$ & $[0,\,114,\,0,\,114]$ & $3{,}639$ & $2{,}4761$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent$\sum a_n = 4{,}154$ und $\sqrt{\sum a_n^2}=2{,}078$; der
+Minimalwert $2{,}196$ wird bei $b=98^\circ$ erreicht.
+
+\paragraph{Und was das für die Leistung heißt.}
+Über Gl.~\eqref{eq:pavglimit} übersetzt sich der Crestfaktor direkt in
+erlaubte mittlere HF-Leistung. Mit $P_{1\mathrm{dB}}=\SI{3.98}{\watt}$:
+\begin{align}
+  \crest_y = 2{,}826 \;&\rightarrow\; P_\mathrm{mittel,y} = 3{,}98/7{,}99 = \SI{0.50}{\watt},\\
+  \crest_y = 2{,}485 \;&\rightarrow\; P_\mathrm{mittel,y} = 3{,}98/6{,}18 = \SI{0.65}{\watt},\\
+  \crest_y = 2{,}196 \;&\rightarrow\; P_\mathrm{mittel,y} = 3{,}98/4{,}82 = \SI{0.83}{\watt}.
+\end{align}
+Die Wahl von $b$ auf der $y$-Achse ist damit \SI{65}{\percent} mehr
+HF-Leistung wert -- und weil die $x$-Achse ohnehin festliegt, ist sie die
+\emph{einzige} Stellschraube, die die Zentrierung übrig lässt.
+
+\subsection{Der allgemeine Grund: Rampen sind Zeitverschiebungen}
+\label{sec:rampen}
+
+Die Rechnung für $N=3$ in Abschnitt~\ref{sec:crestback} kam ohne weitere
+Hilfsmittel aus: Der freie Parameter $\chi$ stand dort einfach im Kosinus und
+konnte dessen Ausschlag nicht ändern. Für allgemeines $N$ braucht es die
+dahinterliegende Aussage, und sie erklärt zugleich die Spalte
+„crest-wirksam`` in Tabelle~\ref{tab:dims}:
+
+\begin{center}
+\emph{Eine linear mit dem Tonindex wachsende Phase -- eine \textbf{Rampe} --
+verschiebt die Einhüllende nur in der Zeit und ändert den Crestfaktor
+überhaupt nicht.}
+\end{center}
+
+\noindent Von den $\lfloor N/2\rfloor$ Dimensionen der zentrierten Familie
+ist damit eine von vornherein wirkungslos; es bleiben
+$\lfloor N/2\rfloor - 1$ crest-wirksame. Für $N=3$ ist das null -- genau das
+Ergebnis von oben, jetzt als Spezialfall. Hier die Begründung Schritt für
+Schritt.
+
+\medskip
+\noindent\textbf{Schritt 1: die Einhüllende im mitgeführten Bezugssystem.}
+Nach Gl.~\eqref{eq:envdef} ist
+\begin{equation}
+  A(t) = \sum_n a_n\,e^{\,\mathrm{i}[\,2\pi (f_n-\bar f)\,t + \varphi_n]} ,
+  \qquad \bar f = \frac{1}{N}\sum_n f_n ,
+\end{equation}
+wobei die Mittenfrequenz $\bar f$ abgezogen ist, weil der Träger für den
+Betrag $|A|$ keine Rolle spielt.
+
+\medskip
+\noindent\textbf{Schritt 2: das Frequenzraster.} Mit dem äquidistanten Raster
+$f_n = f_\mathrm{off} + n\,d$ ($d$ = Tonabstand) ist
+$\bar f = f_\mathrm{off} + d\,\tfrac{N-1}{2}$ und daher
+\begin{equation}
+  f_n - \bar f = d\Bigl(n-\tfrac{N-1}{2}\Bigr) \;\equiv\; d\,\hat n ,
+  \qquad \hat n := n-\tfrac{N-1}{2} .
+  \label{eq:nhat}
+\end{equation}
+Der \emph{zentrierte} Index $\hat n$ läuft symmetrisch um null:
+$\hat n = -1,0,+1$ bei $N=3$ und $-\tfrac32,-\tfrac12,+\tfrac12,+\tfrac32$
+bei $N=4$.
+
+\medskip
+\noindent\textbf{Schritt 3: die Rampe in derselben Zählung.} Eine Rampe ist
+eine Phase, die linear mit dem Tonindex wächst:
+\begin{equation}
+  \varphi_n = \varphi_\mathrm{s} + \delta\,n ,
+  \qquad\text{also}\qquad
+  \varphi = [\,\varphi_\mathrm{s},\;\varphi_\mathrm{s}+\delta,\;
+               \varphi_\mathrm{s}+2\delta,\;\dots\,] .
+\end{equation}
+$\delta$ ist der Zuwachs von Ton zu Ton, $\varphi_\mathrm{s}$ der Startwert.
+Letzterer ist eine allen Tönen gemeinsame Phase; er zieht sich als Faktor
+$e^{\mathrm{i}\varphi_\mathrm{s}}$ vor die Summe und ändert $|A|$ nicht. Auch
+sonst ist nur wichtig, wie die Phasen \emph{relativ} zueinander liegen. Es
+ist deshalb zweckmäßig, den Mittelwert
+\begin{equation}
+  \bar\varphi = \frac{1}{N}\sum_n \varphi_n
+              = \varphi_\mathrm{s} + \delta\,\frac{N-1}{2}
+\end{equation}
+abzuspalten. Man definiert die mittelwertfreie Phase
+\begin{empheq}[box=\fbox]{equation}
+  \chi_n \;:=\; \varphi_n - \bar\varphi
+         \;=\; \delta\Bigl(n-\frac{N-1}{2}\Bigr)
+         \;=\; \delta\,\hat n .
+  \label{eq:rampchi}
+\end{empheq}
+\textbf{Das ist die ganze Einführung von $\chi_n$}: die Rampe, um ihren
+eigenen Mittelwert verschoben, damit sie in derselben zentrierten Zählung
+$\hat n$ steht wie die Frequenzen in Gl.~\eqref{eq:nhat}. Ausgeschrieben:
+\begin{align}
+  N=3:&\quad \chi = \delta\,[\,-1,\;0,\;+1\,] , \\
+  N=4:&\quad \chi = \delta\,[\,-\tfrac32,\;-\tfrac12,\;+\tfrac12,\;+\tfrac32\,] .
+\end{align}
+
+\medskip
+\noindent\textbf{Und warum man $\varphi_n$ durch $\chi_n$ ersetzen darf.}
+Streng genommen darf man das \emph{nicht} -- man klammert aus. Mit
+$\varphi_n = \bar\varphi + \chi_n$ ist
+\begin{equation}
+  A(t) = \sum_n a_n\,e^{\,\mathrm{i}(2\pi d\,\hat n\,t + \bar\varphi + \chi_n)}
+       = e^{\,\mathrm{i}\bar\varphi}\underbrace{
+         \sum_n a_n\,e^{\,\mathrm{i}(2\pi d\,\hat n\,t + \chi_n)}}_{
+         =:\;\tilde A(t)} ,
+  \label{eq:factorglobal}
+\end{equation}
+denn $\bar\varphi$ hängt \emph{nicht} von $n$ ab und darf deshalb vor die
+Summe. Das Ersetzen ist also kein Weglassen, sondern der Übergang zu einer
+neuen Größe $\tilde A$, und es gilt
+\begin{equation}
+  A(t) = e^{\,\mathrm{i}\bar\varphi}\,\tilde A(t)
+  \quad\Longrightarrow\quad
+  |A(t)| = |\tilde A(t)| \;\;\text{für alle } t
+  \quad\Longrightarrow\quad
+  \crest(A) = \crest(\tilde A) ,
+\end{equation}
+weil $|e^{\mathrm{i}\bar\varphi}| = 1$ ist und in Gl.~\eqref{eq:crestsimple}
+nur Beträge vorkommen. $A$ und $\tilde A$ sind \emph{verschiedene} komplexe
+Funktionen -- sie unterscheiden sich um eine konstante Drehung --, aber sie
+haben denselben Betragsverlauf und damit denselben Crestfaktor. Nur darauf
+kommt es hier an; im weiteren wird mit $\tilde A$ gerechnet.
+
+\medskip
+\noindent Nebenbei fällt damit ein Ergebnis ab, das für sich steht. Der
+Spiegelindex $\bar n = N-1-n$ hat in zentrierter Zählung
+\begin{equation}
+  \hat{\bar n} = (N-1-n) - \frac{N-1}{2}
+               = -\Bigl(n-\frac{N-1}{2}\Bigr) = -\hat n ,
+\end{equation}
+und daher ist $\chi_{\bar n} = \delta\,\hat{\bar n} = -\delta\,\hat n =
+-\chi_n$. Das ist genau die Antisymmetrie, die Gl.~\eqref{eq:antisym} für die
+zentrierte Familie verlangt: \textbf{Jede Rampe erfüllt das
+Zentrierungskriterium automatisch.}
+
+\medskip
+\noindent\textbf{Schritt 4: gibt es überhaupt eine Verschiebung?} Hier ist
+Sorgfalt nötig, sonst wird die Aussage zirkulär. Es wird \emph{nicht}
+behauptet, man dürfe $\tau$ passend definieren -- gefragt ist, ob ein solches
+$\tau$ überhaupt \emph{existiert}. Die Frage lautet also:
+
+\begin{center}
+\emph{Gibt es \textbf{eine} Zahl $\tau$ -- dieselbe für alle Zeiten und alle
+Töne -- mit $\tilde A_\delta(t) = \tilde A_0(t+\tau)$ für \textbf{alle} $t$?}
+\end{center}
+
+\noindent Mit $\chi_n=\delta\hat n$ lautet die linke Seite
+\begin{equation}
+  \tilde A_\delta(t) = \sum_n \bigl(a_n\,e^{\,\mathrm{i}\delta\hat n}\bigr)\,
+    e^{\,\mathrm{i}2\pi d\,\hat n\,t} ,
+  \label{eq:adelta}
+\end{equation}
+und $\tilde A_0(t)=\sum_n a_n e^{\mathrm{i}2\pi d\hat n t}$ ist eine feste
+Funktion, in der kein $\delta$ vorkommt. Einsetzen von $t+\tau$ gibt
+\begin{equation}
+  \tilde A_0(t+\tau) = \sum_n \bigl(a_n\,e^{\,\mathrm{i}2\pi d\hat n\tau}\bigr)\,
+    e^{\,\mathrm{i}2\pi d\,\hat n\,t} .
+  \label{eq:a0shift}
+\end{equation}
+
+\medskip
+\noindent\textbf{Koeffizientenvergleich ist hier erlaubt}, und das ist nicht
+selbstverständlich: Beide Seiten sind Entwicklungen nach denselben Funktionen
+$e^{\mathrm{i}2\pi d\hat n t}$, und diese sind zu verschiedenen $\hat n$
+\emph{linear unabhängig} (verschiedene Frequenzen). Zwei solche Summen
+stimmen als Funktionen genau dann überein, wenn alle Koeffizienten
+übereinstimmen. Also
+\begin{equation}
+  a_n\,e^{\,\mathrm{i}\delta\hat n} \;=\; a_n\,e^{\,\mathrm{i}2\pi d\hat n\tau}
+  \qquad\Longleftrightarrow\qquad
+  2\pi d\,\hat n\,\tau \;\equiv\; \delta\,\hat n \pmod{2\pi}
+  \quad\text{für jedes } n .
+  \label{eq:tausystem}
+\end{equation}
+
+\medskip
+\noindent\textbf{Und hier steckt der Inhalt.} Gl.~\eqref{eq:tausystem} ist ein
+Gleichungs\emph{system}: $N$ Bedingungen, \emph{eine} Unbekannte $\tau$. So
+etwas ist im Normalfall unlösbar -- man kann nicht eine Zahl so wählen, dass
+sie vier Gleichungen gleichzeitig erfüllt, es sei denn, die Gleichungen sind
+nicht unabhängig. Genau das ist hier der Fall: Auf beiden Seiten steht
+derselbe Faktor $\hat n$, er kürzt sich für $\hat n\neq0$ heraus, und für
+$\hat n=0$ steht ohnehin $0=0$. Alle $N$ Bedingungen reduzieren sich auf
+\emph{dieselbe}:
+\begin{empheq}[box=\fbox]{equation}
+  \tau = \frac{\delta}{2\pi d}
+  \qquad\Longrightarrow\qquad
+  \tilde A_\delta(t) = \tilde A_0(t+\tau) \quad\text{für alle } t .
+  \label{eq:rampshift}
+\end{empheq}
+\emph{Die Aussage ist die Lösbarkeit, nicht der Wert von $\tau$.} Dass am Ende
+eine Formel für $\tau$ dasteht, ist das Ergebnis und nicht die Voraussetzung.
+
+\paragraph{Die Umkehrung: Zeitverschiebung \boldmath$\Longleftrightarrow$ Rampe.}
+Am deutlichsten wird das, wenn man die Rechnung rückwärts liest. Sei
+$\chi_n$ ein \emph{beliebiger} mittelwertfreier Phasensatz. Derselbe
+Koeffizientenvergleich verlangt dann
+\begin{equation}
+  2\pi d\,\hat n\,\tau \;\equiv\; \chi_n \pmod{2\pi}
+  \qquad\Longrightarrow\qquad
+  \tau \;=\; \frac{\chi_n}{2\pi d\,\hat n} \quad\text{für jedes } \hat n\neq0 .
+\end{equation}
+Rechts steht eine Zahl, die im Allgemeinen \emph{von $n$ abhängt}. Ein
+gemeinsames $\tau$ existiert genau dann, wenn der Quotient $\chi_n/\hat n$ für
+alle Töne derselbe ist -- und das heißt
+\begin{equation}
+  \chi_n \equiv \delta\,\hat n \pmod{2\pi} ,
+\end{equation}
+also: $\chi$ ist eine Rampe. Damit ist gezeigt:
+
+\medskip
+\noindent\fbox{\parbox{0.96\textwidth}{Ein Phasensatz ist \emph{genau dann}
+eine Zeitverschiebung der Einhüllenden, wenn er eine Rampe ist (modulo
+$2\pi$). Die Bedingung an $\tau$ ist keine Definition, sondern eine
+Lösbarkeitsbedingung, und sie charakterisiert die Rampen vollständig.}}
+
+\medskip
+\noindent Wie eng das ist, zeigt eine Abzählung: Bei $N=4$ ist der Raum der
+Phasensätze (nach Abzug der globalen Phase) drei\-dimensional, die
+Zeitverschiebungen bilden darin eine \emph{ein}dimensionale Kurve. Ein
+zufälliger Phasensatz ist also so gut wie nie eine Verschiebung -- die
+Rampen treffen diese dünne Menge exakt.
+
+\medskip
+\noindent Das „modulo $2\pi$`` ist dabei nicht kosmetisch. Der Satz
+$\varphi_x = [0;\,180^\circ;\,0]$ etwa sieht nach keiner Rampe aus, ist aber
+eine (mit $\delta=180^\circ$, siehe unten), und der Test findet ihn auch als
+solche: Er fällt mit $5\cdot10^{-16}$ bei
+$\tau=\SI{-2.7027}{\micro\second}$ durch, also bei genau einer halben
+Einhüllendenperiode.
+
+\medskip
+\noindent\textbf{Wo das $\delta$ geblieben ist.} Auf der rechten Seite von
+Gl.~\eqref{eq:rampshift} steht kein $\delta$ mehr, und das ist gerade der
+Inhalt der Aussage: Die Rampe ist nicht verschwunden, sie ist \emph{in das
+Argument gewandert}. $\tilde A_0$ ist eine einzige, ein für alle Mal
+festliegende Funktion; die ganze Rampenfamilie besteht aus nichts als ihren
+Zeitverschiebungen, und $\delta$ steckt nur noch in der Angabe, um wie viel
+verschoben wird. Zurückübersetzt auf die tatsächlichen Phasen bedeutet das
+\begin{equation}
+  |A_\delta(t)| = |A_0(t+\tau)| \qquad\text{für alle } t ,
+\end{equation}
+denn die globalen Faktoren $e^{\mathrm{i}\bar\varphi}$ auf beiden Seiten haben
+Betrag eins.
+
+
+\medskip
+\noindent\textbf{Richtung und Zahlenprobe.} Das Vorzeichen: Was $\tilde A_0$
+zur Zeit $t+\tau$ tut, tut $\tilde A_\delta$ bereits zur Zeit $t$ -- eine positive
+Rampe lässt die Einhüllende also \emph{früher} eintreffen. Das Maximum, das
+bei $\delta=0$ auf $t=0$ liegt, wandert nach $t=-\tau$. Nachgerechnet auf
+$200\,001$ Zeitpunkten, komplexwertig, mit
+$\max_t|\tilde A_\delta(t)-\tilde A_0(t+\tau)|$ relativ zur Signalspitze:
+
+\begin{center}
+\begin{tabular}{lrrl}
+  \toprule
+  Phasensatz & $\tau$ & Abweichung & Maximum bei\\
+  \midrule
+  Rampe $\delta=12{,}5^\circ$  & \SI{0.1877}{\micro\second} & $6\cdot10^{-16}$ & $t=\SI{-0.1877}{\micro\second}$\\
+  Rampe $\delta=25^\circ$      & \SI{0.3754}{\micro\second} & $6\cdot10^{-16}$ & \\
+  Rampe $\delta=90^\circ$      & \SI{1.3514}{\micro\second} & $6\cdot10^{-16}$ & $t=\SI{-1.3514}{\micro\second}$\\
+  Rampe $\delta=175{,}6^\circ$ & \SI{2.6366}{\micro\second} & $1\cdot10^{-15}$ & \\
+  Rampe $\delta=-40^\circ$     & \SI{-0.6006}{\micro\second}& $6\cdot10^{-16}$ & \\
+  \midrule
+  \emph{keine} Rampe, $\psi=30^\circ$ & \multicolumn{1}{c}{--} & $\mathbf{2{,}3\cdot10^{-1}}$ & existiert nicht\\
+  \emph{keine} Rampe, $\psi=90^\circ$ & \multicolumn{1}{c}{--} & $\mathbf{6{,}1\cdot10^{-1}}$ & existiert nicht\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Also Maschinengenauigkeit, nicht nur im Betrag, sondern in der
+komplexen Amplitude; für $N=4$ mit $d=\SI{0.1233}{\mega\hertz}$ ebenso
+($\le2\cdot10^{-15}$ bei $\delta = 38^\circ, 98^\circ, 250^\circ$). Die
+Zeile $\delta=0$ ist bewusst nicht aufgeführt: Sie lautete
+$\tilde A_0(t)=\tilde A_0(t+0)$ und prüfte gar nichts.
+
+Die beiden unteren Zeilen zeigen, dass der Test überhaupt etwas
+\emph{unterscheidet}. Dort wurde $\psi$ aus Abschnitt~\ref{sec:psi} auf den
+mittleren Ton gelegt -- eine Phase, die nicht linear in $\hat n$ ist -- und
+anschließend $\tau$ \emph{sowie} eine freie globale Phase numerisch so gewählt,
+dass die Abweichung minimal wird. Selbst mit dieser Bestanpassung bleiben
+\SI{23}{\percent} bzw.\ \SI{61}{\percent} der Signalspitze übrig: Es gibt
+schlicht kein $\tau$, das die Einhüllende zur Deckung bringt. Eine Tabelle,
+in der jede Zeile besteht, beweist wenig -- diese hier kann auch durchfallen.
+
+\medskip
+\noindent\textbf{Schritt 5: und das ändert den Crestfaktor wirklich nicht.}
+Nach Gl.~\eqref{eq:crestsimple} ist
+$\crest = \sqrt2\,\max_t|\tilde A|\,/\,\mathrm{rms}_t|\tilde A|$, und beide
+Größen werden über eine \emph{volle} Periode $T$ gebildet. Die Substitution
+$t' = t+\tau$ bildet ein volles Periodenintervall wieder auf ein volles ab,
+also ist die \emph{Wertemenge}
+\begin{equation}
+  \bigl\{\,|\tilde A_\delta(t)| \;:\; t\in[0,T)\,\bigr\}
+  \;=\;
+  \bigl\{\,|\tilde A_0(t')| \;:\; t'\in[\tau,T+\tau)\,\bigr\}
+  \;=\;
+  \bigl\{\,|\tilde A_0(t')| \;:\; t'\in[0,T)\,\bigr\}
+\end{equation}
+dieselbe -- nur in anderer Reihenfolge durchlaufen. Maximum und quadratisches
+Mittel hängen aber nur von der Wertemenge ab, nicht von der Reihenfolge.
+Also $\crest(\delta)=\crest(0)$, und zwar exakt und nicht näherungsweise.
+
+\medskip
+\noindent\textbf{Eine Feinheit bei geradem \boldmath$N$.} Der Schritt setzt
+voraus, dass $|\tilde A|$ die Periode $T=1/d$ hat. Für ungerades $N$ ist
+$\hat n$ ganzzahlig und $\tilde A$ selbst periodisch. Für gerades $N$ ist
+$\hat n$ halbzahlig, und dann ist
+\begin{equation}
+  \tilde A(t+T) = \sum_n a_n e^{\,\mathrm{i}(2\pi d\hat n t + 2\pi\hat n + \chi_n)}
+                = -\,\tilde A(t) ,
+\end{equation}
+denn $e^{\mathrm{i}2\pi\hat n} = e^{\mathrm{i}\pi(2n-N+1)} = -1$ für gerades
+$N$. $\tilde A$ ist dort also \emph{anti}periodisch mit $T$ und erst mit $2T$
+periodisch. Der Betrag $|\tilde A|$ hat aber in beiden Fällen die Periode $T$,
+und da in den Crestfaktor nur Beträge eingehen, gilt das Argument unverändert.
+Numerisch: $\tilde A(t+T)/\tilde A(t) = +1$ bei $N=3$, $-1$ bei $N=4$, und
+$|\tilde A|$ in beiden Fällen $T$-periodisch.
+
+\medskip
+\noindent\textbf{Zahlenprobe.} Über $400\,000$ Stützstellen einer vollen
+Periode, für die Rampensteigungen $\delta = 0^\circ$ bis $359^\circ$:
+
+\begin{center}
+\begin{tabular}{lccc}
+  \toprule
+  & $\max|\tilde A|$ & $\mathrm{rms}|\tilde A|$ & $\crest$\\
+  \midrule
+  $x$-Achse, $N=3$, jedes $\delta$ & $2{,}96977156$ & $1{,}71464282$ & $2{,}44942630$\\
+  $y$-Achse, $N=4$, jedes $\delta$ & $4{,}15406592$ & $2{,}07846097$ & $2{,}82648385$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Übereinstimmung auf elf Stellen, einschließlich $\delta=180^\circ$
+und $270^\circ$. Der Effektivwert trifft dabei exakt
+$\sqrt{\sum_n a_n^2}$ aus Abschnitt~\ref{sec:rmsphase} -- er ist ja ohnehin
+phasenunabhängig; die ganze Aussage dieses Abschnitts betrifft allein den
+Zähler $\max_t|\tilde A|$.
+
+\paragraph{Was eine Rampe sehr wohl ändert.}
+Crestneutral heißt nicht folgenlos. Die Verschiebung ist gegenüber dem
+\emph{absoluten} Zeitnullpunkt real, und der Trigger $t_0$ ist genau so ein
+Nullpunkt. Hält man ihn fest und misst die Pulsfläche
+$\int_{t_0}^{t_0+\SI{1}{\micro\second}}|A|^2\,\mathrm{d}t$ bei $t_0=0$:
+
+\begin{center}
+\begin{tabular}{cc}
+  \toprule
+  $\delta$ & Pulsfläche relativ\\
+  \midrule
+  $0^\circ$      & $1{,}000$\\
+  $12{,}5^\circ$ & $0{,}825$\\
+  $90^\circ$     & $0{,}043$\\
+  $180^\circ$    & $0{,}066$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Eine Rampe von $90^\circ$ je Ton lässt bei unverändertem Trigger
+nur noch \SI{4}{\percent} der Pulsfläche übrig -- sie schiebt den Puls in ein
+Minimum der Einhüllenden. \emph{Redundant zu $t_0$} heißt also: Die Rampe
+muss \emph{gemeinsam} mit $t_0$ betrachtet werden, nicht dass sie folgenlos
+wäre. Für die Optimierung ist sie deshalb kein zusätzlicher Freiheitsgrad,
+sondern eine zweite Schreibweise für einen vorhandenen.
+
+\paragraph{Und ist das Interferenzmuster damit auch nur zeitverschoben?}
+Nur wenn beide Achsen \emph{passend} gerampt werden. Jede Achse hat ihren
+eigenen Tonabstand, $d_x=\SI{0.185}{\mega\hertz}$ und
+$d_y=\SI{0.1233}{\mega\hertz}$, und damit ihren eigenen Versatz
+$\tau_{x,y}=\delta_{x,y}/(2\pi d_{x,y})$. Nur für
+\begin{equation}
+  \frac{\delta_x}{d_x} = \frac{\delta_y}{d_y}
+  \qquad\Longleftrightarrow\qquad \tau_x = \tau_y
+\end{equation}
+wandern beide Einhüllenden um dasselbe $\tau$, und erst dann ist auch das
+zweidimensionale Intensitätsmuster $I(\mathbf r,t)$ als Ganzes verschoben.
+Nachgerechnet mit $\delta_x = 30^\circ$ und $\tau=\SI{0.4505}{\micro\second}$,
+über eine volle Grundperiode und das ganze Ortsgitter,
+$\max|I_\mathrm{Rampe}(\mathbf r,t)-I_0(\mathbf r,t-\tau)|/\max I$:
+\begin{align}
+  \text{angepasste Rampen auf beiden Achsen:}&\quad 8\cdot10^{-14} ,\\
+  \text{Rampe nur auf der $x$-Achse:}&\quad 0{,}28 .
+\end{align}
+\textbf{„Rampe ist Zeitverschiebung`` ist also eine Aussage über die
+Einhüllende \emph{einer} HF-Achse -- und nur als solche wird sie hier
+gebraucht, denn der Crestfaktor ist ebenfalls eine Größe je Achse.} Für das
+Licht am Atom gilt sie erst bei passenden Rampen auf beiden Achsen.
+
+\medskip
+\noindent\textbf{Schritt 6: wie weit die Verschiebung reicht.} Durchläuft
+$\delta$ einmal $[0,2\pi)$, so durchläuft $\tau = \delta/(2\pi d)$ genau
+$[0,1/d)$ -- und $1/d$ ist die Periode der Einhüllenden. \emph{Die
+Rampenfamilie deckt also exakt eine Einhüllendenperiode ab, nicht mehr und
+nicht weniger.} Damit ist sie vollständig redundant zum Trigger $t_0$: Jede
+Rampe lässt sich durch ein anderes $t_0$ ersetzen und umgekehrt. Am
+Arbeitspunkt ($d=\SI{0.185}{\mega\hertz}$) gehört zu $\delta=12{,}5^\circ$
+der Versatz $\tau=\SI{0.188}{\micro\second}$, zu einer vollen Rampe
+$\tau=\SI{5.405}{\micro\second}$.
+
+
+\paragraph{Nachtrag: die \boldmath$N=3$-Familie \emph{ist} die Rampenfamilie.}
+Die beiden Zweige aus Abschnitt~\ref{sec:selfpair},
+$\varphi_x=[\,0,\,c/2,\,c\,]$ und $\varphi_x=[\,0,\,c/2+\pi,\,c\,]$, sind zusammen
+genau die Rampenfamilie -- ein Punkt, an dem man sich leicht verrechnet, weil die
+Phasen nur \emph{modulo} $2\pi$ definiert sind. Die Rampe
+$\varphi_n = \delta\,n$ liefert
+\begin{equation}
+  \varphi_x = [\,0,\;\delta,\;2\delta\,],
+  \qquad c = \varphi_0+\varphi_2 = 2\delta,
+  \qquad \varphi_1 = \delta .
+\end{equation}
+Durchläuft $\delta$ einmal $[0,2\pi)$, so durchläuft $c = 2\delta \bmod 2\pi$
+den Bereich $[0,2\pi)$ \emph{zweimal}: Für $\delta<\pi$ ist $\varphi_1 = c/2$
+(erster Zweig), für $\delta\ge\pi$ ist $\varphi_1 = c/2+\pi$ (zweiter). Die
+scheinbar diskrete Zusatzwahl ist also nichts weiter als die zweite Hälfte
+des Rampenkreises:
+
+\begin{center}
+\begin{tabular}{crcl}
+  \toprule
+  $\delta$ & $\varphi_x \bmod 360^\circ$ & $c$ & Zweig\\
+  \midrule
+  $45^\circ$  & $[0;\;45;\;90]$  & $90^\circ$  & $\varphi_1 = c/2$\\
+  $90^\circ$  & $[0;\;90;\;180]$ & $180^\circ$ & $\varphi_1 = c/2$\\
+  $225^\circ$ & $[0;\;225;\;90]$ & $90^\circ$  & $\varphi_1 = c/2+180^\circ$\\
+  $270^\circ$ & $[0;\;270;\;180]$& $180^\circ$ & $\varphi_1 = c/2+180^\circ$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Zentrierte Familie und Rampenfamilie fallen bei $N=3$ also
+vollständig zusammen. Das ist keine neue Information -- der Crestfaktor stand
+schon in Abschnitt~\ref{sec:crestback} fest --, aber es erklärt, warum dort
+nichts mehr zu holen war: Die einzige Freiheit der Familie ist eine
+Verschiebung, und Verschiebungen sieht der Crestfaktor nicht.
+
+\subsection{Freiheitsgrade im Überblick}
+
+\begin{table}[htb]
+  \centering
+  \caption{Freiheitsgrade und erreichbarer Crestfaktor. $\crest_{\min}$
+  jeweils numerisch über die zulässige Menge minimiert, gleiche Amplituden.}
+  \label{tab:dims}
+  \begin{tabular}{ccccccc}
+    \toprule
+    $N$ & frei: $N-1$ & Familie: $\lfloor N/2\rfloor$ & crest-wirksam
+        & $\crest_{\min}$ (Familie) & $\crest_{\min}$ (frei) & $\sqrt{2N}$\\
+    \midrule
+     3 &  2 & 1 & \textbf{0} & $\mathbf{2{,}4495}$ & $1{,}8257$ & $2{,}4495$\\
+     4 &  3 & 2 & 1 & $2{,}1773$ & $1{,}7481$ & $2{,}8284$\\
+     5 &  4 & 2 & 1 & $2{,}0555$ & $1{,}7311$ & $3{,}1623$\\
+     6 &  5 & 3 & 2 & $2{,}0077$ & $1{,}7568$ & $3{,}4641$\\
+     8 &  7 & 4 & 3 & $2{,}0452$ & $1{,}6200$ & $4{,}0000$\\
+    13 & 12 & 6 & 5 & $2{,}0143$ & $1{,}7016$ & $5{,}0990$\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Tabelle~\ref{tab:dims} zeigt den entscheidenden Punkt. Bei $N=3$ ist
+$\lfloor N/2\rfloor-1=0$: Es bleibt kein crestwirksamer Parameter übrig, und
+$\crest_x = \sqrt{6} = 2{,}4494$ ist Minimum \emph{und} Maximum der Familie
+zugleich -- exakt der Höchstwert nach Gl.~\eqref{eq:sqrt2n}. Das ist
+dasselbe Ergebnis wie in Abschnitt~\ref{sec:crestback}, hier nur aus der
+Abzählung statt aus der expliziten Rechnung.
+
+Ab $N=4$ öffnet sich die Schere: Während $\sqrt{2N}$ weiter wächst, fällt
+$\crest_{\min}$ innerhalb der Familie auf etwa $2{,}0$ und bleibt dort. Der
+\emph{Preis} des Kriteriums, also der Abstand zum unbeschränkten Optimum bei
+rund $1{,}7$, schrumpft von „alles`` bei $N=3$ auf etwa $0{,}3$ ab $N=5$. Mit
+mehr Tönen wird die exakte Zentrierung also nahezu gratis.
+
+Mit den tatsächlichen Amplituden des Arbeitspunkts ($r_x=0{,}97$,
+$r_y=1{,}16$) ergibt sich dasselbe Bild: $\crest_x$ ist auf $2{,}4494$
+festgenagelt, $\crest_y$ lässt sich innerhalb der Familie von $2{,}8265$ auf
+$2{,}1963$ absenken, unbeschränkt wären $1{,}7661$ erreichbar.
+
+\subsection{Die eine freie Phase bei \boldmath$N=3$ -- und was sie kostet}
+\label{sec:psi}
+
+Der vorige Abschnitt endet mit einem Befund, der zunächst wie ein
+Rechenfehler aussieht: Bei drei Tönen ist die mittlere Phase $\varphi_1$ doch
+eine ganz gewöhnliche Zahl am AWG, frei einstellbar zwischen $0$ und
+$2\pi$. Warum also lässt sich der Crestfaktor damit nicht senken?
+
+Er lässt sich senken. Aber es ist genau die Phase, die das
+Zentrierungskriterium bereits vergeben hat. Das ist kein Zufall, und der
+folgende Abschnitt rechnet es explizit aus -- weil die Größenordnung des
+Tauschs die eigentliche Entscheidung ist.
+
+\paragraph{Abzählen der wirksamen Freiheiten.}
+Von den drei Phasen $(\varphi_0,\varphi_1,\varphi_2)$ sind zwei ohne Wirkung
+auf $\crest$:
+\begin{enumerate}
+  \item Eine \emph{globale} Phase multipliziert $A(t)$ mit einem Betrag-Eins-Faktor.
+        Weder $\max|A|$ noch $\mathrm{rms}|A|$ merken das.
+  \item Eine \emph{Rampe} ist nach dem vorigen Abschnitt eine reine
+        Zeitverschiebung der Einhüllenden. Am Arbeitspunkt mit
+        $d=\SI{0.185}{\mega\hertz}$ entspricht die Steigung
+        $\Delta\varphi=12{,}5^\circ$ dem Versatz
+        $\tau=\Delta\varphi/(2\pi d)=\SI{0.188}{\micro\second}$: Der Satz
+        $\varphi_x=[\,0;\,12{,}5;\,25\,]$ ist physikalisch \emph{derselbe}
+        wie $[\,0;\,0;\,0\,]$, nur \SI{0.19}{\micro\second} anders
+        getriggert. Als Stellschraube ist die Rampe damit redundant zu
+        $t_0$ -- sie ist keine zusätzliche Freiheit, sondern eine zweite
+        Schreibweise für eine schon vorhandene.
+\end{enumerate}
+Übrig bleibt \emph{ein} crestwirksamer Parameter, die Abweichung der
+mittleren Phase von ihrem Rampenwert:
+\begin{equation}
+  \boxed{\;\psi \;=\; \varphi_1 - \frac{\varphi_0+\varphi_2}{2}\;}
+  \label{eq:psidef}
+\end{equation}
+Man nennt $\psi$ die \emph{Krümmung} des Phasenprofils: Null heißt, die drei
+Phasen liegen auf einer Geraden über dem Tonindex; $\psi\neq0$ biegt den
+mittleren Ton aus dieser Geraden heraus.
+
+\paragraph{Der Crestfaktor in geschlossener Form.}
+Mit den Amplituden $a_0=a_2=\varrho$, $a_1=1$ und dem Tonabstand $d$ ist die
+Einhüllende im mitgeführten Bezugssystem (Trägerfrequenz $\bar f = f_1$)
+\begin{equation}
+  A(t) = \varrho\,e^{\mathrm{i}(\varphi_0-2\pi d t)} + e^{\mathrm{i}\varphi_1}
+       + \varrho\,e^{\mathrm{i}(\varphi_2+2\pi d t)} .
+\end{equation}
+Zieht man $e^{\mathrm{i}\varphi_1}$ heraus und schreibt die beiden
+Außenphasen als Mittelwert plus Differenz,
+\begin{equation}
+  \varphi_0-\varphi_1 = -\psi+\delta, \qquad
+  \varphi_2-\varphi_1 = -\psi-\delta, \qquad
+  \delta = \tfrac{1}{2}(\varphi_0-\varphi_2),
+\end{equation}
+so fassen sich die beiden Außentöne zu einem einzigen Kosinus zusammen:
+\begin{align}
+  A(t)\,e^{-\mathrm{i}\varphi_1}
+  &= \varrho\,e^{\mathrm{i}(-\psi+\delta-2\pi d t)} + 1 + \varrho\,e^{\mathrm{i}(-\psi-\delta+2\pi d t)}\\
+  &= \varrho\,e^{-\mathrm{i}\psi}\Big[e^{\mathrm{i}(\delta-2\pi d t)}+e^{-\mathrm{i}(\delta-2\pi d t)}\Big] + 1\\
+  &= 2\varrho\,e^{-\mathrm{i}\psi}\cos\Theta + 1,
+     \qquad \Theta = 2\pi d\,(t-t_\delta),\quad t_\delta=\frac{\delta}{2\pi d} .
+     \label{eq:n3env}
+\end{align}
+Hier steht die ganze Struktur der Achse auf einer Zeile. $\delta$ -- die
+Rampe -- taucht ausschließlich als Zeitversatz $t_\delta$ auf und kann den
+Betrag nicht ändern. $\varphi_1$ ist der herausgezogene globale Faktor.
+Wirksam ist allein $\psi$, und zwar als \emph{Winkel zwischen} dem
+Außentonpaar und dem mittleren Ton. Der Betrag folgt sofort:
+\begin{equation}
+  |A|^2 = 4\varrho^2\cos^2\Theta + 4\varrho\cos\psi\,\cos\Theta + 1 .
+\end{equation}
+Über eine Periode durchläuft $\cos\Theta$ das ganze Intervall $[-1,1]$, das
+Maximum wird bei $\cos\Theta=\operatorname{sign}(\cos\psi)$ angenommen:
+\begin{empheq}[box=\fbox]{align}
+  \max_t|A| &= \sqrt{4\varrho^2 + 4\varrho\,|\cos\psi| + 1}, &
+  \mathrm{rms}|A| &= \sqrt{2\varrho^2+1} \;\;\text{(fest)},\\[2pt]
+  \crest_x(\psi) &= \sqrt{2}\;\frac{\sqrt{4\varrho^2+4\varrho|\cos\psi|+1}}{\sqrt{2\varrho^2+1}} . &&
+  \label{eq:crestpsi}
+\end{empheq}
+Der Nenner ist nach Abschnitt~\ref{sec:rmsphase} phasenunabhängig -- nur der
+Zähler bewegt sich. Er ist maximal bei $|\cos\psi|=1$ und minimal bei
+$\cos\psi=0$:
+\begin{align}
+  \psi = 0 \text{ oder } \pi:&\quad \max|A| = 2\varrho+1 = \textstyle\sum_n a_n
+    &&\text{(alle Zeiger ausgerichtet)},\\
+  \psi = \pm\tfrac{\pi}{2}:&\quad \max|A| = \sqrt{4\varrho^2+1}
+    &&\text{(mittlerer Ton in Quadratur)} .
+\end{align}
+Mit $\varrho=\sqrt{r_x}=\sqrt{0{,}97}=0{,}98489$ und $\mathrm{rms}|A|=1{,}71464$:
+
+\begin{center}
+\begin{tabular}{lcccccc}
+  \toprule
+  $\psi$ & $0^\circ$ & $45^\circ$ & $60^\circ$ & $\mathbf{90^\circ}$ & $135^\circ$ & $180^\circ$\\
+  \midrule
+  $\crest_x$ & $2{,}4494$ & $2{,}2836$ & $2{,}1586$ & $\mathbf{1{,}8220}$ & $2{,}2836$ & $2{,}4494$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Gl.~\eqref{eq:crestpsi} und die direkte numerische Auswertung von
+$\crest$ auf dem Zeitraster stimmen auf sechs Stellen überein.
+
+\paragraph{Und jetzt die Pointe.}
+Das Zentrierungskriterium Gl.~\eqref{eq:centering} lautet bei $N=3$
+ausgeschrieben $\varphi_0+\varphi_2 = 2\varphi_1$, in der Sprache von
+Gl.~\eqref{eq:psidef} also schlicht
+\begin{equation}
+  \psi = 0 \quad(\text{oder } \pi;\ \text{beide Zweige liefern}\ |\cos\psi|=1) .
+\end{equation}
+
+\medskip
+\noindent\fbox{\parbox{0.96\textwidth}{\textbf{Der einzige crestwirksame
+Parameter, den drei Töne besitzen, ist genau derjenige, den das
+Zentrierungskriterium festlegt -- und es stellt ihn auf den Wert, bei dem
+$\max|A|$ sein Maximum $\sum_n a_n$ annimmt.} Dass $\crest_x$ bei drei Tönen
+„immer maximal`` ist, ist keine Eigenheit der Amplituden, sondern die
+Zentrierung selbst.}}
+\medskip
+
+\paragraph{Was das Aufgeben der Zentrierung bringt -- und kostet.}
+Damit ist die Frage beantwortbar, ob sich der Tausch lohnt. Dazu wurde für
+feste Krümmung $\psi$ jeweils der Rest neu optimiert: die vier
+$y$-Tonphasen und der Trigger $t_0$, Zielgröße $\Uw$, unter der
+Nebenbedingung $\langle\theta\rangle \ge$ Zeitmittel (nicht in eine Delle
+triggern). Ergebnis in Tabelle~\ref{tab:psitrade}.
+
+\begin{table}[htb]
+  \centering
+  \caption{Preis der Krümmung. $\crest_y$ ist hier nicht mitbeschränkt und
+  läuft in allen drei Fällen auf $\approx 2{,}80$; die relative mittlere
+  Leistung ist $\propto 1/(\crest_x\crest_y)^2$ nach
+  Gl.~\eqref{eq:powerbudget}.}
+  \label{tab:psitrade}
+  \begin{tabular}{lccccc}
+    \toprule
+    $\psi$ & $\crest_x$ & $(\crest_x\crest_y)^2$
+           & $P_\mathrm{mittel}$ rel. & $\Uw$ & Schwerpunktversatz\\
+    \midrule
+    $0^\circ$ (zentriert) & $2{,}4494$ & $47{,}9$ & $1{,}00$ & $\mathbf{0{,}94}\,\%$ & $0$\,nm\\
+    $45^\circ$            & $2{,}2836$ & $40{,}7$ & $1{,}18$ & $1{,}27\,\%$ & $0$\,nm\\
+    $90^\circ$            & $\mathbf{1{,}8220}$ & $25{,}9$ & $\mathbf{1{,}85}$ & $3{,}88\,\%$ & $0$\,nm\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Die Krümmung $\psi=90^\circ$ ist also real \emph{Faktor $1{,}85$ mehr
+mittlere HF-Leistung} wert, $\SI{+2.7}{\decibel}$ auf der $x$-Achse. Das ist
+kein Rundungseffekt, sondern derselbe Hebel, der in
+Abschnitt~\ref{sec:crestback} die $y$-Achse \SI{65}{\percent} wert war.
+
+\paragraph{Wo genau der Schaden auftritt.}
+Bemerkenswert ist die letzte Spalte: Der Schwerpunktversatz bleibt in allen
+drei Zeilen null. Das Kriterium ist für einen verschwindenden Schwerpunkt
+also \emph{hinreichend, aber nicht notwendig} -- $t_0$ und die
+$y$-Phasen können das ungerade Moment der \emph{zeitintegrierten}
+Pulsfläche auch dann noch zu Null bringen, wenn die Symmetrie zu keinem
+einzelnen Zeitpunkt gilt. Was verlorengeht, ist nicht die Lage, sondern die
+Ruhe: Bei $\psi=0$ steht das Interferenzmuster über den ganzen Puls still,
+bei $\psi\neq0$ atmet es und verschiebt sich hin und her, und nur die Bilanz
+über die Pulsdauer hebt sich auf. Übrig bleibt der \emph{gerade} Anteil --
+die Breite der $\theta$-Verteilung über die Wolke --, und der wächst:
+$\Uw$ von $0{,}94\,\%$ auf $3{,}88\,\%$, ein Faktor vier.
+
+Übersetzt auf einen $\pi$-Puls: Eine relative Streuung $\Uw$ der Pulsfläche
+gibt eine Winkelstreuung $\pi\,\Uw$ und damit eine Infidelität
+\begin{equation}
+  1-F \;\approx\; \left(\frac{\pi\,\Uw}{2}\right)^{\!2}
+  \;=\;
+  \begin{cases}
+    2{,}2\cdot10^{-4} & (\Uw = 0{,}94\,\%),\\[2pt]
+    3{,}7\cdot10^{-3} & (\Uw = 3{,}88\,\%).
+  \end{cases}
+\end{equation}
+
+\paragraph{Entscheidungsregel.}
+Der Tausch ist damit sauber bezifferbar und hat keine allgemeingültige
+Antwort, sondern hängt daran, welche der beiden Grenzen zuerst greift:
+
+\begin{itemize}
+  \item \textbf{Klemmt der Verstärker} -- reicht die erreichbare Beugung
+    nach Abschnitt~\ref{sec:realsetup} nicht für die gewünschte
+    Rabifrequenz --, so sind $\psi=90^\circ$ und $\SI{0.4}{\percent}$
+    Infidelität aus der Ortsverteilung ein guter Handel: Faktor $1{,}85$ in
+    der Leistung ist über $\eta=\sin^2(\kappa\sqrt{P})$ ein erheblicher
+    Sprung, und $3{,}7\cdot10^{-3}$ liegt unter dem, was Streuung und
+    Lichtverschiebung ohnehin beitragen.
+  \item \textbf{Klemmt die Fidelity}, so bleibt $\psi=0$ gesetzt, und die
+    Leistung wird dort geholt, wo sie noch frei ist: auf der $y$-Achse über
+    den Parameter $b$ (Abschnitt~\ref{sec:crestback}), und ab $N_x\ge4$
+    Tönen auch auf der $x$-Achse, wo nach Tabelle~\ref{tab:dims} das
+    Kriterium fast gratis wird.
+\end{itemize}
+
+\noindent Der zweite Punkt ist die eigentliche Empfehlung: Die Enge bei
+$N=3$ ist eine Eigenschaft der \emph{Tonzahl}, nicht der Physik. Ein
+vierter $x$-Ton löst den Konflikt, statt ihn auszuhandeln.
+
+\subsection{Wofür der Crestfaktor am Ende entscheidend ist}
+
+Damit lässt sich die Rolle des Crestfaktors scharf fassen. Man vergleiche
+\num{220} zufällige Phasensätze \emph{aus} der zentrierten Familie mit
+\num{220} völlig freien Sätzen, jeweils bei bestmöglichem $t_0$ unter der
+Bedingung $A(t_0)\ge\langle A\rangle$:
+
+\begin{table}[htb]
+  \centering
+  \caption{Die Zentrierung erledigt die Homogenität; innerhalb der Familie
+  unterscheidet sie die Mitglieder kaum noch.}
+  \label{tab:decisive}
+  \begin{tabular}{lcc}
+    \toprule
+     & aus der Familie & völlig frei\\
+    \midrule
+    $\Uw$ Median                 & \SI{0.28}{\percent} & \SI{4.15}{\percent}\\
+    $\Uw$ 10--90-Perzentil       & \SIrange{0.12}{0.55}{\percent} & \SIrange{1.49}{12.45}{\percent}\\
+    $\crest_y$ Spanne            & $2{,}197 \dots 2{,}826$ & --\\
+    $A(t_0)/\langle A\rangle$    & $1{,}00 \dots 3{,}90$ & --\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Zwei Dinge stehen hier nebeneinander:
+
+\begin{enumerate}\itemsep0.3em
+  \item \textbf{Das Zentrierungskriterium leistet die Physik.} Es drückt $\Uw$
+        im Median von \SI{4.15}{\percent} auf \SI{0.28}{\percent} -- Faktor
+        \num{15} -- und garantiert dabei den Versatz exakt null. Das ist der
+        Schritt, der über die Qualität der Anregung entscheidet.
+  \item \textbf{Innerhalb der Familie ist $\Uw$ praktisch erledigt.} Die
+        \numrange{0.12}{0.55} Prozent des 10--90-Perzentils liegen allesamt
+        weit unter jeder anderen Fehlerquelle des Experiments; $\Uw$
+        unterscheidet die Mitglieder nicht mehr sinnvoll. Was sie
+        unterscheidet, ist der Crestfaktor -- Spanne $2{,}197$ bis $2{,}826$,
+        nach Gl.~\eqref{eq:intensity} ein Faktor $1{,}66$ in der zulässigen
+        mittleren Leistung -- und die erreichbare Pulsfläche.
+\end{enumerate}
+
+\medskip
+\noindent\textbf{Der Crestfaktor ist also nicht das primäre Optimierungsziel,
+sondern das Auswahlkriterium \emph{innerhalb} der durch die Physik bereits
+festgelegten Familie.} Erst wird die Zentrierung als harte Bedingung gesetzt,
+dann wird die verbleibende Freiheit -- bei $3\times4$ ausschließlich die eine
+Dimension der $y$-Achse -- zur Entlastung der HF-Kette genutzt. In dieser
+Reihenfolge ist er optimierungsentscheidend; als eigenständiges Ziel wäre er
+es nicht, denn die crest-minimalen Sätze (Schroeder) verletzen gerade die
+Bedingung, auf die es ankommt.
+
+\section{Quantifizierung am Arbeitspunkt}
+
+Arbeitspunkt: $3\times4$ Töne, Airy-Profil, Waist \SI{1.04}{\micro\meter},
+$\Delta f = \SI{0.37}{\mega\hertz}$, $r_x/r_y = 0{,}97/1{,}16$,
+$f_1/f_2 = 75/\SI{750}{\milli\meter}$, Pulslänge $T_p=\SI{1}{\micro\second}$,
+Atom bei \SI{17}{\micro\kelvin} und $\nu_r=\SI{60.4}{\kilo\hertz}$, also
+$\sigma=\SI{108}{\nano\meter}$.
+
+\begin{table}[htb]
+  \centering
+  \caption{Vergleich dreier Phasensätze. $A(t_0)/\langle A\rangle$ ist die
+  atomgewichtete Pulsfläche am Trigger, bezogen auf ihren Zeitmittelwert.}
+  \label{tab:vergleich}
+  \begin{tabular}{lccccc}
+    \toprule
+    Phasensatz & $\crest_x$ & $\crest_y$ & $\Uw$ & Versatz & $A(t_0)/\langle A\rangle$\\
+    \midrule
+    alle Phasen $0$ & $2{,}449$ & $2{,}826$ & \SI{0.18}{\percent} & \SI{0.0}{\nano\meter} & $1{,}35$\\
+    \textbf{gewählter Punkt} & $2{,}449$ & $\mathbf{2{,}196}$ & \SI{0.30}{\percent} & \SI{0.0}{\nano\meter} & $1{,}92$\\
+    frühere Wahl    & $2{,}449$ & $2{,}485$ & \SI{0.21}{\percent} & \SI{0.0}{\nano\meter} & $1{,}15$\\
+    Schroeder       & $2{,}159$ & $2{,}000$ & \SI{17.9}{\percent} & \SI{18.9}{\nano\meter} & $0{,}86$\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Der gewählte Punkt ist
+\begin{equation}
+  \varphi_x=[\,0;\;12{,}5;\;25{,}0\,]^\circ,\qquad
+  \varphi_y=[\,0;\;98{,}0;\;16{,}0;\;114{,}0\,]^\circ,\qquad
+  t_0=\SI{15.306}{\micro\second}.
+  \label{eq:workingpoint}
+\end{equation}
+Er erfüllt Gl.~\eqref{eq:centering} auf beiden Achsen -- Spiegelsummen
+$25{,}0^\circ$ bzw.\ $114{,}0^\circ$, Abweichungen vom Mittenwinkel
+$\chi_x=[-12{,}5;\,0;\,+12{,}5]^\circ$ und
+$\chi_y=[-57;\,+41;\,-41;\,+57]^\circ$, beide antisymmetrisch -- und hält die
+frequenzentarteten Spots in Quadratur ($|\cos\Delta\varphi| = 0{,}018$).
+Nachgerechnet: $\Uw=\SI{0.304}{\percent}$, Versatz \SI{0.0000}{\nano\meter},
+$A(t_0)=1{,}92\,\langle A\rangle$.
+
+Die $y$-Achse schöpft dabei die einzige verbliebene Freiheit aus:
+$\crest_y = 2{,}196$ ist das Minimum, das Gl.~\eqref{eq:centering} bei vier
+Tönen zulässt. Eine frühere Wahl,
+$\varphi_x=[\,0;\,175{,}6;\,351{,}2\,]^\circ$ und
+$\varphi_y=[\,0;\,10{,}5;\,250{,}7;\,261{,}2\,]^\circ$, ist ebenso exakt
+zentriert, lässt mit $\crest_y=2{,}485$ aber \SI{28}{\percent} HF-Leistung
+liegen; sie steht in den Tabellen zum Vergleich.
+
+\paragraph{Was die Phasenwahl an HF-Reserve bringt.}
+Gegenüber $\varphi=0$ bleibt $\crest_x$ unverändert -- es kann nach
+Abschnitt~\ref{sec:crestback} gar nicht anders sein --, während $\crest_y$ von
+$2{,}826$ auf $2{,}196$ fällt. Nach Gl.~\eqref{eq:intensity} entspricht das
+\begin{equation}
+  \frac{I}{I_{\varphi=0}}
+  = \left(\frac{2{,}826}{2{,}196}\right)^{2} = 1{,}66
+  \qquad\widehat{=}\qquad \SI{2.2}{\deci\bel}
+\end{equation}
+mehr zulässige mittlere Leistung. Schroeder-Phasen kämen auf
+\SI{4.10}{\deci\bel}, verletzen aber Gl.~\eqref{eq:centering}: Der Fleck sitzt
+dann $0{,}18\,\sigma$ neben dem Atom und $\Uw$ steigt um zwei
+Größenordnungen.
+
+\paragraph{Der Preis der Zentrierung.}
+Die Differenz ist die eigentlich zu begründende Zahl:
+\begin{equation}
+  \SI{4.10}{\deci\bel} - \SI{2.2}{\deci\bel} \;\approx\; \SI{1.9}{\deci\bel}
+\end{equation}
+Verstärkerreserve kostet die exakte Zentrierung gegenüber der reinen
+Crest-Minimierung. Die Begründung lautet damit: \emph{Die
+Zentrierungsbedingung kostet rund \SI{2}{\deci\bel} gegenüber dem
+crest-optimalen Satz, und das ist gerechtfertigt, weil andernfalls der
+Interferenzfleck um $0{,}18\,\sigma$ neben dem Atom steht und $\Uw$ von
+\SI{0.3}{\percent} auf \SI{18}{\percent} springt.}
+
+\section{Abgrenzung: was der Crestfaktor nicht ist}\label{sec:abgrenzung}
+
+Der Crestfaktor wird leicht mit dem Verhältnis von maximaler zu gemittelter
+\emph{Intensität} verwechselt, zumal beide am Arbeitspunkt zufällig
+ähnliche Zahlenwerte annehmen. Sie sind verschieden und nicht einmal monoton
+gekoppelt, wie Tabelle~\ref{tab:abgrenzung} zeigt.
+
+\begin{table}[htb]
+  \centering
+  \caption{HF-Crestfaktor gegen optische Spitzenwerte. $I_W$ ist die
+  atomgewichtete Intensität, „Profil`` das Maximum über Ort und Zeit,
+  bezogen auf das Maximum des Zeitmittels.}
+  \label{tab:abgrenzung}
+  \begin{tabular}{lccc}
+    \toprule
+    Phasensatz & $\crest_x/\crest_y$ & $\max_t I_W/\langle I_W\rangle$ & Profil\\
+    \midrule
+    alle Phasen $0$ & $2{,}449/2{,}826$ & $4{,}44$ & $4{,}18$\\
+    gewählter Punkt & $2{,}449/2{,}485$ & $2{,}92$ & $4{,}04$\\
+    Schroeder       & $2{,}159/2{,}000$ & $2{,}86$ & $\mathbf{5{,}17}$\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Schroeder hat den niedrigsten HF-Crestfaktor und zugleich den höchsten
+optischen Spitzenwert im Profil -- eine Identität der beiden Größen ist damit
+ausgeschlossen. Im Code wird der Crestfaktor ausschließlich aus $f_n$,
+$\varphi_n$ und $a_n$ berechnet; Feld, Ortsgitter und Intensität gehen nicht
+ein.
+
+Ein Zusammenhang besteht lediglich im Grenzfall vollständig überlappender
+Spots. Dort wäre $I \propto |A_x|^2|A_y|^2$ und folglich
+\begin{equation}
+  \frac{\max_t I}{\langle I\rangle_t}
+  \;\approx\; \frac{\crest_x^{2}}{2}\cdot\frac{\crest_y^{2}}{2},
+\end{equation}
+für den gewählten Punkt also $9{,}26$; die direkte Auswertung dieses
+Grenzfalls ergibt $6{,}71$ (die Abweichung rührt daher, dass die Töne
+kommensurabel sind und die beiden Einhüllenden ihr Maximum nicht unabhängig
+voneinander erreichen). In der realen Geometrie sind die Spots getrennt, am
+Atomort trägt nur die Teilüberlappung bei, und der Wert sinkt auf $2{,}92$.
+
+Beide Größen adressieren zudem verschiedene Budgets: Der HF-Crestfaktor
+begrenzt Verstärkerkompression und Spitzenlast am AOD-Wandler, die optische
+Spitzenintensität dagegen Lichtverschiebung und Streuung am Atom.
+
+\section{Fazit}
+
+Der Crestfaktor ist keine physikalische Einschränkung der Tonphasen -- jeder
+Satz ist einstellbar und wird von der Simulation korrekt behandelt. Er ist
+eine Aussage über die Hardware: Gl.~\eqref{eq:powerbudget} und
+\eqref{eq:intensity} übersetzen ihn in Licht am Atom. Als Nebenbedingung ist
+er dadurch gerechtfertigt, dass er die Voraussetzung der Rechnung -- lineare
+Beugung ohne Intermodulation -- überhaupt erst sichert.
+
+Die Argumentationskette für die Parameterwahl lautet damit:
+\begin{enumerate}\itemsep0.2em
+  \item Nur Phasendifferenzen gehen ein; eine globale Phase je Achse und eine
+        gemeinsame, in der Zeit abgestimmte Rampe auf beiden Achsen sind
+        Eichfreiheiten -- letztere ist exakt eine Verschiebung von $t_0$
+        (numerisch auf $3\cdot10^{-11}$ geprüft).
+  \item Physikalisches Kriterium: gleichmäßige Beleuchtung des Atoms, also
+        minimales $\Uw$. Gl.~\eqref{eq:centering} erfüllt die Zentrierung
+        exakt und per Konstruktion statt per Anpassung.
+  \item Hardwarekriterium: $\crest_x$ und $\crest_y$ unterhalb der
+        gemessenen Kompressionsgrenze der Kette.
+  \item Die verbleibende Freiheit -- bei $3\times4$ ausschließlich auf der
+        $y$-Achse -- wird zur Absenkung des Crestfaktors genutzt.
+\end{enumerate}
+
+\section{Die Rechnung am realen Aufbau}\label{sec:realsetup}
+
+Dieser Abschnitt rechnet alles Vorangegangene an der tatsächlichen Hardware
+durch, Schritt für Schritt.
+
+\subsection{Drei Grenzen, drei Geräte}
+
+Man verwechselt leicht, was wovon begrenzt wird. Es sind drei unabhängige
+Budgets:
+
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  Grenze & gehört zu & hängt vom Crestfaktor ab?\\
+  \midrule
+  \SI{2}{\watt} mittlere HF-Leistung & AOD-Wandler (Wärme) & \textbf{nein}\\
+  Kompression & Verstärker (Spitzenspannung) & \textbf{ja}, $\propto 1/\crest^2$\\
+  Beugungssättigung $\sin^2$ & AOD (Leistung \emph{pro Ton}) & nein\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+Die \SI{2}{\watt} des AOD sind ein \emph{Mittelwert} über die Zeit -- der
+Wandler wird warm, und wie die Leistung innerhalb einer Mikrosekunde verteilt
+ist, ist ihm gleich. Der Verstärker dagegen sieht die Momentanspannung; ihn
+interessiert nur die Spitze.
+
+\subsection{Die Daten}
+
+\begin{center}
+\begin{tabular}{ll}
+  \toprule
+  \multicolumn{2}{l}{\textbf{Verstärker Mini-Circuits ZHL-03-5WF+}}\\
+  Frequenzbereich & \SIrange{60}{300}{\mega\hertz} (\SI{100}{\mega\hertz} liegt darin)\\
+  Verstärkung & \SI{30}{\deci\bel}\\
+  $P_{1\mathrm{dB}}$ & $+\SI{36}{dBm}$\\
+  $P_\mathrm{sat}$ & $+\SI{39}{dBm}$\\
+  OIP3 & $+\SI{49}{dBm}$\\
+  \midrule
+  \multicolumn{2}{l}{\textbf{AOD AA DTSXY-400-800, S/N 3001-O211386}}\\
+  max.\ HF-Leistung je Achse & \SI{2}{\watt} (Wandlerschaden)\\
+  Messpunkt im Testsheet & \SI{1.3}{\watt} je Achse\\
+  Effizienz dort, Ordnung „1-1`` & $>\SI{58}{\percent}$ (Spez.\ $>\SI{40}{\percent}$)\\
+  Mittenfrequenz bei \SI{795}{\nano\meter} & \SI{103}{\mega\hertz} $\pm$ \SI{4}{\mega\hertz}\\
+  Bandbreite & \SI{36}{\mega\hertz}\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{dBm in Watt.}
+Die Verstärkerangaben stehen in dBm, also Dezibel bezogen auf
+\SI{1}{\milli\watt}:
+\begin{equation}
+  P[\mathrm{W}] \;=\; \frac{1}{1000}\cdot 10^{\,P[\mathrm{dBm}]/10} .
+\end{equation}
+Damit
+\begin{align}
+  P_{1\mathrm{dB}} &= \tfrac{1}{1000}\cdot10^{36/10} = \tfrac{1}{1000}\cdot 3981 = \SI{3.98}{\watt},\\
+  P_\mathrm{sat}   &= \tfrac{1}{1000}\cdot10^{39/10} = \tfrac{1}{1000}\cdot 7943 = \SI{7.94}{\watt}.
+\end{align}
+Der \emph{Kompressionspunkt} $P_{1\mathrm{dB}}$ ist die Ausgangsleistung, bei
+der die Verstärkung um \SI{1}{\deci\bel} eingebrochen ist -- ab dort ist die
+Kette nicht mehr linear. Genau die Linearität setzt die Feldrechnung voraus,
+also ist $P_{1\mathrm{dB}}$ die richtige Grenze, nicht $P_\mathrm{sat}$.
+
+\subsection{Schritt 1: Welche mittlere Leistung erlaubt der Verstärker?}
+
+Entscheidend ist: Die Grenze gilt für die \emph{Spitze}, nicht für den
+Mittelwert. Nach Gl.~\eqref{eq:powerbudget} ist
+$P_\mathrm{peak}=\crest^2 P_\mathrm{mittel}$, die Forderung
+$P_\mathrm{peak}\le P_{1\mathrm{dB}}$ liefert also
+\begin{equation}
+  P_\mathrm{mittel} \;\le\; \frac{P_{1\mathrm{dB}}}{\crest^{2}} .
+  \label{eq:pavglimit}
+\end{equation}
+Eingesetzt, mit den Crestfaktoren des gewählten Arbeitspunkts:
+\begin{align}
+  \text{$x$-Achse:}\quad &\crest_x = 2{,}449
+  &&\crest_x^2 = 6{,}00
+  &&P_\mathrm{mittel,x} \le \frac{3{,}98}{6{,}00} = \SI{0.66}{\watt},\\
+  \text{$y$-Achse:}\quad &\crest_y = 2{,}196
+  &&\crest_y^2 = 4{,}82
+  &&P_\mathrm{mittel,y} \le \frac{3{,}98}{4{,}82} = \SI{0.83}{\watt}.
+\end{align}
+
+\medskip
+\noindent\fbox{\parbox{0.96\textwidth}{\textbf{Das ist das Ergebnis, auf das
+es ankommt:} Erlaubt sind \SI{0.66}{\watt} und \SI{0.83}{\watt} -- höchstens
+\SI{0.4}{} der AOD-Grenze von \SI{2}{\watt} und deutlich unter dem Messpunkt
+von \SI{1.3}{\watt}. \emph{Der AOD ist nicht das Limit, der Verstärker ist
+es.} Der Wandler wird bei diesem Betrieb nie warm.}}
+
+\subsection{Schritt 2: Gegenprobe}
+
+Umgekehrt gefragt: Welche Spitzenleistung bräuchte man, um die AOD-Grenzen
+auszufahren? Maßgeblich ist die $x$-Achse mit $\crest_x^2=6{,}00$:
+\begin{align}
+  P_\mathrm{mittel} = \SI{1.3}{\watt} &\;\rightarrow\; P_\mathrm{peak} = 6{,}00\cdot1{,}3 = \SI{7.8}{\watt} = +\SI{38.9}{dBm},\\
+  P_\mathrm{mittel} = \SI{2.0}{\watt} &\;\rightarrow\; P_\mathrm{peak} = 6{,}00\cdot2{,}0 = \SI{12.0}{\watt} = +\SI{40.8}{dBm}.
+\end{align}
+Die \SI{1.3}{\watt} landen exakt auf $P_\mathrm{sat}$ -- der Verstärker
+begrenzt dort bereits hart, von Linearität keine Rede. Die vollen
+\SI{2}{\watt} lägen \SI{1.9}{\deci\bel} \emph{über} $P_\mathrm{sat}$ und sind
+mit dieser Kette gar nicht erreichbar.
+
+\subsection{Schritt 3: Von der HF-Leistung zur Beugung}\label{sec:beugung}
+
+Jetzt ist die Frage zu beantworten, wie viel Licht die erlaubte HF-Leistung
+tatsächlich in das Profil bringt. Drei Dinge sind dafür zu klären, und nur
+das dritte ist wirklich heikel:
+\begin{enumerate}\itemsep0.15em
+  \item Wie macht \emph{ein} Gitter aus HF-Leistung Beugung? (Abschnitt unten,
+        Ergebnis $\eta=\sin^2(\kappa\sqrt{P})$.)
+  \item Woher kommt die Zahl $\kappa$? (Aus dem Testsheet, nicht aus einer Rechnung.)
+  \item Was ändert sich, wenn $N$ Gitter \emph{gleichzeitig} stehen?
+        (Die Summe wandert unter die Wurzel.)
+\end{enumerate}
+
+\paragraph{Woher das \boldmath$\sin^2$ kommt, und warum \boldmath$\sqrt{P}$.}
+Die HF-Leistung erzeugt am Piezowandler eine akustische Welle. Deren
+Dehnungsamplitude $S$ hängt mit der akustischen Leistung über
+$P_\mathrm{ak}\propto S^2$ zusammen -- Leistung ist quadratisch in der
+Amplitude, wie überall. Über den photoelastischen Effekt wird daraus eine
+Brechungsindexmodulation
+\begin{equation}
+  \Delta n = -\tfrac{1}{2}\,n^3 p\,S \;\;\propto\;\; \sqrt{P_\mathrm{ak}} ,
+  \label{eq:photoelast}
+\end{equation}
+also ein Phasengitter, dessen \emph{Amplitude} mit der Wurzel der Leistung
+wächst. \textbf{Das ist der Ursprung der Wurzel} -- sie steckt nicht in der
+Beugung, sondern in der Umrechnung von Leistung auf Amplitude.
+
+Im Bragg-Regime tauschen einfallende und gebeugte Welle entlang der
+Wechselwirkungsstrecke $z$ periodisch Amplitude aus. Es sind zwei gekoppelte
+Wellen mit Kopplungskonstante $\propto\Delta n$; mit $A_\mathrm{u}(0)=1$, $A_\mathrm{d}(0)=0$
+lautet die Lösung $A_\mathrm{u}=\cos(\nu z/L)$, $A_\mathrm{d}=-\mathrm{i}\sin(\nu z/L)$ und
+damit am Ausgang
+\begin{equation}
+  \eta = |A_\mathrm{d}|^2 = \sin^2\nu , \qquad
+  \nu = \frac{\pi\,\Delta n\,L}{\lambda\cos\theta_\mathrm{B}}
+      = \frac{\pi}{\lambda}\sqrt{\frac{M_2\,L\,P_\mathrm{ak}}{2H}} ,
+\end{equation}
+mit der Wechselwirkungslänge $L$, der Wandlerhöhe $H$ und der Gütezahl $M_2$
+des Kristalls. Zusammengefasst zu einer einzigen Konstanten:
+\begin{equation}
+  \boxed{\;\eta(P) = \sin^2\!\bigl(\kappa\sqrt{P}\bigr)\;}
+  \qquad
+  \kappa = \frac{\pi}{\lambda}\sqrt{\frac{M_2 L}{2H}}\cdot\sqrt{\zeta} ,
+  \label{eq:etasingle}
+\end{equation}
+wobei $\zeta$ den Wirkungsgrad der elektroakustischen Wandlung und der
+HF-Anpassung enthält, denn $P$ soll die \emph{elektrische} Leistung sein.
+
+\medskip
+\noindent In $\kappa$ stecken damit vier Größen -- $M_2$, das
+Aspektverhältnis $L/H$, die Wandlung $\zeta$ und die Anpassung --, von denen
+keine einzeln mit brauchbarer Genauigkeit bekannt ist. Genau deshalb wird
+$\kappa$ \emph{gemessen} und nicht gerechnet: Eine einzige Effizienzmessung
+bei einer bekannten Leistung ersetzt alle vier.
+
+\paragraph{Der Ankerpunkt aus dem Testsheet.}
+Das Testsheet nennt \SI{58}{\percent} in der Ordnung „1-1`` bei
+\SI{1.3}{\watt} je Achse, Einzelton. „1-1`` heißt einmal in $x$ \emph{und}
+einmal in $y$ gebeugt; die \SI{58}{\percent} sind also bereits das
+\emph{Produkt} beider Achsen. Unter der Annahme, dass die beiden Achsen
+desselben Bauteils gleich gut sind -- sie teilen Kristall, Wandlerprozess und
+Testsheet --, folgt je Achse
+\begin{equation}
+  \eta_\mathrm{Achse} = \sqrt{0{,}58} = 0{,}762 \quad\text{bei } \SI{1.3}{\watt},
+\end{equation}
+und Gl.~\eqref{eq:etasingle} nach $\kappa$ aufgelöst:
+\begin{equation}
+  \kappa = \frac{\arcsin\sqrt{0{,}762}}{\sqrt{1{,}3}}
+         = \frac{1{,}061}{1{,}140} = \SI{0.930}{\per\sqrt\watt}.
+  \label{eq:kappa}
+\end{equation}
+Zwei Vorbehalte dazu: Das Testsheet schreibt „$>\SI{58}{\percent}$``, der
+Wert ist also eine \emph{untere} Schranke, und er stammt aus einer
+Einzeltonmessung. Beides macht die folgenden Zahlen eher konservativ.
+
+\paragraph{Woher die gekoppelten Gleichungen kommen.}
+Gl.~\eqref{eq:etasingle} wurde oben als Ergebnis zitiert; für den
+Mehrtonfall genügt das nicht, weil dort gerade die \emph{Struktur} der
+Gleichungen die Antwort trägt. Also von vorn.
+
+\medskip
+\noindent\textbf{Ausgangspunkt.} Im Kristall gilt die skalare
+Helmholtz-Gleichung
+\begin{equation}
+  \nabla^2 E + k_\mathrm{vac}^2\,n^2(\mathbf{r},t)\,E = 0 ,
+  \qquad k_\mathrm{vac} = \frac{\omega_0}{c} ,
+\end{equation}
+und die Schallwellen modulieren den Index. Jeder Ton $n$ ist eine laufende
+Welle mit Wellenvektor $\mathbf{K}_n$ ($|\mathbf{K}_n| = \Omega_n/v$,
+$v$ = Schallgeschwindigkeit), Kreisfrequenz $\Omega_n = 2\pi f_n$ und
+\emph{seiner} Phase $\varphi_n$:
+\begin{equation}
+  n(\mathbf{r},t) = n_0 + \sum_n \Delta n_n
+    \cos\!\bigl(\mathbf{K}_n\!\cdot\!\mathbf{r} - \Omega_n t + \varphi_n\bigr),
+  \qquad \Delta n_n \propto \sqrt{P_n}
+\end{equation}
+nach Gl.~\eqref{eq:photoelast}. Für $\Delta n_n\ll n_0$ ist
+$n^2 \approx n_0^2 + 2n_0\sum_n\Delta n_n\cos(\dots)$ -- der quadratische
+Term ist die akustische Nichtlinearität aus Punkt~(iii) unten und wird hier
+weggelassen.
+
+\medskip
+\noindent\textbf{Ansatz.} Das Feld ist die Überlagerung \emph{einer}
+ungebeugten Welle und $N$ gebeugter, jede mit langsam veränderlicher
+Amplitude:
+\begin{equation}
+  E = \underbrace{A_\mathrm{u}(z)\,
+        e^{\mathrm{i}(\mathbf{k}_\mathrm{u}\cdot\mathbf{r}-\omega_0 t)}}_{
+        \text{ungebeugt}}
+    \;+\; \underbrace{\sum_{n=0}^{N-1} A_n(z)\,
+        e^{\mathrm{i}(\mathbf{k}_n\cdot\mathbf{r}-\omega_n t)}}_{
+        \text{je ein Strahl pro Ton}} ,
+  \qquad
+  \omega_n = \omega_0 + \Omega_n .
+  \label{eq:ansatz}
+\end{equation}
+Alle Wellenvektoren liegen auf der Dispersionskugel
+($|\mathbf{k}_n| = n_0\omega_n/c$); $\mathbf{k}_n$ zeigt in die Richtung, in
+die die $n$-te Ordnung tatsächlich läuft. „Langsam veränderlich`` heißt
+$|\mathrm{d}^2A/\mathrm{d}z^2| \ll |k\,\mathrm{d}A/\mathrm{d}z|$, die
+zweite Ableitung fällt also weg.
+
+\medskip
+\noindent\fbox{\parbox{0.96\textwidth}{\textbf{Zur Bezeichnung.} Der
+\emph{ungebeugte} Strahl heißt hier $A_\mathrm{u}$ und trägt \emph{keinen}
+Zahlenindex -- er gehört zu keinem Ton. Der Tonindex $n$ läuft wie im ganzen
+Text von $0$ bis $N-1$, und $A_n$ ist der von Ton $n$ erzeugte gebeugte
+Strahl. Insbesondere ist $A_0$ die erste Beugungsordnung des
+\emph{ersten Tons}, nicht der durchgehende Strahl. Jede Summe $\sum_n$
+in diesem Abschnitt läuft über die $N$ Töne und enthält
+$A_\mathrm{u}$ nie.}}
+
+\medskip
+\noindent\textbf{Einsetzen und sortieren.} Der Kosinus im Indexterm zerfällt
+in $e^{+\mathrm{i}(\dots)}$ und $e^{-\mathrm{i}(\dots)}$. Multipliziert man
+$A_\mathrm{u}\,e^{\mathrm{i}(\mathbf{k}_\mathrm{u}\mathbf{r}-\omega_0 t)}$ mit dem
+$+$-Anteil des Tons $n$, so entsteht ein Term mit Raum-Zeit-Abhängigkeit
+$e^{\mathrm{i}[(\mathbf{k}_\mathrm{u}+\mathbf{K}_n)\mathbf{r}-(\omega_0+\Omega_n)t]}$
+-- in der Zeit genau $\omega_n$, im Raum aber
+$\mathbf{k}_\mathrm{u}+\mathbf{K}_n$, und das ist \emph{nicht} notwendig
+$\mathbf{k}_n$. Sammelt man alle Beiträge, die mit $\omega_n$ schwingen, und
+bezieht sie auf den Träger $e^{\mathrm{i}\mathbf{k}_n\mathbf{r}}$ aus
+Gl.~\eqref{eq:ansatz}, bleibt genau dieser Rest stehen:
+\begin{empheq}[box=\fbox]{align}
+  \frac{\mathrm{d}A_n}{\mathrm{d}z}
+    &= -\mathrm{i}\,\kappa_n\,e^{\mathrm{i}\varphi_n}\,A_\mathrm{u}\;
+       e^{\,\mathrm{i}\Delta k_n z} , \label{eq:coupledgena}\\
+  \frac{\mathrm{d}A_\mathrm{u}}{\mathrm{d}z}
+    &= -\mathrm{i}\sum_n \kappa_n\,e^{-\mathrm{i}\varphi_n}\,A_n\;
+       e^{-\mathrm{i}\Delta k_n z} , \label{eq:coupledgenb}
+\end{empheq}
+mit der Kopplungskonstanten und dem Impulsfehler
+\begin{equation}
+  \kappa_n = \frac{\pi\,\Delta n_n}{\lambda\cos\theta_n} \;\propto\; \sqrt{P_n} ,
+  \qquad
+  \Delta k_n = \bigl(\mathbf{k}_\mathrm{u}+\mathbf{K}_n-\mathbf{k}_n\bigr)\cdot\hat{\mathbf{z}} .
+  \label{eq:dkdef}
+\end{equation}
+$\Delta k_n$ misst also, um wie viel die Impulsbilanz
+$\mathbf{k}_n = \mathbf{k}_\mathrm{u}+\mathbf{K}_n$ verfehlt wird, wenn
+$\mathbf{k}_n$ zugleich auf der Dispersionskugel liegen soll. Genau null ist
+sie nur für den einen Ton, für den der AOD exakt im Bragg-Winkel steht.
+
+\medskip
+\noindent Aus Gl.~\eqref{eq:coupledgena}--\eqref{eq:coupledgenb} liest man
+drei Dinge ab, und alle drei werden gebraucht.
+
+\medskip
+\noindent\textbf{(a) Die Tonphasen lassen sich wegtransformieren.} Mit
+$\tilde A_n = A_n e^{-\mathrm{i}\varphi_n}$ verschwindet $\varphi_n$ aus
+beiden Gleichungen vollständig. Da $|A_n| = |\tilde A_n|$, ist die
+Beugungseffizienz $\eta_n$ \emph{exakt} phasenunabhängig, und $\varphi_n$
+taucht allein als Phase der gebeugten Welle wieder auf -- dort, wo sie
+hingehört, nämlich in $\varphi_{nm}$ des Interferenzbildes. Das ist die
+strenge Fassung des Arguments aus Abschnitt~\ref{sec:abgrenzung}: Der
+Crestfaktor kann in der Beugungsrechnung gar nicht vorkommen.
+
+\medskip
+\noindent\textbf{(b) Die Phasenanpassung ist bereits hier eingebaut.} Setzt
+man $\Delta k_n = 0$ für alle $n$ und transformiert die $\varphi_n$ nach (a)
+weg, so wird aus Gl.~\eqref{eq:coupledgena}--\eqref{eq:coupledgenb}
+unmittelbar
+\begin{equation}
+  \frac{\mathrm{d}A_\mathrm{u}}{\mathrm{d}z} = -\mathrm{i}\sum_n \kappa_n A_n ,
+  \qquad
+  \frac{\mathrm{d}A_n}{\mathrm{d}z} = -\mathrm{i}\,\kappa_n A_\mathrm{u} ,
+  \qquad \kappa_n = \kappa\sqrt{P_n} .
+  \label{eq:coupled}
+\end{equation}
+Hier und im Folgenden ist $z$ in Einheiten der Wechselwirkungslänge $L$
+gemessen; der Kristallausgang liegt also bei $z=1$. Damit ist $\kappa_n$ die
+über den \emph{ganzen} Kristall aufsummierte Kopplung -- genau die Größe
+$\nu$ aus Gl.~\eqref{eq:etasingle}, weshalb $\kappa_n = \kappa\sqrt{P_n}$
+dimensionslos ist.
+
+\emph{Das} ist die Stelle, an der die gemeinsame Phasenanpassung
+vorausgesetzt wird -- nicht später und nicht nebenbei. Alles, was folgt,
+steht und fällt mit $\Delta k_n \approx 0$; wie gut das hier erfüllt ist,
+beziffert Punkt~(i) unten.
+
+\medskip
+\noindent\textbf{(c) Ungleiche \boldmath$\Delta k_n$ zerstören die
+Modenreduktion.} Das ist der Grund, warum es nicht genügt, die Verstimmung
+als kleine Korrektur nachzureichen. Versucht man die helle Mode
+mitzuführen, $B = \kappa_\mathrm{eff}^{-1}\sum_n \kappa_n A_n
+e^{-\mathrm{i}\Delta k_n z}$, so liefert die Produktregel
+\begin{equation}
+  \frac{\mathrm{d}B}{\mathrm{d}z}
+  = -\mathrm{i}\,\kappa_\mathrm{eff}A_\mathrm{u}
+    \;-\;\frac{\mathrm{i}}{\kappa_\mathrm{eff}}
+        \sum_n \kappa_n\,\Delta k_n\,A_n\,e^{-\mathrm{i}\Delta k_n z} .
+\end{equation}
+Der zweite Term ist eine \emph{neue} Kombination, mit den Gewichten
+$\kappa_n\Delta k_n$ statt $\kappa_n$. Sie ist zu $B$ nur dann
+proportional, wenn alle $\Delta k_n$ denselben Wert haben. Andernfalls
+koppelt $B$ an sie, sie an die nächste (Gewichte $\kappa_n\Delta k_n^2$),
+und so fort -- eine Hierarchie, die nicht abbricht. Zwei Sonderfälle
+schließen sie:
+\begin{itemize}\itemsep0.15em
+  \item $\Delta k_n = 0$ für alle $n$: Gl.~\eqref{eq:coupled}, exakt lösbar.
+  \item $\Delta k_n = \Delta k$ für alle $n$ (gemeinsame Verstimmung):
+        Das System schließt wieder, und man erhält die verstimmte
+        Zwei-Wellen-Lösung Gl.~\eqref{eq:detuned} mit
+        $\nu = \kappa_\mathrm{eff}$.
+\end{itemize}
+Am Arbeitspunkt sind die $\Delta k_n$ zwar nicht gleich, aber alle so nahe
+bei null, dass beide Bilder auf sechs Stellen dasselbe liefern -- siehe die
+Tabelle in Punkt~(i).
+
+\medskip
+\noindent\textbf{Strukturprüfung.} Gl.~\eqref{eq:coupled} erhält die
+Energie, wie sie muss:
+\begin{equation}
+  \frac{\mathrm{d}}{\mathrm{d}z}\Bigl(|A_\mathrm{u}|^2+\sum_n|A_n|^2\Bigr)
+  = 2\sum_n \kappa_n\,\mathrm{Im}\bigl(A_\mathrm{u}^{*}A_n\bigr)
+    - 2\sum_n \kappa_n\,\mathrm{Im}\bigl(A_\mathrm{u}^{*}A_n\bigr) = 0 .
+\end{equation}
+Das $-\mathrm{i}$ in \emph{beiden} Gleichungen ist dafür notwendig; ein
+Vorzeichenfehler an einer Stelle würde hier sofort auffallen.
+
+\medskip
+\noindent\textbf{Wo die Frequenzverschiebung bleibt.} Die
+$\Omega_n$ aus Gl.~\eqref{eq:ansatz} kürzen sich aus den
+Amplitudengleichungen heraus -- für $\eta_n = |A_n|^2$ spielen sie keine
+Rolle. Sie verschwinden aber nicht: Jede gebeugte Welle läuft mit
+$\omega_0+\Omega_n$, und die Differenzen dieser Frequenzen sind genau das
+Beating in der Fokalebene, mit Grundfrequenz $f_0$ und den Ordnungen $k$ aus
+Abschnitt~\ref{sec:zentrierung}. Die Beugungsrechnung liefert die
+\emph{Amplituden} der Spots, die Frequenzverschiebungen ihre
+\emph{Zeitabhängigkeit}; beides zusammen ist das Feld, mit dem der Rest
+dieses Textes arbeitet.
+
+\paragraph{Mehrere Töne gleichzeitig: warum die Effizienzen nicht addiert werden.}
+Hier liegt der eigentliche Stolperstein. Nahe liegt, jedem Ton seine eigene
+Beugung zuzuschreiben und aufzusummieren. Das ist falsch, und der Grund ist
+einfach: Die $N$ Gitter stehen gleichzeitig im selben Kristall und speisen
+sich alle aus \emph{derselben} ungebeugten Welle. Sie konkurrieren um ein
+gemeinsames Reservoir, statt jeweils ein eigenes anzuzapfen.
+
+Formal ist das Gl.~\eqref{eq:coupled} -- $N+1$ gekoppelte Gleichungen, von
+denen die erste zeigt, dass \emph{alle} $A_n$ an demselben $A_\mathrm{u}$ ziehen. Sie lassen sich in vier Schritten auf
+zwei reduzieren, und zwar \emph{exakt}.
+
+\medskip
+\noindent\textbf{Schritt 1: die helle Mode.} Man definiert
+\begin{equation}
+  \kappa_\mathrm{eff} = \sqrt{\textstyle\sum_n \kappa_n^{2}} ,
+  \qquad
+  B = \frac{1}{\kappa_\mathrm{eff}}\sum_n \kappa_n A_n .
+  \label{eq:brightmode}
+\end{equation}
+Dann ist einerseits $\mathrm{d}A_\mathrm{u}/\mathrm{d}z = -\mathrm{i}\,\kappa_\mathrm{eff}B$
+-- das ist nur Gl.~\eqref{eq:coupled} rückwärts gelesen -- und andererseits
+\begin{equation}
+  \frac{\mathrm{d}B}{\mathrm{d}z}
+  = \frac{1}{\kappa_\mathrm{eff}}\sum_n \kappa_n\,\frac{\mathrm{d}A_n}{\mathrm{d}z}
+  = \frac{-\mathrm{i}}{\kappa_\mathrm{eff}}\sum_n \kappa_n^{2}\,A_\mathrm{u}
+  = -\mathrm{i}\,\kappa_\mathrm{eff}A_\mathrm{u} .
+\end{equation}
+$A_\mathrm{u}$ und $B$ bilden also ein geschlossenes Zwei-Wellen-System mit
+Kopplung $\kappa_\mathrm{eff}$ -- genau die Form, die schon gelöst ist.
+
+\medskip
+\noindent\textbf{Schritt 2: die dunklen Moden bleiben dunkel.} Nimmt man
+irgendeine andere Linearkombination $C=\sum_n c_n A_n$ mit
+$\sum_n c_n\kappa_n = 0$, so ist
+\begin{equation}
+  \frac{\mathrm{d}C}{\mathrm{d}z} = -\mathrm{i}\Bigl(\sum_n c_n\kappa_n\Bigr) A_\mathrm{u} = 0 ,
+\end{equation}
+und weil am Eingang noch nichts gebeugt ist, $C(0)=0$, bleibt $C\equiv 0$
+über die ganze Strecke. Von den $N$ gebeugten Freiheitsgraden werden $N-1$
+also \emph{nie} angeregt. Das ist der Grund, warum die Reduktion exakt ist
+und keine Näherung.
+
+\medskip
+\noindent\textbf{Schritt 3: lösen.} Mit $A_\mathrm{u}(0)=1$, $B(0)=0$:
+\begin{equation}
+  A_\mathrm{u}(z) = \cos(\kappa_\mathrm{eff}z) , \qquad B(z) = -\mathrm{i}\sin(\kappa_\mathrm{eff}z) ,
+  \qquad 0\le z\le 1 .
+\end{equation}
+
+\medskip
+\noindent\textbf{Schritt 4: zurück auf die einzelnen Ordnungen.} Bisher ist
+nur die \emph{Summe} $B$ bekannt; gesucht sind die einzelnen $A_n$. Der
+Schlüssel steht schon in Gl.~\eqref{eq:coupled}: Dort treibt für \emph{alle}
+$n$ dasselbe $A_\mathrm{u}$. Integriert man die zweite Gleichung mit $A_n(0)=0$, so
+steht rechts für jedes $n$ dasselbe Integral:
+\begin{equation}
+  A_n(z) = -\mathrm{i}\,\kappa_n \underbrace{\int_0^z A_\mathrm{u}(z')\,\mathrm{d}z'}_{
+           \text{für alle } n \text{ identisch}}
+         = -\mathrm{i}\,\kappa_n \int_0^z \cos(\kappa_\mathrm{eff}z')\,\mathrm{d}z'
+         = -\mathrm{i}\,\frac{\kappa_n}{\kappa_\mathrm{eff}}\,\sin(\kappa_\mathrm{eff}z) .
+  \label{eq:anexplicit}
+\end{equation}
+Die Ordnungen unterscheiden sich also \emph{nur} durch den Vorfaktor
+$\kappa_n$ -- ihre $z$-Abhängigkeit ist dieselbe, und ein Vergleich mit
+Schritt~3 zeigt $A_n = (\kappa_n/\kappa_\mathrm{eff})\,B$, wie behauptet.
+
+\medskip
+\noindent Daraus folgt alles Weitere in drei Zeilen. \emph{Erstens} die
+Gesamteffizienz am Kristallausgang $z=1$. Sie ist die Summe über die $N$
+\emph{gebeugten} Strahlen -- der ungebeugte zählt nicht mit, er ist gerade
+das, was übrig bleibt:
+\begin{equation}
+  \eta_\mathrm{ges} = \sum_{n=0}^{N-1} |A_n|^2
+    = \underbrace{\frac{\sum_n\kappa_n^2}{\kappa_\mathrm{eff}^2}}_{=\,1
+      \text{ nach Gl.~\eqref{eq:brightmode}}}\,\sin^2\kappa_\mathrm{eff}
+    = \sin^2 \kappa_\mathrm{eff}
+    \;=\; 1 - |A_\mathrm{u}|^2 .
+  \label{eq:etages}
+\end{equation}
+Die letzte Gleichheit ist die Energiebilanz von unten gelesen: Was nicht
+gebeugt wird, läuft geradeaus weiter. $\eta_\mathrm{ges}=\SI{47}{\percent}$
+heißt also, dass \SI{53}{\percent} des Lichts den Kristall ungebeugt
+verlassen.
+\emph{Zweitens} -- und das ist die Stelle, an der die Summe unter die Wurzel
+wandert -- wird $\kappa_\mathrm{eff}$ mit $\kappa_n = \kappa\sqrt{P_n}$ aus
+Gl.~\eqref{eq:coupled} ausgeschrieben:
+\begin{equation}
+  \kappa_\mathrm{eff}
+  = \sqrt{\sum_n \kappa_n^2}
+  = \sqrt{\sum_n \kappa^2 P_n}
+  = \kappa\,\sqrt{\sum_n P_n}
+  = \kappa\sqrt{P_\mathrm{ges}} .
+  \label{eq:keffP}
+\end{equation}
+Die Quadrate der Kopplungen sind die Leistungen -- deshalb ist die
+quadratische Summe der $\kappa_n$ nichts anderes als die \emph{gewöhnliche}
+Summe der Leistungen unter einer Wurzel. \emph{Drittens} die Aufteilung: Aus
+Gl.~\eqref{eq:anexplicit} ist
+$|A_n|^2 = (\kappa_n^2/\kappa_\mathrm{eff}^2)\sin^2\kappa_\mathrm{eff}$, und
+$\kappa_n^2/\kappa_\mathrm{eff}^2 = P_n/P_\mathrm{ges}$. Zusammen:
+\begin{empheq}[box=\fbox]{equation}
+  \eta_\mathrm{ges} = \sin^2\!\bigl(\kappa\sqrt{P_\mathrm{ges}}\bigr) ,
+  \qquad
+  \eta_n = \frac{P_n}{P_\mathrm{ges}}\;\eta_\mathrm{ges} ,
+  \qquad P_\mathrm{ges}=\sum_n P_n .
+  \label{eq:multitone}
+\end{empheq}
+Für $N=1$ ist $P_\mathrm{ges}=P_0$ und Gl.~\eqref{eq:multitone} geht in
+Gl.~\eqref{eq:etasingle} über, wie sie muss. Die Energiebilanz stimmt exakt:
+$|A_\mathrm{u}|^2+\sum_n|A_n|^2 = \cos^2\kappa_\mathrm{eff}+\sin^2\kappa_\mathrm{eff} = 1$.
+
+\medskip
+\noindent\textbf{Die Summe steht also \emph{unter} der Wurzel, nicht außen
+vor den Sinusquadraten.} Anschaulich: Die $N$ Gitter wirken wie \emph{ein
+einziges} Gitter der Stärke $\sqrt{\sum_n\kappa_n^2}$. Ein zusätzlicher Ton
+öffnet keinen neuen Kanal aus dem ungebeugten Strahl heraus -- er benutzt
+denselben Kanal mit. Deshalb zählt nur die Gesamtleistung.
+
+\paragraph{Warum die naive Summe trotzdem verbreitet ist.}
+Sie ist nicht falsche Physik, sondern die Kleinsignalgrenze, an der falschen
+Stelle genommen. Für $\kappa\sqrt{P}\ll1$ ist $\sin^2 x\approx x^2$, und dann
+gilt
+\begin{equation}
+  \sum_n \sin^2\!\bigl(\kappa\sqrt{P_n}\bigr) \approx \kappa^2\sum_n P_n
+  = \kappa^2 P_\mathrm{ges} \approx \sin^2\!\bigl(\kappa\sqrt{P_\mathrm{ges}}\bigr) .
+\end{equation}
+Beide Ausdrücke fallen zusammen. Sie laufen genau dann auseinander, wenn die
+Sättigung einsetzt -- und das ist der Bereich, in dem wir arbeiten:
+
+\begin{center}
+\begin{tabular}{ccccc}
+  \toprule
+  $P_\mathrm{ges}$ & $\kappa\sqrt{P_\mathrm{ges}}$ & $\eta_\mathrm{ges}$ korrekt
+    & naive Summe (3 Töne) & Fehler\\
+  \midrule
+  \SI{5}{\milli\watt}   & $0{,}066$ & $0{,}00432$ & $0{,}00433$ & $+0{,}10\,\%$\\
+  \SI{50}{\milli\watt}  & $0{,}208$ & $0{,}0427$  & $0{,}0431$  & $+0{,}97\,\%$\\
+  \textbf{\SI{0.664}{\watt}} & $0{,}758$ & $\mathbf{0{,}473}$ & $0{,}539$ & $\mathbf{+14{,}0\,\%}$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Am Arbeitspunkt liegt die naive Summe für die $x$-Achse
+\SI{14.0}{\percent} zu hoch, für die $y$-Achse (\SI{0.825}{\watt}, vier Töne)
+\SI{20.2}{\percent}, und bei dreizehn Tönen \SI{19.8}{\percent}. Bei
+stärkerer Kopplung überschreitet sie sogar \SI{100}{\percent} -- der
+sicherste Hinweis, dass sie kein Erhaltungssatz kennt.
+
+\paragraph{Gültigkeitsbereich.}
+Gl.~\eqref{eq:multitone} ist \emph{keine} Kleinsignalnäherung, sondern die
+exakte Lösung von Gl.~\eqref{eq:coupled} bei beliebiger Kopplungsstärke.
+Numerisch gegen eine direkte Integration von Gl.~\eqref{eq:coupled} geprüft:
+
+\begin{center}
+\begin{tabular}{cccc}
+  \toprule
+  $\kappa_\mathrm{eff}$ & $\eta_\mathrm{ges}$ exakt & $\sin^2\kappa_\mathrm{eff}$ & Abweichung\\
+  \midrule
+  $0{,}211$ & $0{,}044015$ & $0{,}044015$ & $7\cdot10^{-16}$\\
+  $0{,}705$ & $0{,}419510$ & $0{,}419510$ & $7\cdot10^{-14}$\\
+  $1{,}409$ & $0{,}974086$ & $0{,}974086$ & $5\cdot10^{-13}$\\
+  $2{,}114$ & $0{,}733126$ & $0{,}733126$ & $5\cdot10^{-13}$\\
+  $2{,}818$ & $0{,}100972$ & $0{,}100972$ & $1\cdot10^{-13}$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Die letzten drei Zeilen liegen jenseits des Maximums, wo die
+Effizienz durch Rückkonversion wieder fällt -- auch dort stimmt die Formel,
+und die Aufteilung $\eta_n/\eta_\mathrm{ges} = P_n/P_\mathrm{ges}$ bleibt auf
+sechs Stellen konstant.
+
+Vorausgesetzt wird stattdessen dreierlei, und das sind die eigentlichen
+Grenzen.
+
+\medskip
+\noindent\textbf{(i) Gemeinsame Phasenanpassung.} Alle $N$ Gitter müssen
+dieselbe Bragg-Bedingung erfüllen. Sie tun das nicht exakt: Zu jedem Ton
+gehört ein leicht anderer Bragg-Winkel, und bei festem Einfall bleibt ein
+Impulsfehler $\Delta k$. Die verstimmte Zwei-Wellen-Lösung lautet
+\begin{equation}
+  \eta(\xi) = \frac{\nu^2}{\nu^2+\xi^2}\,\sin^2\!\sqrt{\nu^2+\xi^2} ,
+  \qquad \nu = \kappa\sqrt{P},\quad \xi = \frac{\Delta k\,L}{2} .
+  \label{eq:detuned}
+\end{equation}
+Die Verstimmung $\xi$ muss nicht aus der Geometrie gerechnet werden -- sie
+steckt bereits in der spezifizierten Bandbreite. Definitionsgemäß ist die
+\SI{36}{\mega\hertz} genau die Spanne, über der die Effizienz auf die Hälfte
+fällt; am Bandrand $\delta f = \pm\SI{18}{\mega\hertz}$ gilt also
+$\eta=\tfrac12\eta(0)$. Bei $\nu=\kappa\sqrt{0{,}664}=0{,}758$ löst
+Gl.~\eqref{eq:detuned} das zu $\xi_{1/2}=1{,}3625$, und weil $\xi$ linear in
+der Frequenzablage ist, folgt die Eichung
+\begin{equation}
+  \xi(\delta f) = 1{,}3625\cdot\frac{\delta f}{\SI{18}{\mega\hertz}} .
+\end{equation}
+Damit lässt sich jede Tonspanne beziffern -- $\delta f$ ist die Ablage des
+äußersten Tons, also die halbe Spanne:
+
+\begin{center}
+\begin{tabular}{cccc}
+  \toprule
+  Tonspanne & $\delta f$ (äußerster Ton) & $\xi$ & Effizienzverlust dort\\
+  \midrule
+  \textbf{\SI{0.37}{\mega\hertz}} & \SI{0.185}{\mega\hertz} & $0{,}014$ & $\mathbf{0{,}007\,\%}$\\
+  \SI{6}{\mega\hertz}  & \SI{3}{\mega\hertz}  & $0{,}227$ & $1{,}8\,\%$\\
+  \SI{18}{\mega\hertz} & \SI{9}{\mega\hertz}  & $0{,}681$ & $15{,}1\,\%$\\
+  \SI{36}{\mega\hertz} & \SI{18}{\mega\hertz} & $1{,}363$ & $50\,\%$ (Bandrand, Eichpunkt)\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Die Tonspanne des Arbeitspunkts ist \emph{ein Hundertstel Prozent}
+der Bandbreite wert -- die Phasenanpassung ist hier schlicht kein Thema. Das
+ist keine Selbstverständlichkeit: Ein Profil mit \SI{18}{\mega\hertz} Spanne,
+wie es größere Spotfelder brauchen, verlöre am Rand bereits
+\SI{15}{\percent}, und dann wäre Gl.~\eqref{eq:multitone} durch die
+verstimmte Version Gl.~\eqref{eq:detuned} je Ton zu ersetzen, mit
+ordnungsabhängigem $\eta_n$.
+
+\medskip
+\noindent\textbf{(ii) Bragg-Regime, zwei Wellen je Gitter.} Höhere
+Beugungsordnungen und optische Mischprodukte sind stark fehlangepasst und
+vernachlässigt.
+
+\medskip
+\noindent\textbf{(iii) Linearität des Wandlers.} $\kappa_n\propto\sqrt{P_n}$
+setzt voraus, dass die HF-Leistung linear in die Indexmodulation übergeht.
+Akustische Nichtlinearität ist nicht enthalten -- dazu gleich mehr, denn an
+dieser Stelle kommt der Crestfaktor ein zweites Mal ins Spiel.
+
+\paragraph{Warum die Tonphasen hier nirgends auftauchen.}
+Das ist kein Versehen, sondern der Kern der Abgrenzung aus
+Abschnitt~\ref{sec:abgrenzung}. Die akustooptische Wechselwirkung sieht die
+\emph{Fourierkomponenten} des Schallfeldes. Jeder Ton ist genau eine solche
+Komponente, mit zeitlich konstanter Amplitude $a_n$ und konstanter Frequenz;
+er bildet ein stehendes Gitter, dessen Beugung von $P_n = a_n^2$ abhängt und
+von sonst nichts. Die Phase $\varphi_n$ legt nur fest, \emph{wo} die
+Gitterberge dieses einen Tons liegen, und das überträgt sich als derselbe
+Phasenversatz auf die gebeugte Welle -- also auf $\varphi_{nm}$ im
+Interferenzbild, wo er hingehört, und nicht auf $\eta_n$.
+
+Der Crestfaktor dagegen ist eine Eigenschaft der \emph{Summe} $s(t)$, nicht
+einer einzelnen Komponente. Diese Summe existiert nur dort, wo alle Töne
+durch dasselbe breitbandige Bauteil müssen: im Verstärker. Damit ist
+endgültig klar, warum der Crestfaktor eine Budgetgrenze der Elektronik ist
+und in der ganzen Beugungsrechnung nicht vorkommt.
+
+\medskip
+\noindent\emph{Mit einer Ausnahme}, und das ist Punkt (iii): Die momentane
+Dehnung an einem Ort im Kristall ist $s(t)$, mit Crestfaktor $\crest$. Wird
+die Spitzendehnung groß genug, erzeugt der Kristall selbst Harmonische, und
+die Zerlegung in $N$ unabhängige Gitter gilt nicht mehr. Das ist ein
+zweiter, vom Verstärker unabhängiger Kanal, über den ein hoher Crestfaktor
+schadet -- und er zeigt in dieselbe Richtung. Quantifizieren lässt er sich
+hier nicht; dafür bräuchte es eine Messung der Oberwellen bei fester
+mittlerer Leistung und variiertem $\crest$.
+
+\paragraph{Die Merkregel.}
+Aus Gl.~\eqref{eq:multitone} folgt unmittelbar eine Aussage, die man sich
+merken sollte:
+
+\begin{center}
+\emph{Die Gesamtbeugungseffizienz hängt nur von der gesamten HF-Leistung ab,
+nicht davon, auf wie viele Töne sie verteilt wird.}
+\end{center}
+
+\noindent Bei \SI{0.664}{\watt} ist $\eta_\mathrm{ges}=0{,}473$, ob die
+Leistung auf einen, drei oder dreizehn Töne verteilt wird; nur die Aufteilung
+auf die Ordnungen ändert sich (je Ton $0{,}473$, $0{,}158$ bzw.\ $0{,}036$).
+Das Aufspalten in ein Multitonprofil kostet also \emph{keine} Effizienz -- die
+geringere Effizienz gegenüber dem Testsheet kommt allein aus der kleineren
+Gesamtleistung (\SI{0.66}{\watt} statt \SI{1.3}{\watt}).
+
+\paragraph{Die Zahlen.}
+Mit $P_\mathrm{mittel,x}=\SI{0.664}{\watt}$ und
+$P_\mathrm{mittel,y}=\SI{0.825}{\watt}$ aus Schritt~1:
+\begin{align}
+  \eta_x &= \sin^2\!\bigl(0{,}930\cdot\sqrt{0{,}664}\bigr) = 0{,}473 ,\\
+  \eta_y &= \sin^2\!\bigl(0{,}930\cdot\sqrt{0{,}825}\bigr) = 0{,}559 .
+\end{align}
+Die Leistungsanteile aus $r_x=0{,}97$ und $r_y=1{,}16$ verteilen das nach
+Gl.~\eqref{eq:multitone} auf die Ordnungen,
+\begin{align}
+  \eta_{x,n} &= [\,0{,}156;\;0{,}161;\;0{,}156\,], \\
+  \eta_{y,m} &= [\,0{,}150;\;0{,}130;\;0{,}130;\;0{,}150\,],
+\end{align}
+und weil jeder Spot \emph{zweimal} gebeugt wird -- einmal im $x$-, einmal im
+$y$-AOD --, ist die Effizienz des Spots $(n,m)$ das Produkt
+$\eta_{x,n}\,\eta_{y,m}$. Das erklärt zugleich, wo das ungebeugte Licht
+bleibt: Der in $x$ nicht gebeugte Anteil $1-\eta_x$ durchläuft den
+$y$-AOD weiter und landet in den Ordnungen „0-$m$``, der in $y$ nicht
+gebeugte in „$n$-0``, und $(1-\eta_x)(1-\eta_y)$ geht ganz geradeaus
+als „0-0``. Diese Strahlen laufen geometrisch getrennt und werden
+ausgeblendet -- deshalb spricht das Testsheet von der Ordnung „1-1``, und
+deshalb ist nur sie das Nutzsignal. Summiert über alle zwölf Spots faktorisiert die
+Doppelsumme:
+\begin{equation}
+  \eta_\mathrm{Profil} \;=\; \sum_{n,m}\eta_{x,n}\,\eta_{y,m}
+  \;=\; \Bigl(\sum_n \eta_{x,n}\Bigr)\Bigl(\sum_m \eta_{y,m}\Bigr)
+  \;=\; \eta_x\,\eta_y \;=\; \SI{26.4}{\percent},
+\end{equation}
+also zwischen \SI{2.0}{\percent} und \SI{2.4}{\percent} je Spot, je nach
+Randgewichtung.
+
+\paragraph{Intermodulation.}
+Mit $\mathrm{OIP3}=+\SI{49}{dBm}$ und der stärksten Tonleistung
+$\SI{0.226}{\watt} = +\SI{23.5}{dBm}$ liegen die Produkte dritter Ordnung
+\begin{equation}
+  \mathrm{IMD3} = 2\,\bigl(\mathrm{OIP3} - P_\mathrm{Ton}\bigr)
+  = 2\,(49 - 23{,}5) = \SI{51}{dBc}
+\end{equation}
+unter den Haupttönen. Geisterspots \SI{51}{\deci\bel} unter den Hauptspots
+sind unkritisch. Bei $P_\mathrm{mittel}=\SI{1.3}{\watt}$ wären es noch
+\SI{45}{dBc} -- dort gilt die Extrapolation über OIP3 allerdings ohnehin nicht
+mehr, weil der Verstärker in der Begrenzung sitzt.
+
+\subsection{Schritt 4: Was die Phasenwahl in Watt bringt}
+
+Jetzt zahlt sich alles Vorangegangene aus. Nach Gl.~\eqref{eq:pavglimit}
+übersetzt sich jeder Crestfaktor unmittelbar in erlaubte Leistung und damit in
+Licht:
+
+\begin{table}[htb]
+  \centering
+  \caption{Alle Sätze bei $P_\mathrm{peak}\le P_{1\mathrm{dB}}$. Die
+  $x$-Achse liegt bei jedem zentrierten Satz fest bei $\crest_x=2{,}449$.}
+  \label{tab:hardware}
+  \begin{tabular}{lcccc}
+    \toprule
+    Phasensatz & $\crest_y$ & $P_\mathrm{mittel,y}$ & $\eta_\mathrm{Profil}$ & Versatz / $\Uw$\\
+    \midrule
+    alle Phasen $0$      & $2{,}826$ & \SI{0.50}{\watt} & \SI{17.6}{\percent} & \SI{0}{\nano\meter} / \SI{0.18}{\percent}\\
+    frühere Wahl         & $2{,}485$ & \SI{0.65}{\watt} & \SI{21.8}{\percent} & \SI{0}{\nano\meter} / \SI{0.21}{\percent}\\
+    \textbf{gewählter Punkt} & $\mathbf{2{,}196}$ & $\mathbf{\SI{0.83}{\watt}}$ & $\mathbf{\SI{26.4}{\percent}}$ & \SI{0}{\nano\meter} / \SI{0.30}{\percent}\\
+    Schroeder            & $2{,}000$ & \SI{1.00}{\watt} & \SI{36.8}{\percent} & \SI{18.9}{\nano\meter} / \SI{17.9}{\percent}\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Der gewählte Satz nach Gl.~\eqref{eq:workingpoint} schöpft die einzige
+verbliebene Freiheit aus: \SI{0.83}{\watt} statt \SI{0.50}{\watt} gegenüber
+$\varphi=0$ und \SI{0.65}{\watt} gegenüber der früheren Wahl, bei unverändert
+exakter Zentrierung und $\Uw=\SI{0.30}{\percent}$. In Licht sind das
+\SI{26.4}{\percent} statt \SI{17.6}{\percent} bzw.\ \SI{21.8}{\percent} im
+Profil.
+
+Schroeder brächte mit \SI{36.8}{\percent} nochmals mehr, verletzt aber
+Gl.~\eqref{eq:centering}: Der Fleck sitzt \SI{18.9}{\nano\meter} neben dem
+Atom und $\Uw$ springt um zwei Größenordnungen. Das ist der bereits bekannte
+Preis der Zentrierung, hier in echten Watt.
+
+\section*{Offene Punkte}
+
+\begin{itemize}\itemsep0.2em
+  \item Die Datenblattwerte des Verstärkers sind übernommen, die
+        Kompressionskurve der konkreten Kette ist \emph{nicht gemessen}.
+        Gl.~\eqref{eq:powerbudget} unterstellt eine harte Spitzenspannungs\-grenze
+        mit linearem Verhalten bis dorthin; die reale Kompressionskurve,
+        die Sättigung des AOD selbst (etwa $\eta_\mathrm{diff}/3$), die
+        akustische Dämpfung sowie Filter, Kabel und Wandler sind nicht
+        enthalten. Der berechnete Wert gilt für das ideale AWG-Signal.
+  \item Bei $N_x=3$ ist die Spitzenlast der $x$-Achse durch
+        Gl.~\eqref{eq:centering} auf $\sqrt{6}$ festgelegt. Eine Entlastung
+        dieser Achse ist nur über mehr Töne oder über das Aufgeben der
+        exakten Zentrierung erreichbar.
+  \item Der Atomort ist fest der Profilmittelpunkt; Strahllagefluktuationen
+        sind nicht berücksichtigt.
+\end{itemize}
+
+\end{document}

@@ -1,0 +1,55 @@
+Table~\ref{tab:beat34} lists all beating orders for the $3\times4$ tone grid.
+The last column gives the contribution of each order,
+$\sigma_d/\langle I\rangle_t$ with $\sigma_d=\sqrt{2|D_d|^2}$ and
+$\langle I\rangle_t=D_0$, as an rms over the spot square
+($2.34\times2.34\,\mu$m), so that it is defined over the same region $R$ as the
+spatial uniformity $U_h$. The pair counts add up to
+$\binom{12}{2}=66$, so every spot pair is accounted for.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{rrrlrr}
+\hline
+$d$ & $f_{\text{beat}}$ [kHz] & pairs & $(\Delta i,\Delta j)$ & distance [$\mu$m]
+ & $\left\langle\sigma_d^2/\langle I\rangle_t^2\right\rangle_R^{1/2}$ [\%]\\ \hline
+0  & 0     & 1  & $(2,-3)$           & 3.31       & --\\
+1  & 61.7  & 10 & $(1,-1)$, $(-1,2)$ & 1.40, 1.95 & 20.0\\
+2  & 123.3 & 11 & $(0,1)$, $(2,-2)$  & 0.78, 2.81 & 40.5\\
+3  & 185.0 & 10 & $(1,0)$, $(-1,3)$  & 1.17, 2.61 & \textbf{51.7}\\
+4  & 246.7 & 9  & $(0,2)$, $(2,-1)$  & 1.56, 2.46 & 20.4\\
+5  & 308.3 & 6  & $(1,1)$            & 1.40       & 18.8\\
+6  & 370.0 & 7  & $(2,0)$, $(0,3)$   & 2.34, 2.34 & 16.2\\
+7  & 431.7 & 4  & $(1,2)$            & 1.95       &  7.0\\
+8  & 493.3 & 3  & $(2,1)$            & 2.46       &  3.2\\
+9  & 555.0 & 2  & $(1,3)$            & 2.61       &  6.1\\
+10 & 616.7 & 2  & $(2,2)$            & 2.81       &  5.4\\
+11 & 678.3 & 0  & --                 & --         & --\\
+12 & 740.0 & 1  & $(2,3)$            & 3.31       &  1.8\\
+\hline
+\end{tabular}
+\caption{Beat orders of the $3\times4$ grid with $f_0=\SI{61.67}{\kilo\hertz}$
+together with the distance of the corresponding spot pairs and their
+contribution to the time dependent uniformity, calculated as an rms over the
+spot square $R$, for the tone phases $\phi_x=(0,\,12.5,\,25)^\circ$ and
+$\phi_y=(0,\,98,\,16,\,114)^\circ$ used in this work.}
+\label{tab:beat34}
+\end{table}
+
+The strongest beating is at $d=3$, produced by the nearest neighbors along $x$,
+followed by the nearest neighbors along $y$ at $d=2$; the diagonal neighbors
+contribute at $d=1$, $4$ and $5$ on a comparable level. Different orders
+oscillate at different frequencies and are therefore orthogonal over one
+fundamental period $T_0$, so their \emph{variances} add and no cross terms
+survive the time average. Since the spatial average $\langle\,\cdot\,\rangle_R$
+is linear it may be taken inside the sum, and the squares of the table entries
+add up to the total time dependent uniformity:
+\begin{equation}
+U_t=\left\langle\frac{\sigma_I^2}{\langle I\rangle_t^2}\right\rangle_R^{1/2}
+=\Bigl(\sum_{d>0}\Bigl\langle\frac{\sigma_d^2}{\langle I\rangle_t^2}
+\Bigr\rangle_R\Bigr)^{1/2}
+=76.6\,\% .
+\end{equation}
+The extreme order $d=12$ is produced by a single pair of corner spots, so its
+magnitude cannot be altered by any choice of tone phases; it is the residual
+that remains no matter how the phases are chosen.

@@ -36,6 +36,7 @@ The GUI always opens with this working point:
     waist            1.04 um after the lenses (1.287 mm before them)
     width            0.37 MHz, x and y coupled
     amplitudes       r_x = 0.97, r_y = 1.16
+    tone phases      phi_x = 0, 12.5, 25 deg;  phi_y = 0, 98, 16, 114 deg
     optics           f1 = 75 mm, f2 = 750 mm, fLO = 52.88 mm
     light / AOD      795 nm, offset 100 MHz
     pulse            f_Rabi = 1 MHz, Omega ~ I, eta = 0
@@ -243,8 +244,10 @@ class BeatingMultitoneWindow(QMainWindow):
             "grid_n": 200,
             "n_periods": 3,
             "frames_per_period": 60,
-            "phase_x": np.zeros(3),      # rad, phase per x tone
-            "phase_y": np.zeros(4),      # rad, phase per y tone
+            # Start phases of the working point, in degrees:
+            #     phi_x = 0, 12.5, 25        phi_y = 0, 98, 16, 114
+            "phase_x": np.radians([0.0, 12.5, 25.0]),            # rad, per x tone
+            "phase_y": np.radians([0.0, 98.0, 16.0, 114.0]),     # rad, per y tone
             # Phases are always TONE phases: a spot (n,m) carries
             # phi_x(n) + phi_y(m). Free spot phases were a cross-check and
             # have been removed - they could not be driven anyway and did
@@ -1851,6 +1854,116 @@ class BeatingMultitoneWindow(QMainWindow):
         self.canvas.draw_idle()
         return True
 
+    def _panel_spectrum(self, ax, c, fs=8, title=True):
+        """Beat spectrum with the trap frequency and its first harmonic.
+
+        ONE drawing for the screen panel and for the PDF written on save - a
+        second version of the same picture drifts out of step with the first
+        as soon as anything here changes.
+        """
+        spec = c.get("spectrum", {})
+        if not spec:
+            ax.text(0.5, 0.5, "no spectrum available",
+                    ha="center", va="center", transform=ax.transAxes)
+            return
+        ds = np.array(sorted(spec))
+        freqs = ds * c["f0"] * 1e-3
+        vals = np.array([spec[int(d)] * 100 for d in ds])
+        width_bar = 0.7 * (freqs[1] - freqs[0]) if len(freqs) > 1 else 10.0
+        ax.bar(freqs, vals, width=width_bar, color="#3b6ea5", edgecolor="none")
+        # Fix the axis BEFORE the labels are placed - they are anchored to the
+        # top of the axis, and setting the limit afterwards left them hanging
+        # in mid air.
+        ax.set_ylim(0, max(vals.max() * 1.28, 1e-3))
+        nu = self.sp_nu_r.value()
+        # CAUTION: do not use a variable "col" here - further up that
+        # is the column index of the crosshair.
+        for f_mark, lab in ((nu, "$\\nu_r$"), (2 * nu, "$2\\nu_r$")):
+            if freqs[0] - width_bar <= f_mark <= freqs[-1] + width_bar:
+                ax.axvline(f_mark, color="#b3402f", lw=1.4, ls="--")
+                ax.annotate(lab, (f_mark, ax.get_ylim()[1]),
+                            xytext=(3, -2), textcoords="offset points",
+                            color="#b3402f", fontsize=fs + 1, ha="left", va="top")
+        ax.set_xlabel("beat frequency (kHz)", fontsize=fs)
+        ax.set_ylabel("$\\sigma_d / \\langle I\\rangle$ (%)", fontsize=fs)
+        if title:
+            ax.set_title(f"Spectrum of the beating in the plateau   "
+                         f"(total {c['sigma_rms'] * 100:.0f} %)", fontsize=fs + 1)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    # --------------------------------------------------------
+    # the two figures written on save
+    # --------------------------------------------------------
+    def _save_period_pdf(self, path):
+        """The whole profile at t = 0, T_0/3 and 2 T_0/3, side by side.
+
+        One shared colour bar for the three panels, so they are directly
+        comparable. The scale is I / <I> with <I> the mean of the time
+        average over the whole grid - ONE number, not a map: 1.0 therefore
+        reads as 'as bright as the profile is on average', and a value of 3
+        means three times that, wherever it sits.
+        """
+        c, s = self.cache, self.state
+        fpp = int(s["frames_per_period"])
+        n = int(c["n_frames"])
+        if n < 3 or not np.isfinite(c["T0"]) or c["T0"] <= 0:
+            raise RuntimeError(
+                "no full beat period available - the pattern is not periodic, "
+                "or frames/period is too small")
+        idx = [0, int(round(fpp / 3.0)) % n, int(round(2.0 * fpp / 3.0)) % n]
+        labels = ["$t = 0$", "$t = T_0/3$", "$t = 2\\,T_0/3$"]
+
+        mean_I = float(c["I_avg"].mean())
+        if not np.isfinite(mean_I) or mean_I <= 0:
+            raise RuntimeError("time average is zero - nothing to normalise to")
+
+        # The colour scale follows the selector in the window, converted from
+        # 'x the maximum of the time average' into 'x the mean'. A shared bar
+        # needs ONE scale, so 'per frame' becomes the largest of the three.
+        mode = self.cmb_scale.currentIndex()
+        if mode == 0:
+            top = c["cube_p995"]
+        elif mode == 1:
+            top = c["cube_max"]
+        elif mode == 2:
+            top = float(c["I_avg"].max())
+        else:
+            top = float(max(c["cube"][k].max() for k in idx))
+        vmax = max(top / mean_I, 1e-12)
+
+        x_um, y_um = c["x"] * 1e6, c["y"] * 1e6
+        extent = [x_um[0], x_um[-1], y_um[0], y_um[-1]]
+
+        fig = Figure(figsize=(11.2, 3.9), dpi=100)
+        FigureCanvas(fig)
+        axes = fig.subplots(1, 3, sharex=True, sharey=True)
+        im = None
+        for ax, k, lab in zip(axes, idx, labels):
+            im = ax.imshow(c["cube"][k] / mean_I, extent=extent, origin="lower",
+                           cmap="inferno", vmin=0.0, vmax=vmax, aspect="equal")
+            ax.set_title("%s   (%.4f us)" % (lab, c["t"][k] * 1e6), fontsize=10)
+            ax.set_xlabel("x (um)", fontsize=9)
+            ax.tick_params(labelsize=8)
+        axes[0].set_ylabel("y (um)", fontsize=9)
+        fig.subplots_adjust(left=0.06, right=0.90, bottom=0.14, top=0.90,
+                            wspace=0.10)
+        cax = fig.add_axes([0.915, 0.14, 0.016, 0.76])
+        cb = fig.colorbar(im, cax=cax)
+        cb.set_label(r"$I\,/\,\langle I\rangle$", fontsize=10)
+        cb.ax.tick_params(labelsize=8)
+        fig.savefig(path, format="pdf")
+
+    def _save_spectrum_pdf(self, path):
+        """The beat spectrum on its own page, nu_r and 2 nu_r marked."""
+        fig = Figure(figsize=(6.6, 4.1), dpi=100)
+        FigureCanvas(fig)
+        ax = fig.add_subplot(111)
+        self._panel_spectrum(ax, self.cache, fs=10, title=False)
+        ax.tick_params(labelsize=9)
+        fig.tight_layout()
+        fig.savefig(path, format="pdf", bbox_inches="tight")
+
     def draw_frame(self, full=False):
         c, s = self.cache, self.state
         if not c:
@@ -2036,34 +2149,7 @@ class BeatingMultitoneWindow(QMainWindow):
                 self.ax_st.text(0.5, 0.5, "no uniformity available",
                                 ha="center", va="center", transform=self.ax_st.transAxes)
         elif panel == 4:
-            spec = c.get("spectrum", {})
-            if spec:
-                ds = np.array(sorted(spec))
-                freqs = ds * c["f0"] * 1e-3
-                vals = np.array([spec[int(d)] * 100 for d in ds])
-                width_bar = 0.7 * (freqs[1] - freqs[0]) if len(freqs) > 1 else 10.0
-                self.ax_st.bar(freqs, vals, width=width_bar, color="#3b6ea5",
-                               edgecolor="none")
-                nu = self.sp_nu_r.value()
-                # CAUTION: do not use a variable "col" here - further up that
-                # is the column index of the crosshair.
-                for f_mark, lab in ((nu, "$\\nu_r$"), (2 * nu, "$2\\nu_r$")):
-                    if freqs[0] - width_bar <= f_mark <= freqs[-1] + width_bar:
-                        self.ax_st.axvline(f_mark, color="#b3402f", lw=1.4, ls="--")
-                        self.ax_st.annotate(lab, (f_mark, self.ax_st.get_ylim()[1]),
-                                            xytext=(3, -2), textcoords="offset points",
-                                            color="#b3402f", fontsize=9, ha="left", va="top")
-                self.ax_st.set_ylim(0, max(vals.max() * 1.28, 1e-3))
-                self.ax_st.set_xlabel("beat frequency (kHz)", fontsize=8)
-                self.ax_st.set_ylabel("$\\sigma_d / \\langle I\\rangle$ (%)", fontsize=8)
-                self.ax_st.set_title(
-                    f"Spectrum of the beating in the plateau   "
-                    f"(total {c['sigma_rms'] * 100:.0f} %)", fontsize=9)
-                self.ax_st.spines["top"].set_visible(False)
-                self.ax_st.spines["right"].set_visible(False)
-            else:
-                self.ax_st.text(0.5, 0.5, "no spectrum available",
-                                ha="center", va="center", transform=self.ax_st.transAxes)
+            self._panel_spectrum(self.ax_st, c)
         else:
             if panel == 1:
                 dat, cmap = c["n_eff"], "viridis"
@@ -2216,6 +2302,14 @@ class BeatingMultitoneWindow(QMainWindow):
         dlg.activateWindow()
 
     def _on_save_clicked(self):
+        """Two vector PDFs plus the parameters as text.
+
+        The window as a whole is no longer written out: what is wanted in a
+        document is the time course over one beat period and the spectrum,
+        each on its own page and each at its own size.
+        """
+        if not self.cache:
+            return
         self.draw_frame(full=True)
         stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
         s = self.state
@@ -2226,10 +2320,18 @@ class BeatingMultitoneWindow(QMainWindow):
         name = (f"Beating_N{s['N_x']}x{s['N_y']}_"
                 f"{'Airy' if s['use_airy'] else 'Gauss'}_"
                 f"w{s['win'] * 1e6:.3f}um_width{s['width_x'] * 1e-6:.4f}MHz"
-                f"{tag}_frame{self.frame_idx:04d}_{stamp}")
-        path = self.out_dir / (name + ".pdf")
+                f"{tag}_{stamp}")
+        p_per = self.out_dir / (name + "_period3.pdf")
+        p_spec = self.out_dir / (name + "_spectrum.pdf")
         try:
-            self.fig.savefig(path, format="pdf", bbox_inches="tight")
+            old_ft = matplotlib.rcParams.get("pdf.fonttype")
+            matplotlib.rcParams["pdf.fonttype"] = 42      # editable text
+            try:
+                self._save_period_pdf(p_per)
+                self._save_spectrum_pdf(p_spec)
+            finally:
+                if old_ft is not None:
+                    matplotlib.rcParams["pdf.fonttype"] = old_ft
             # Parameter daneben als Textdatei - ein Bild ohne die Zahlen,
             # aus denen es entstanden ist, ist spaeter nicht rekonstruierbar.
             c = self.cache
@@ -2253,7 +2355,10 @@ class BeatingMultitoneWindow(QMainWindow):
                      f"camera exposure = {s['t_exp'] * 1e6:.3f} us",
                      f"grid = {s['grid_n']}^2, frames/period = "
                      f"{s['frames_per_period']}, periods = {s['n_periods']}",
-                     f"frame index = {self.frame_idx}"]
+                     f"trap frequency nu_r = {self.sp_nu_r.value():.3f} kHz",
+                     "figure 1: profile at t = 0, T_0/3, 2 T_0/3, colour "
+                     "scale I / <I> with <I> = mean of the time average",
+                     "figure 2: beat spectrum, nu_r and 2 nu_r marked"]
             if c:
                 lines += [f"f_0 = {c['f0'] * 1e-3:.6f} kHz  ->  T_0 = "
                           f"{c['T0'] * 1e6:.4f} us",
@@ -2267,8 +2372,9 @@ class BeatingMultitoneWindow(QMainWindow):
                          + ", ".join(f"{v:.2f}" for v in np.degrees(s["phase_y"])))
             (self.out_dir / (name + ".txt")).write_text("\n".join(lines),
                                                         encoding="utf-8")
-            self.lbl_status.setText(f"saved: {short_name(path)} (+ .txt)")
-            self.lbl_status.setToolTip(str(path))
+            self.lbl_status.setText(
+                f"saved: {short_name(p_per)}, _spectrum.pdf (+ .txt)")
+            self.lbl_status.setToolTip(f"{p_per}\n{p_spec}")
         except Exception as exc:
             QMessageBox.critical(self, "Saving failed", str(exc))
 
