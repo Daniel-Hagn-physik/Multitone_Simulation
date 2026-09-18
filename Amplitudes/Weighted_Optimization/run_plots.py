@@ -161,6 +161,20 @@ class PlotsDialog(QDialog):
             "Grenzen stehen im Bericht.")
         display_layout.addRow(self.draw_best_point)
 
+        self.best_point_report_only = QCheckBox(
+            "nur in den Bericht, nicht einzeichnen")
+        self.best_point_report_only.setChecked(False)
+        self.best_point_report_only.setToolTip(
+            "Der Punkt wird ganz normal bestimmt und mit allen Parametern in\n"
+            "den Bericht geschrieben - die Karten bleiben aber frei, kein Stern,\n"
+            "keine Linie, kein Schnitt durch den Punkt.\n\n"
+            "Fuer den Fall, dass man die Zahlen eines Gitterpunkts braucht, die\n"
+            "Abbildung aber ohne Markierung ins Dokument soll.")
+        # Anfangszustand passend zum Stern-Haken - _on_draw_best_point_toggled
+        # laeuft erst beim Umschalten.
+        self.best_point_report_only.setEnabled(self.draw_best_point.isChecked())
+        display_layout.addRow(self.best_point_report_only)
+
         self.best_point_follow = QComboBox()
         self.best_point_follow.setToolTip(
             "Nach welcher Groesse der Stern gesetzt wird.\n\n"
@@ -953,6 +967,8 @@ class PlotsDialog(QDialog):
         self._fill_valley_limit()
 
     def _on_draw_best_point_toggled(self, an):
+        # Ohne Punkt gibt es auch nichts in den Bericht zu schreiben.
+        self.best_point_report_only.setEnabled(bool(an))
         self.best_point_follow.setEnabled(bool(an))
         self._sync_manual_point()
 
@@ -1129,6 +1145,7 @@ class PlotsDialog(QDialog):
             win_axis=WIN_AXIS_CHOICES[self.win_axis.currentIndex()][1],
             legend_fontsize=int(self.legend_fontsize.value()),
             draw_best_point=self.draw_best_point.isChecked(),
+            best_point_report_only=self.best_point_report_only.isChecked(),
             best_point_follow=self._current_best_point_follow(),
             best_point_value=self.best_point_value.value(),
             best_point_value2=self.best_point_value2.value(),
@@ -1205,6 +1222,7 @@ def main():
             results,
             win_axis=params["win_axis"],
             draw_best_point=params["draw_best_point"],
+            best_point_report_only=params["best_point_report_only"],
             best_point_follow=params["best_point_follow"],
             best_point_value=params["best_point_value"],
             best_point_value2=params["best_point_value2"],

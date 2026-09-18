@@ -425,10 +425,12 @@ C_SYMBOL = r"$\eta_%s$" % _IDX
 # Breite und stand in jeder der vier Karten ein zweites Mal.
 U_CBAR = U_SYMBOL + " (%)"
 C_CBAR = C_SYMBOL + " (%)"
-U_TITLE = (r"Uniformity $U_w$ (atom-weighted)" if _WEIGHTED
-           else r"Uniformity $U_h$ (hard metric)")
-C_TITLE = (r"Crosstalk $\eta_w$ (atom-weighted)" if _WEIGHTED
-           else r"Crosstalk $\eta_h$ (hard metric)")
+# Nur das Wort. Welches Symbol gemeint ist und in welchen Einheiten es
+# steht, sagt die Colorbar daneben; welche Metrik-Familie der Ordner rechnet,
+# steht im Bericht und im Dateinamen. "Uniformity $U_h$ (hard metric)" hat
+# dasselbe dreimal gesagt und den Titel ueber zwei Zeilen gezogen.
+U_TITLE = "Uniformity"
+C_TITLE = "Crosstalk"
 FAMILY_TITLE = "atom-weighted" if _WEIGHTED else "hard metric"
 
 
@@ -1225,6 +1227,11 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
             ax.set_xlabel(x_label)
         for ax in axes[:, 0]:
             ax.set_ylabel(WIDTH_LABEL)
+            # Zwei Nachkommastellen, wie in den uebrigen Karten. Ohne das
+            # waehlt matplotlib hier eine Schrittweite von 0.025 und schreibt
+            # drei Stellen - eine Genauigkeit, die das Gitter gar nicht hat.
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=5, steps=[1, 2, 5, 10]))
+            ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
 
         handles, labels = axes.flat[0].get_legend_handles_labels()
         if any(p.get('clamped') for p in panels):
@@ -1973,6 +1980,7 @@ def make_all(results, win_axis="before_lens", draw_best_point=DRAW_BEST_POINT_DE
              amplitude_maps=False,
              forbidden_factor=None, forbidden_excluded=False,
              forbidden_draw=True, best_point_follow=None, best_point_value=None,
+             best_point_report_only=False,
              best_point_value2=None, point_cuts=False,
              valley_map_show_path=False,
              valley_legend_placement=VALLEY_LEGEND_PLACEMENT_DEFAULT,
@@ -2032,6 +2040,12 @@ def make_all(results, win_axis="before_lens", draw_best_point=DRAW_BEST_POINT_DE
     # brauchen es, best_point_by liefert es nur beim manuellen Punkt.
     stern = _mit_waist_um(results, stern)
     out['best_point'] = stern
+    # Der Punkt kann NUR in den Bericht: er wird dann ganz normal bestimmt und
+    # mit allen Parametern ausgewertet, aber keine Figur zeichnet ihn ein.
+    # Gedacht fuer den Fall, dass man die Zahlen eines Gitterpunkts braucht,
+    # die Abbildung aber ohne Markierung ins Dokument soll.
+    zeichne_stern = bool(draw_best_point) and not best_point_report_only
+    stern_plot = stern if zeichne_stern else None
     if stern is not None and stern.get('outside'):
         print("Hinweis: der selbst gewaehlte Punkt liegt ausserhalb des "
               "gescannten Fensters - dort gibt es keine Daten.")
@@ -2051,10 +2065,10 @@ def make_all(results, win_axis="before_lens", draw_best_point=DRAW_BEST_POINT_DE
     # haengt. legend_fontsize wird als DOKUMENT-Groesse durchgereicht.
     out['plots']['metric_comparison'] = plot_metric_comparison(
         results, prefix, out_dir=plots_dir, win_axis=win_axis,
-        draw_best_point=draw_best_point, save=save, show=show,
+        draw_best_point=zeichne_stern, save=save, show=show,
         confirm_overwrite=confirm_overwrite, fit_line=karten_fit,
         fit_line_dashed_extrapolation=fit_line_dashed_extrapolation,
-        forbidden_factor=zeichnen, best_point=stern)
+        forbidden_factor=zeichnen, best_point=stern_plot)
     if amplitude_maps:
         if amplitude_panels(results) is None:
             # Kein Abbruch: die uebrigen Plots sollen nicht an einer
@@ -2065,11 +2079,11 @@ def make_all(results, win_axis="before_lens", draw_best_point=DRAW_BEST_POINT_DE
         else:
             out['plots']['metric_comparison_amp'] = plot_metric_comparison(
                 results, prefix, out_dir=plots_dir, win_axis=win_axis,
-                draw_best_point=draw_best_point, save=save, show=show,
+                draw_best_point=zeichne_stern, save=save, show=show,
                 confirm_overwrite=confirm_overwrite, fit_line=karten_fit,
                 fit_line_dashed_extrapolation=fit_line_dashed_extrapolation,
                 with_amplitudes=True, forbidden_factor=zeichnen,
-                best_point=stern)
+                best_point=stern_plot)
             geklemmt = r_bounds_clamped_fraction(results)
             if geklemmt is not None and max(geklemmt) > 0:
                 lo, hi = results['r_bounds']
@@ -2080,9 +2094,9 @@ def make_all(results, win_axis="before_lens", draw_best_point=DRAW_BEST_POINT_DE
                       "sind keine freien Optima - im Bild sind sie ein Plateau.")
     out['plots']['region'] = plot_region(
         results, prefix, out_dir=plots_dir, win_axis=win_axis,
-        draw_best_point=draw_best_point, save=save, show=show,
+        draw_best_point=zeichne_stern, save=save, show=show,
         confirm_overwrite=confirm_overwrite, forbidden_factor=zeichnen,
-        best_point=stern)
+        best_point=stern_plot)
     if valley_cut:
         # Im Geradenmodus IST die Gerade der Schnitt - sie wird dann
         # immer bestimmt, unabhaengig vom fit_line-Schalter.
@@ -2099,7 +2113,7 @@ def make_all(results, win_axis="before_lens", draw_best_point=DRAW_BEST_POINT_DE
             waist_range=valley_waist_range, width_range=valley_width_range,
             map_show_path=valley_map_show_path,
             legend_placement=valley_legend_placement,
-            draw_best_point=draw_best_point, best_point=stern)
+            draw_best_point=zeichne_stern, best_point=stern_plot)
         if braucht_fit:
             out['valley_line'] = fit_valley_line(
                 results, axis=valley_axis, follow=valley_follow,
@@ -2126,19 +2140,19 @@ def make_all(results, win_axis="before_lens", draw_best_point=DRAW_BEST_POINT_DE
                 guide_follow=valley_guide_follow,
                 guide_halfwidth=valley_guide_halfwidth,
                 waist_range=valley_waist_range, width_range=valley_width_range,
-                draw_best_point=draw_best_point, best_point=stern,
+                draw_best_point=zeichne_stern, best_point=stern_plot,
                 show_extrapolated=valley_map_show_path,
                 legend_placement=panel_legend_placement)
             if panels is not None:
                 out['plots']['line_panels'] = panels
     if point_cuts:
-        if stern is None:
+        if stern_plot is None:
             print("Hinweis: kein Schnitt durch den Punkt - es ist kein Punkt "
                   "markiert (Haken \"Punkt als Stern einzeichnen\").")
         else:
             try:
                 out['plots']['point_cuts'] = plot_point_cuts(
-                    results, prefix, best=stern, out_dir=plots_dir,
+                    results, prefix, best=stern_plot, out_dir=plots_dir,
                     win_axis=win_axis, save=save, show=show,
                     confirm_overwrite=confirm_overwrite,
                     legend_fontsize=legend_fontsize)
@@ -2149,7 +2163,7 @@ def make_all(results, win_axis="before_lens", draw_best_point=DRAW_BEST_POINT_DE
     if plot_scan_overview:
         out['plots']['overview'] = plot_overview(
             results, out_dir=plots_dir, save=save, show=show,
-            confirm_overwrite=confirm_overwrite, best_point=stern,
+            confirm_overwrite=confirm_overwrite, best_point=stern_plot,
             win_axis=win_axis)
 
     if save:
