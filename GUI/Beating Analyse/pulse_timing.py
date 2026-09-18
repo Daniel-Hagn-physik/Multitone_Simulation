@@ -55,6 +55,7 @@ from PyQt5.QtWidgets import (
 
 # The physics: kern/beating_physik.py (kern is a package next to this file).
 from kern import beating_physik as phys
+from kern.plotstil import FIG_WIDTH_IN, FIG_WIDTH_SMALL_IN, style_figure
 
 try:
     from power_budget import _load_raman
@@ -612,8 +613,7 @@ class PulseTimingDialog(QDialog):
         gname = "I" if L["law"] == "I" else r"\sqrt{I}"
         ax.set_ylabel(r"$%s(t)\,/\,\langle %s\rangle_t$" % (gname, gname))
         if title:
-            ax.set_title("Profile intensity, normalised to its time average",
-                         fontsize=10)
+            ax.set_title("Profile intensity, normalised to its time average")
         ax.grid(alpha=0.25)
 
     def _panel_period(self, ax, L, title=True):
@@ -624,7 +624,7 @@ class PulseTimingDialog(QDialog):
         ax.set_xlabel(r"pulse start $t_0$ (%s)" % ul)
         ax.set_ylabel(r"$\langle\theta\rangle\,/\,\pi$")
         if title:
-            ax.set_title("Mean pulse area over one beat period", fontsize=10)
+            ax.set_title("Mean pulse area over one beat period")
         ax.grid(alpha=0.25)
         # No second y axis and no peak-to-peak number here any more: with a
         # pulse longer than the beat period the swing rides on a large offset
@@ -678,7 +678,7 @@ class PulseTimingDialog(QDialog):
             ttl = "Pulse area point by point"
         im = ax.imshow(dat, extent=ext, origin="lower", cmap="magma", **kw)
         cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03)
-        cb.set_label(cb_lab, fontsize=10)
+        cb.set_label(cb_lab)
         # A white line on the bright end of any colormap is invisible; the dark
         # stroke around it keeps the rings readable wherever they fall.
         stroke = [pe.withStroke(linewidth=2.6, foreground="black")]
@@ -702,7 +702,7 @@ class PulseTimingDialog(QDialog):
             ax.set_xlabel(r"x ($\mu$m)")
             ax.set_ylabel(r"y ($\mu$m)")
         if title:
-            ax.set_title(ttl, fontsize=10)
+            ax.set_title(ttl)
 
     def _draw_curves(self, fig, titles=True):
         """The three time-domain panels - what goes into the curve PDF."""
@@ -849,21 +849,40 @@ class PulseTimingDialog(QDialog):
             old_ft = matplotlib.rcParams.get("pdf.fonttype")
             matplotlib.rcParams["pdf.fonttype"] = 42          # editable text
 
-            f_cur = Figure(figsize=(A4_PORTRAIT[0], 0.62 * A4_PORTRAIT[1]),
-                           dpi=100)
+            # 16 cm wide, like every other saved figure - see kern/plotstil.py.
+            f_cur = Figure(figsize=(FIG_WIDTH_IN, 1.06 * FIG_WIDTH_IN), dpi=100)
             FigureCanvas(f_cur)
             self._draw_curves(f_cur, titles=False)
             p_cur = out / (base + "_curves.pdf")
-            f_cur.savefig(p_cur, format="pdf", bbox_inches="tight")
+            style_figure(f_cur)
+            f_cur.savefig(p_cur, format="pdf")
 
-            f_map = Figure(figsize=(5.6, 4.6), dpi=100)
+            # Die Karte gehoert nicht ueber die ganze Textbreite: bei 16 cm
+            # waere sie 12.8 cm hoch und haette die halbe Seite belegt. Mit
+            # 10 x 8 cm sind es knapp ein Drittel der Texthoehe (24.7 cm) -
+            # und weil sie in DIESER Groesse gespeichert wird, steht sie mit
+            # width=0.625\textwidth unskaliert im Dokument und ihre
+            # Beschriftung ist dieselben 10 pt wie ueberall sonst.
+            f_map = Figure(figsize=(FIG_WIDTH_SMALL_IN, 0.80 * FIG_WIDTH_SMALL_IN),
+                           dpi=100)
             FigureCanvas(f_map)
             ax = f_map.add_subplot(111)
             self._panel_map(f_map, ax, L, title=False)
+            ax.locator_params(axis="both", nbins=4)   # schmale Achse, weniger Ticks
+            # Raender in ZENTIMETERN gerechnet, nicht als Anteil: bei 10 pt
+            # braucht die y-Beschriftung mit ihren Tick-Zahlen rund 1.7 cm,
+            # egal wie gross die Figur ist. Und nicht ueber die
+            # Automatik-Layouts: die Achse hat aspect="equal", waechst darin
+            # ueber ihre Zelle hinaus und schiebt die y-Beschriftung aus dem
+            # Bild - genau das schnitt sie vorher ab.
+            w_cm, h_cm = 10.0, 8.0
+            f_map.subplots_adjust(left=1.75 / w_cm, right=1.0 - 1.85 / w_cm,
+                                  bottom=1.30 / h_cm, top=1.0 - 0.25 / h_cm)
             map_sfx = "_excmap.pdf" if self.cmb_map.currentIndex() == 1 \
                 else "_areamap.pdf"
             p_map = out / (base + map_sfx)
-            f_map.savefig(p_map, format="pdf", bbox_inches="tight")
+            style_figure(f_map)
+            f_map.savefig(p_map, format="pdf")
 
             if old_ft is not None:
                 matplotlib.rcParams["pdf.fonttype"] = old_ft
@@ -1003,6 +1022,10 @@ class PulseTimingDialog(QDialog):
               "3. The same curve zoomed around the chosen t_0. x is the trigger "
               "error, the right axis the deviation from the area at zero error.",
               "",
+              "Breiten: `_curves.pdf` ist 16 cm breit gespeichert und gehoert "
+              "mit `width=\\textwidth` ins Dokument, die Karte 10 cm und mit "
+              "`width=0.625\\textwidth`. Beide dann unskaliert, Beschriftung "
+              "10 pt.", "",
               "**`_map.pdf`**: pulse area `theta(r)/pi` point by point, no "
               "averaging. The white rings are 1 and 2 sigma of the atomic "
               "position distribution (or the outline of the hard mask). In the "

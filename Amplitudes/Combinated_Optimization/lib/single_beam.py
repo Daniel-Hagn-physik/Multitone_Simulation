@@ -215,15 +215,21 @@ ARBEITSPUNKT_DEFAULT_UM = 1.9
 # ----------------------------------------------------------------------
 # Positions-Sweep: fester Waist, das ATOM wandert
 # ----------------------------------------------------------------------
-# Gefahren wird der Betrag r des Versatzes; die Richtung sagt, wie er sich
-# auf x und y verteilt. Eine dritte, waagerechte Richtung braucht es nicht:
-# das Profil ist rotationssymmetrisch, waagerecht ist dasselbe wie
-# senkrecht. Diagonal ist es NICHT dasselbe - nicht wegen des Strahls,
-# sondern wegen der Nachbar-Sites: die liegen auf einem Quadratgitter, und
-# in der Diagonale ist die naechste Site sqrt(2) mal weiter weg.
+# Gefahren wird der Betrag r des Versatzes SENKRECHT, also (0, r). Eine
+# waagerechte Richtung braucht es nicht: das Profil ist rotationssymmetrisch,
+# waagerecht ist dasselbe wie senkrecht.
+#
+# Die frueher zweite, diagonale Richtung ist raus. Sie unterschied sich nur
+# ueber die Nachbar-Sites (Quadratgitter, diagonal ist die naechste Site
+# sqrt(2) mal weiter weg) - also allein in den HARTEN, geometrischen
+# Groessen, und die werden beim Versatz nicht mehr gezeichnet. Fuer die
+# atomgewichteten Groessen lieferten beide Richtungen ohnehin dieselben
+# Zahlen (gemessen: 5e-8 relativer Unterschied).
+#
+# offset_vektor() kennt "diagonal" weiterhin, damit aeltere Datensaetze mit
+# beiden Richtungen noch geladen und geplottet werden koennen.
 OFFSET_RICHTUNGEN = [
     ("vertikal", "senkrecht  (0, r)"),
-    ("diagonal", "diagonal  (r/sqrt2, r/sqrt2)"),
 ]
 
 OFFSET_STUETZSTELLEN_DEFAULT = 61
@@ -698,7 +704,7 @@ def monotone_kind(werte):
 # Positions-Sweep: fester Waist, das Atom wandert
 # ======================================================================
 def sweep_offset(waist, params, n=None, r_max=None,
-                 richtungen=("vertikal", "diagonal"), progress=None):
+                 richtungen=("vertikal",), progress=None):
     """Alle Metriken ueber dem VERSATZ des Atoms, bei festem Waist.
 
     r laeuft von 0 (Atom auf der Site) bis `r_max` - Default ist der Waist

@@ -400,11 +400,12 @@ class PlotsDialog(QDialog):
                 "r_y": "r_y (Amplituden-Verhaeltnis y)",
             }[key]
             box = QCheckBox(klartext)
-            # Die beiden kombinierten Groessen sind die Haelften von J
-            # (J = alpha*U_c + (1-alpha)*eta_c). Im Talpfad-Modus sind sie
-            # anhakbar, aber nicht voreingestellt - sonst waeren es neun
-            # Kurven. Im Geradenmodus stehen sie ohnehin immer im Bild.
-            box.setChecked(key not in ("uniformity_kombi", "crosstalk_kombi"))
+            # Voreingestellt ist NUR J. Alles anzuhaken ergab neun Kurven
+            # auf vier y-Achsen - beim Pruefen brauchbar, als Abbildung
+            # nicht. Die Einzelgroessen stehen im Panel-Plot daneben, jede in
+            # ihrem eigenen Feld; hier holt sie ein Haken zurueck.
+            # Im Geradenmodus steht die Auswahl ohnehin fest (J, U_c, eta_c).
+            box.setChecked(key in report.VALLEY_TRACES_DEFAULT)
             if key in ("uniformity_kombi", "crosstalk_kombi"):
                 box.setToolTip(
                     "Eine der beiden Haelften der Zielfunktion:\n"

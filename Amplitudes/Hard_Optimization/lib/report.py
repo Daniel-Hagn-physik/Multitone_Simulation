@@ -239,7 +239,18 @@ ZWEI_PANEL_DICHTE = 0.70
 # 6.3 Zoll ist die Textbreite (A4, 2.5-cm-Raender), die Datei wird im
 # Dokument also nicht mehr skaliert. Wer hier etwas aendert, aendert es in
 # allen drei Ordnern.
-VALLEY_FIGSIZE = (6.3, 3.6)
+# 6.3 in = 16 cm Textbreite. Die Hoehe so, dass die Karte links etwa dasselbe
+# Seitenverhaeltnis bekommt wie eine Karte der Metrik-Uebersicht - bei 3.6 in
+# stand sie hochkant neben quadratischen Karten in der Nachbarabbildung.
+VALLEY_FIGSIZE = (6.3, 2.9)
+# Eigene Hoehe fuer plot_score_and_crosstalk(). Dort tragen BEIDE Panels eine
+# Karte samt Farbskala; im Schnittplot ist es nur eine, das zweite Panel ist
+# eine Kurve ohne Colorbar. Bei gleicher Figurhoehe wuerde die Datenflaeche
+# deshalb schmal und hoch (4.55 x 5.95 cm gegen 5.62 x 5.03 cm im Combinated-
+# Schnittplot). 2.25 in bringt sie auf dasselbe Seitenverhaeltnis 0.90 -
+# gemessen, nicht geschaetzt. Absolut bleibt sie kleiner: zwei Farbskalen in
+# 16 cm Breite kosten nun einmal Platz, den eine nicht kostet.
+VALLEY_MAPS_FIGSIZE = (6.3, 2.25)
 VALLEY_WIDTH_RATIOS = [1.0, 1.0]
 # Beide Legenden stehen UNTER ihrem Panel, nicht im Bild: in der Karte
 # ueberdeckte die Legende (mit den Koordinaten des Arbeitspunkts) die
@@ -259,7 +270,11 @@ VALLEY_LEGEND_CHOICES = [
     ("below", "Unter die Panels"),
     ("inside", "Ins Panel, unten rechts (kleinere Schrift)"),
 ]
-VALLEY_LEGEND_PLACEMENT_DEFAULT = "below"
+# "inside": seit die Karte nur noch die Gerade zeigt und der Schnitt nur noch
+# die Zielgroesse, hat jede Legende einen oder zwei Eintraege. Zwei Kaesten
+# UNTER den Panels reservieren dafuer eine ganze Zeile Figurhoehe, und unter
+# der Karte blieb davon nur Weiss.
+VALLEY_LEGEND_PLACEMENT_DEFAULT = "inside"
 # Beide Legenden des Schnittplots stehen eine Stufe kleiner als die
 # Achsenbeschriftung. Nicht kosmetisch, sondern gemessen: in voller Groesse
 # stossen die beiden Kaesten unter der Figur in der Mitte aneinander (die
@@ -2091,6 +2106,15 @@ def make_all(results, win_axis="before_lens", draw_best_point=DRAW_BEST_POINT_DE
                 select=valley_select, guide_follow=valley_guide_follow,
                 guide_halfwidth=valley_guide_halfwidth,
                 waist_range=valley_waist_range, width_range=valley_width_range)
+        # Dritte Datei: dieselbe J-Karte, daneben aber der Crosstalk als
+        # KARTE statt als Schnitt - siehe plot_score_and_crosstalk(). Nur im
+        # harten Fall; Weighted_Optimization hat sie bewusst nicht.
+        out['plots']['maps_score_crosstalk'] = plot_score_and_crosstalk(
+            results, prefix, axis=valley_axis, follow=valley_follow,
+            out_dir=plots_dir, save=save, show=show,
+            confirm_overwrite=confirm_overwrite,
+            legend_fontsize=legend_fontsize, fit=out.get('valley_line'),
+            forbidden_factor=zeichnen)
         if valley_path_mode == "line":
             # Zweite Datei: dieselbe Gerade, aber jede Groesse der Uebersicht
             # in einem eigenen Feld - in derselben Anordnung wie die Karten.
@@ -3053,7 +3077,12 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
         zeige_pfad = bool(map_show_path) or (
             fit_fuer_maske is None and path_mode != "line")
 
-        Z = verboten_ausblenden(Z, results, forbidden_factor)
+        # Der verbotene Bereich wird hier NICHT ausgeblendet. In den
+        # Metrik-Karten ist das richtig - dort geht es um die Metriken selbst,
+        # und wo die Eck-Spots ueberlappen, gelten sie nicht. In dieser Karte
+        # geht es um den Verlauf der Zielgroesse und um die Lage der Geraden
+        # darin; ein weisses Dreieck unten links schneidet davon ein Stueck
+        # heraus, das die Gerade nie beruehrt.
         im = ax_map.pcolormesh(x_heat, width_vals * 1e-6, Z, shading="auto", cmap="magma_r")
         label = follow_cbar_label(follow) + (" (%)" if skala == 100.0 else "")
         fig.colorbar(im, ax=ax_map, label=label)
@@ -3069,7 +3098,6 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
 
         if path_mode == "line":
             fit = valley["fit"]
-            ax_map.set_title(follow_map_title(follow))
             if zeige_pfad:
                 # Der echte Talpfad blass im Bild - nur so ist zu sehen, wie
                 # weit die Gerade von den tatsaechlichen Minima abweicht.
@@ -3110,7 +3138,6 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
                                 label=f"extrapolated ({int(extrap.sum())})",
                                 **SD(EXTRAPOLATED_MARKER))
         else:
-            ax_map.set_title(follow_map_title(follow))
             fit = fit_fuer_maske
             if zeige_pfad:
                 ax_map.plot(_break_at(x_pfad, unbenutzt), _break_at(y_pfad, unbenutzt),
@@ -3188,7 +3215,10 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="score", traces=Non
         # nebeneinander als dasselbe Bild erkennbar bleiben.
         # In beiden Pfadmodi derselbe Titel: was geschnitten wurde, sagt der
         # Titel der Karte links ("Linear fit" bzw. "Minimum path").
-        ax_cut.set_title("Cross section")
+        # Keine Ueberschrift mehr: oben steht jetzt die Width-Achse, und was
+        # das Panel zeigt, sagen die Achsen und die Legende.
+        if path_mode == "line":
+            width_axis_on_top(ax_cut, valley.get("fit"))
         ax_cut.grid(True, alpha=0.25)
         # Die Kurven in eine Zeile (bei vielen umgebrochen), der
         # Arbeitspunkt in eine eigene Zeile darunter.
@@ -3260,6 +3290,105 @@ VALLEY_JUMP_FACTOR = 6.0
 # Einheitlichkeit mit Combinated_Optimization halber bleibt sie auch dort
 # gesperrt, damit "Gerade" im Dialog eindeutig an der µm-Achse haengt.
 VALLEY_FIT_AXIS = "waist_um"
+
+
+def width_axis_on_top(ax, fit, label=WIDTH_LABEL):
+    """Oben die Width, die die Fit-Gerade zum Waist darunter vorschreibt.
+
+    Der Schnitt laeuft ENTLANG dieser Geraden: zu jedem Waist auf der unteren
+    Achse gehoert genau eine Width, und die ist die zweite Haelfte des
+    Arbeitspunkts. Oben abzulesen erspart das Nachschlagen in der Karte.
+
+    Gibt None zurueck, wenn es keine Gerade gibt - dann hat der Waist keine
+    eindeutige Width und eine zweite Achse waere geraten.
+    """
+    if not fit:
+        return None
+    a = float(fit.get("a", float("nan")))
+    b = float(fit.get("b", float("nan")))
+    if not (np.isfinite(a) and np.isfinite(b)) or a == 0.0:
+        return None
+    sek = ax.secondary_xaxis(
+        "top", functions=(lambda t: np.asarray(t, dtype=float) * a + b,
+                          lambda u: (np.asarray(u, dtype=float) - b) / a))
+    sek.set_xlabel(label)
+    return sek
+
+
+
+# ======================================================================
+# Zielgroesse und Crosstalk nebeneinander, beide als Karte
+# ======================================================================
+# NUR im harten Fall. Der Schnittplot daneben zeigt links dieselbe
+# J-Karte, rechts aber den Verlauf ENTLANG der Geraden - eine Kurve. Diese
+# Abbildung beantwortet die andere Frage: wo im ganzen Fenster sitzt der
+# Crosstalk, und liegt die Gerade dort guenstig? Dafuer braucht es die
+# zweite Karte und keinen Schnitt.
+#
+# Gleiche Geometrie wie der Schnittplot (VALLEY_FIGSIZE), damit beide
+# Abbildungen im Dokument nebeneinander dasselbe Format haben.
+
+def plot_score_and_crosstalk(results, prefix, axis="waist_um", follow="score",
+                             out_dir=None, save=True, show=False,
+                             confirm_overwrite=None, legend_fontsize=9,
+                             fit=None, forbidden_factor=None, win_axis=None):
+    """Links J als Karte mit der Geraden, rechts der Crosstalk als Karte.
+
+    `fit`: Ergebnis von fit_valley_line(); None = keine Gerade einzeichnen.
+    """
+    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
+    if "crosstalk_grid" not in results:
+        return None
+    win_axis = _VALLEY_AXIS_TO_WIN_AXIS[axis] if win_axis is None else win_axis
+    x_heat, x_heat_label, reversed_ = win_axis_values(results, win_axis)
+    width_vals = np.asarray(results["width_vals"], dtype=float)
+
+    breite, hoehe = VALLEY_MAPS_FIGSIZE
+    with dokument_stil(breite, legend_fontsize=legend_fontsize, dichte=1.0):
+        fig, achsen = plt.subplots(
+            1, 2, figsize=(breite, hoehe), constrained_layout=True,
+            gridspec_kw={"width_ratios": list(VALLEY_WIDTH_RATIOS)})
+
+        # Zwei Groessen, zwei Farbskalen. Die Zielgroesse behaelt magma_r wie
+        # in der Karte des Schnittplots; der Crosstalk bekommt "Oranges", also
+        # dieselbe Skala wie in der Metrik-Uebersicht. Gleiche Groesse,
+        # gleiche Farben - und zwei nebeneinanderliegende Karten in derselben
+        # Skala waeren ohnehin auf den ersten Blick zu verwechseln.
+        #
+        # Der verbotene Bereich wird nicht ausgeblendet: es geht hier um den
+        # Verlauf im ganzen Fenster und um die Lage der Geraden darin.
+        for ax, key, cmap in zip(achsen, (follow, "crosstalk"),
+                                 ("magma_r", "Oranges")):
+            grid = _grid_for(results, key)
+            skala = 100.0 if (key in TRACE_SPECS and TRACE_SPECS[key][3]) else 1.0
+            Z = np.asarray(grid, dtype=float) * skala
+            Z = Z[:, ::-1] if reversed_ else Z
+            im = ax.pcolormesh(x_heat, width_vals * 1e-6, Z,
+                               shading="auto", cmap=cmap)
+            label = follow_cbar_label(key) + (" (%)" if skala == 100.0 else "")
+            fig.colorbar(im, ax=ax, label=label)
+            ax.set_xlabel(kurzes_achsenlabel(x_heat_label))
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=4, steps=[1, 2, 5, 10]))
+            ax.set_ylabel(WIDTH_LABEL)
+            # Die Gerade steht in BEIDEN Karten. Sie ist in der J-Karte
+            # gefittet, gilt aber als Arbeitslinie fuer das ganze Fenster -
+            # und genau deshalb will man sehen, wo sie im Crosstalk liegt.
+            if fit is not None:
+                draw_fit_line_on_map(ax, results, fit, win_axis)
+        # Legende in BEIDE Karten, jeweils unten rechts. Es ist zwar
+        # dieselbe Gerade, aber die beiden Karten werden einzeln gelesen -
+        # und wer nur die rechte ansieht, soll nicht in der linken
+        # nachschlagen muessen, was die blaue Linie dort ist.
+        for ax in achsen:
+            handles, labels = ax.get_legend_handles_labels()
+            if handles:
+                ax.legend(handles, labels, loc="lower right", framealpha=0.9)
+
+    achse_tag = {"waist_um": "waist_um", "waist_mm": "waist_mm",
+                 "width": "width"}[axis]
+    dateiname = f"{prefix}_maps_{follow}_crosstalk_over_{achse_tag}.pdf"
+    return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite,
+                   tight=False)
 
 
 def valley_fit_supported(axis):
@@ -3944,7 +4073,9 @@ def plot_line_panels(results, prefix, axis="waist_um", follow="score",
             _achse_mit_bruch(ax, bereiche, TRACE_SPECS[gruppe["traces"][0]][1],
                              kopfraum=eigene_legende)
             ax.set_ylabel(_axis_label_for_group(gruppe["traces"]))
-            ax.set_title(gruppe["title"])
+            # Statt einer Ueberschrift oben die Width, die die Gerade zu
+            # diesem Waist vorschreibt. Was im Feld steht, sagt die y-Achse.
+            width_axis_on_top(ax, path.get("fit"))
             # Kurzform: drei Felder nebeneinander lassen je rund 2 Zoll,
             # die ausgeschriebene Fassung ueberlappte die der Nachbarfelder.
             ax.set_xlabel(kurzes_achsenlabel(path["x_label"]))

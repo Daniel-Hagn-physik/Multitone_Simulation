@@ -146,7 +146,9 @@ from kern.beating_physik import (
     uniformity_of, VariationObjective, UniformitySeries, PulseArea,
     # the atom as a weight, and how evenly it is lit
     sigma_thermal, atom_beating_at_centre, atom_illumination_at_centre,
+    atom_local_stack, beat_coeffs_mean,
 )
+from kern.plotstil import FIG_WIDTH_IN, style_figure
 
 try:
     import one_lens_design
@@ -1884,8 +1886,9 @@ class BeatingMultitoneWindow(QMainWindow):
                 ax.annotate(lab, (f_mark, ax.get_ylim()[1]),
                             xytext=(3, -2), textcoords="offset points",
                             color="#b3402f", fontsize=fs + 1, ha="left", va="top")
-        ax.set_xlabel("beat frequency (kHz)", fontsize=fs)
-        ax.set_ylabel("$\\sigma_d / \\langle I\\rangle$ (%)", fontsize=fs)
+        # Same symbols as in the document: U_t per beat order d over f_beat.
+        ax.set_xlabel(r"$f_{beat}$ (kHz)", fontsize=fs)
+        ax.set_ylabel(r"${U_t}_d$ (%)", fontsize=fs)
         if title:
             ax.set_title(f"Spectrum of the beating in the plateau   "
                          f"(total {c['sigma_rms'] * 100:.0f} %)", fontsize=fs + 1)
@@ -1895,14 +1898,40 @@ class BeatingMultitoneWindow(QMainWindow):
     # --------------------------------------------------------
     # the two figures written on save
     # --------------------------------------------------------
+    def _atom_mean_intensity(self):
+        """<I>_W,t - the time average of the ATOM WEIGHTED mean intensity.
+
+        The same number pulse_timing.py divides its top panel by (g_ref
+        there), so the colour scale of the saved frames and that curve carry
+        the same 1.0. It is NOT the mean over the grid: the grid is mostly
+        dark background, which would push the reference far below anything
+        the atom ever sees.
+
+        The atom sits at the centre of the profile, on its own fine grid -
+        the global one has some 600 nm per cell and would smear an atom of
+        100 nm into a fraction of one pixel. c[0] of the beat coefficients is
+        the DC term, i.e. exactly that time average.
+        """
+        c, s = self.cache, self.state
+        sig = sigma_thermal(s["atom_nu"], s["atom_T"])
+        if not np.isfinite(sig) or sig <= 0:
+            raise RuntimeError("no atom size available - check temperature "
+                               "and trap frequency")
+        _, _, _, _, F_a, W = atom_local_stack(
+            c["centers_x"], c["centers_y"], c["amp_spots"], s["win"],
+            s["use_airy"], s["airy_factor"], sig)
+        coef, _ = beat_coeffs_mean(F_a, c["k_orders"], c["phases"], None, W)
+        return float(np.real(coef[0])), sig
+
     def _save_period_pdf(self, path):
         """The whole profile at t = 0, T_0/3 and 2 T_0/3, side by side.
 
         One shared colour bar for the three panels, so they are directly
-        comparable. The scale is I / <I> with <I> the mean of the time
-        average over the whole grid - ONE number, not a map: 1.0 therefore
-        reads as 'as bright as the profile is on average', and a value of 3
-        means three times that, wherever it sits.
+        comparable. The scale is the SAME quantity the top panel of
+        pulse_timing.py plots: the intensity divided by the time average of
+        the atom weighted mean intensity. 1.0 on the bar and 1.0 on that
+        curve therefore mean the same brightness, and the two figures can be
+        read side by side in the document.
         """
         c, s = self.cache, self.state
         fpp = int(s["frames_per_period"])
@@ -1913,56 +1942,68 @@ class BeatingMultitoneWindow(QMainWindow):
                 "or frames/period is too small")
         idx = [0, int(round(fpp / 3.0)) % n, int(round(2.0 * fpp / 3.0)) % n]
         labels = ["$t = 0$", "$t = T_0/3$", "$t = 2\\,T_0/3$"]
+        gname = "I" if self.state.get("rabi_law", "I") == "I" else r"\sqrt{I}"
 
-        mean_I = float(c["I_avg"].mean())
+        mean_I, sig_atom = self._atom_mean_intensity()
         if not np.isfinite(mean_I) or mean_I <= 0:
             raise RuntimeError("time average is zero - nothing to normalise to")
 
-        # The colour scale follows the selector in the window, converted from
-        # 'x the maximum of the time average' into 'x the mean'. A shared bar
-        # needs ONE scale, so 'per frame' becomes the largest of the three.
-        mode = self.cmb_scale.currentIndex()
-        if mode == 0:
-            top = c["cube_p995"]
-        elif mode == 1:
-            top = c["cube_max"]
-        elif mode == 2:
-            top = float(c["I_avg"].max())
-        else:
-            top = float(max(c["cube"][k].max() for k in idx))
-        vmax = max(top / mean_I, 1e-12)
+        # The colour scale covers the three shown frames exactly, and it does
+        # NOT follow the selector in the window. The selector serves the
+        # animation, where a single rephasing peak would otherwise black out
+        # every other frame, and its default (the 99.5 percentile of the whole
+        # cube) sits below the peaks of these three frames. In the animation
+        # that is a fair trade; in a figure that goes into a document it is
+        # not - a saturated patch there is read as a value, and the picture
+        # would be wrong about its own brightest points.
+        #
+        # So this figure is scaled to what it shows: nothing is clipped, and
+        # the top of the bar is a number that really occurs in one of the
+        # three panels. That it therefore looks somewhat darker than the same
+        # instants in the window is the price, and the honest side of the
+        # trade.
+        vmax = max(float(max(c["cube"][k].max() for k in idx)) / mean_I, 1e-12)
 
-        x_um, y_um = c["x"] * 1e6, c["y"] * 1e6
+        # Nullpunkt der ABBILDUNG in die Mitte des Musters. Gerechnet wird
+        # weiter in den globalen Koordinaten - deren Ursprung ist die Lage
+        # eines Tons beim blanken RF-Offset und liegt weit ausserhalb des
+        # Bildes, was auf einer Achse nichts zu suchen hat. Es verschiebt sich
+        # nur die Beschriftung, keine Zahl.
+        cx0, cy0 = c["r_center_x"] * 1e6, c["r_center_y"] * 1e6
+        x_um, y_um = c["x"] * 1e6 - cx0, c["y"] * 1e6 - cy0
         extent = [x_um[0], x_um[-1], y_um[0], y_um[-1]]
 
-        fig = Figure(figsize=(11.2, 3.9), dpi=100)
+        fig = Figure(figsize=(FIG_WIDTH_IN, 0.42 * FIG_WIDTH_IN), dpi=100)
         FigureCanvas(fig)
         axes = fig.subplots(1, 3, sharex=True, sharey=True)
         im = None
         for ax, k, lab in zip(axes, idx, labels):
             im = ax.imshow(c["cube"][k] / mean_I, extent=extent, origin="lower",
                            cmap="inferno", vmin=0.0, vmax=vmax, aspect="equal")
-            ax.set_title("%s   (%.4f us)" % (lab, c["t"][k] * 1e6), fontsize=10)
-            ax.set_xlabel("x (um)", fontsize=9)
-            ax.tick_params(labelsize=8)
-        axes[0].set_ylabel("y (um)", fontsize=9)
-        fig.subplots_adjust(left=0.06, right=0.90, bottom=0.14, top=0.90,
-                            wspace=0.10)
-        cax = fig.add_axes([0.915, 0.14, 0.016, 0.76])
+            ax.set_title("%s   (%.2f us)" % (lab, c["t"][k] * 1e6))
+            ax.set_xlabel("x (um)")
+        axes[0].set_ylabel("y (um)")
+        fig.subplots_adjust(left=0.108, right=0.878, bottom=0.17, top=0.88,
+                            wspace=0.12)
+        cax = fig.add_axes([0.893, 0.17, 0.016, 0.71])
+        # Keine Pfeilspitze: die Skala reicht ueber alles, was in den drei
+        # Bildern vorkommt, also gibt es nichts, was ueber sie hinausginge.
         cb = fig.colorbar(im, cax=cax)
-        cb.set_label(r"$I\,/\,\langle I\rangle$", fontsize=10)
-        cb.ax.tick_params(labelsize=8)
+        # Literally the label of the top panel in pulse_timing.py - same
+        # quantity, same words, so nobody has to check whether they match.
+        cb.set_label(r"$%s(t)\,/\,\langle %s\rangle_t$" % (gname, gname))
+        style_figure(fig)
         fig.savefig(path, format="pdf")
 
     def _save_spectrum_pdf(self, path):
         """The beat spectrum on its own page, nu_r and 2 nu_r marked."""
-        fig = Figure(figsize=(6.6, 4.1), dpi=100)
+        fig = Figure(figsize=(FIG_WIDTH_IN, 0.55 * FIG_WIDTH_IN), dpi=100)
         FigureCanvas(fig)
         ax = fig.add_subplot(111)
-        self._panel_spectrum(ax, self.cache, fs=10, title=False)
-        ax.tick_params(labelsize=9)
+        self._panel_spectrum(ax, self.cache, title=False)
         fig.tight_layout()
-        fig.savefig(path, format="pdf", bbox_inches="tight")
+        style_figure(fig)
+        fig.savefig(path, format="pdf")
 
     def draw_frame(self, full=False):
         c, s = self.cache, self.state
@@ -2357,7 +2398,8 @@ class BeatingMultitoneWindow(QMainWindow):
                      f"{s['frames_per_period']}, periods = {s['n_periods']}",
                      f"trap frequency nu_r = {self.sp_nu_r.value():.3f} kHz",
                      "figure 1: profile at t = 0, T_0/3, 2 T_0/3, colour "
-                     "scale I / <I> with <I> = mean of the time average",
+                     "scale I / <I>_t with <I>_t = time average of the atom "
+                     "weighted mean intensity (same as pulse_timing.py)",
                      "figure 2: beat spectrum, nu_r and 2 nu_r marked"]
             if c:
                 lines += [f"f_0 = {c['f0'] * 1e-3:.6f} kHz  ->  T_0 = "

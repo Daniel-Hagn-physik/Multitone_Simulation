@@ -87,7 +87,11 @@ HALF_PAGE_FIGSIZE = (6.3, 6.2)   # 2x2, gleiche Kartenhoehe wie oben
 #
 # Vorher stand hier 4.0 Zoll bei 1 : 1.15, was 1.81 x 2.75 ergab (B/H = 0.66):
 # sichtbar hochkant gegenueber allen anderen Plots.
-CUT_FIGSIZE = (6.3, 3.6)
+# 6.3 in = 16 cm Textbreite. Die Hoehe ist so gewaehlt, dass die Karte links
+# etwa dasselbe Seitenverhaeltnis bekommt wie eine Karte der Metrik-
+# Uebersicht - bei 3.6 in stand sie hochkant neben quadratischen Karten in
+# der Nachbarabbildung.
+CUT_FIGSIZE = (6.3, 2.9)
 CUT_WIDTH_RATIOS = [1.0, 1.0]
 
 # Der Schnittplot (Karte + Querschnitt) soll in Hard_, Weighted_ und
@@ -111,7 +115,12 @@ VALLEY_LEGEND_CHOICES = [
     ("below", "Unter die Panels"),
     ("inside", "Ins Panel, unten rechts (kleinere Schrift)"),
 ]
-VALLEY_LEGEND_PLACEMENT_DEFAULT = "below"
+# Voreinstellung "inside": seit der Schnitt nur noch J zeigt und die Karte
+# nur noch die Gerade, hat jede der beiden Legenden genau einen Eintrag.
+# Zwei einzeilige Kaesten UNTER den Panels reservieren trotzdem eine ganze
+# Zeile Figurhoehe, und weil die Karte quadratisch bleibt, stand unter ihr
+# nur Weiss. Im Panel kostet ein Kasten mit einem Eintrag nichts.
+VALLEY_LEGEND_PLACEMENT_DEFAULT = "inside"
 # Beide Legenden des Schnittplots stehen eine Stufe kleiner als die
 # Achsenbeschriftung. Nicht kosmetisch, sondern gemessen: in voller Groesse
 # stossen die beiden Kaesten unter der Figur in der Mitte aneinander (die
@@ -934,45 +943,40 @@ def amplitude_panels(results):
        Vergleich zweier Aufloesungen unmoeglich, fuer den diese Karten da
        sind.
     3. Punkte, deren Amplitude auf einer r_bounds-SCHRANKE klemmt, werden
-       aus der Skala herausgenommen und grau ueberzeichnet. Dort steht
-       kein freies Optimum, sondern die Schranke - im 41x41-Datensatz
-       betrifft das 18.6% der r_y-Werte. Sie mitzuskalieren wuerde die
-       Skala verzerren UND das Plateau wie ein Ergebnis aussehen lassen.
-       Ungueltige (NaN-)Punkte bleiben davon unberuehrt und weiss.
+       wie alle anderen gezeichnet - in der Farbskala, ohne graue Ebene und
+       ohne eigenen Legendeneintrag. Vorher waren sie grau ueberzeichnet;
+       im 41x41-Datensatz betrifft das 18.6% der r_y-Werte, und die halbe
+       Karte in Grau liess sie unbrauchbar aussehen. Dass dort die Schranke
+       steht und kein freies Optimum, bleibt nachlesbar: make_all() meldet
+       den Anteil auf der Konsole, und r_bounds steht im Bericht.
+       Ungueltige (NaN-)Punkte bleiben weiss.
     """
     if 'r_x_grid' not in results or 'r_y_grid' not in results:
         return None
-    bounds = results.get('r_bounds')
     grids, masken, freie = {}, {}, []
     for key in ("r_x_grid", "r_y_grid"):
         grid = np.asarray(results[key], dtype=float)
-        maske = _r_clamp_mask(grid, bounds)
-        grids[key], masken[key] = grid, maske
-        frei = grid[np.isfinite(grid) & ~maske]
-        freie.append(frei)
+        grids[key] = grid
+        # Keine Graumaske mehr - die Schrankenpunkte gehen in die Skala ein
+        # wie alle anderen (siehe Punkt 3 oben).
+        masken[key] = np.zeros(grid.shape, dtype=bool)
+        freie.append(grid[np.isfinite(grid)])
     frei = np.concatenate(freie)
     if frei.size == 0:
-        # Alles geklemmt (oder leer): dann lieber die volle Spanne zeigen
-        # als gar nichts - und ohne Graumaske, sonst waere die Karte leer.
-        alle = np.concatenate([grids[k][np.isfinite(grids[k])].ravel()
-                               for k in grids])
-        if alle.size == 0:
-            return None
-        frei, masken = alle, {k: np.zeros(grids[k].shape, dtype=bool) for k in grids}
+        return None
     vmin, vmax = float(frei.min()), float(frei.max())
     if vmin <= 0:                            # LogNorm braucht positive Grenzen
         vmin = float(frei[frei > 0].min()) if (frei > 0).any() else 1e-3
     if not vmax > vmin:                      # konstantes Gitter
         vmin, vmax = vmin / 1.5, vmax * 1.5
     norm = LogNorm(vmin=vmin, vmax=vmax)
-    geklemmt = any(m.any() for m in masken.values())
     return [
         dict(key="r_x_grid", cbar=r"$r_x$", title=r"Amplitude ratio $r_x$",
              cmap=AMPLITUDE_CMAP, scale=1.0, norm=norm,
-             mask=masken["r_x_grid"], clamped=geklemmt),
+             mask=masken["r_x_grid"], clamped=False),
         dict(key="r_y_grid", cbar=r"$r_y$", title=r"Amplitude ratio $r_y$",
              cmap=AMPLITUDE_CMAP, scale=1.0, norm=norm,
-             mask=masken["r_y_grid"], clamped=geklemmt),
+             mask=masken["r_y_grid"], clamped=False),
     ]
 
 
@@ -982,9 +986,9 @@ def r_bounds_clamped_fraction(results):
     bestimmen laesst.
 
     Solche Punkte sind KEINE freien Optima: der Optimierer wollte weiter
-    und durfte nicht. In der Amplituden-Karte sind sie grau; make_all()
-    meldet den Anteil zusaetzlich auf der Konsole, damit er auch dann
-    auffaellt, wenn nur der Bericht gelesen wird.
+    und durfte nicht. In der Karte sind sie nicht mehr hervorgehoben;
+    make_all() meldet den Anteil auf der Konsole, damit er trotzdem
+    auffaellt.
     """
     bounds = results.get('r_bounds')
     if bounds is None or len(bounds) != 2:
@@ -1843,7 +1847,7 @@ def make_all(results, win_axis="before_lens", draw_best_point=DRAW_BEST_POINT_DE
              valley_select="guided", valley_guide_follow=GUIDE_FOLLOW_DEFAULT,
              valley_guide_halfwidth=GUIDE_HALFWIDTH_DEFAULT,
              valley_waist_range=None, valley_width_range=None,
-             valley_traces=None, valley_fit_line=False, valley_path_mode="valley",
+             valley_traces=None, valley_fit_line=True, valley_path_mode="valley",
              valley_max_axes=MAX_CUT_AXES_DEFAULT, map_marks=None,
              fit_line_on_maps=False, amplitude_maps=False,
              forbidden_factor=None, forbidden_excluded=False,
@@ -2120,10 +2124,19 @@ TRACE_ORDER = ["uniformity_weighted", "crosstalk_weighted", "uniformity_hard",
                "crosstalk_hard", "uniformity_kombi", "crosstalk_kombi",
                "penalty_raw", "r_x", "r_y"]
 
+# Vorgabe im Talpfad-Modus: NUR die Zielgroesse. Alles auf einmal ergab
+# neun Kurven auf vier y-Achsen - als Uebersicht beim Pruefen brauchbar, als
+# Abbildung unlesbar. Die Einzelgroessen stehen im Panel-Plot daneben, jede
+# in ihrem eigenen Feld. Die Haken im Dialog holen sie bei Bedarf zurueck.
+VALLEY_TRACES_DEFAULT = ["penalty_raw"]
+
 # Der schlanke Schnitt im Geradenmodus: die Zielgroesse und ihre beiden
 # Haelften, mehr nicht. U_c und eta_c sind beide in %, teilen sich also eine
 # Achse - macht zwei y-Achsen statt vier.
-LINE_CUT_TRACES = ["penalty_raw", "uniformity_kombi", "crosstalk_kombi"]
+# Nur die Zielgroesse. U_c und eta_c standen frueher daneben, brauchten dafuer
+# aber eine zweite y-Achse, und was sie sagen, steht aufgeschluesselt im
+# Panel-Plot (U_h/U_w, eta_h/eta_w) und in Zahlen im Bericht.
+LINE_CUT_TRACES = ["penalty_raw"]
 
 
 VALLEY_AXIS_CHOICES = [
@@ -2793,6 +2806,10 @@ def _achsenraster(ax, einheit):
 # die Kurven nah beieinander, bleibt die Achse durchgehend - ein Bruch,
 # der nichts gewinnt, macht das Bild nur schwerer lesbar.
 ACHSENBRUCH_MIN_ANTEIL = 0.40
+# Fuer das Amplituden-Feld (r_x, r_y) eine niedrigere Schwelle - siehe
+# plot_line_panels(). Die beiden Verhaeltnisse liegen dicht beieinander,
+# ihre Luecke ist aber echt und soll aufgeschnitten werden.
+AMPLITUDE_BRUCH_MIN_ANTEIL = 0.12
 # So viel von der Achse bleibt der Luecke uebrig. Ganz auf null gestaucht
 # waere die Abbildung nicht mehr umkehrbar (matplotlib braucht beide
 # Richtungen), und ein sichtbarer Rest sagt dem Betrachter, dass hier
@@ -2880,7 +2897,8 @@ def _bruchmarken(ax, anteil):
 ACHSEN_KOPFRAUM = 0.28
 
 
-def _achse_mit_bruch(ax, bereiche, einheit, kopfraum=False):
+def _achse_mit_bruch(ax, bereiche, einheit, kopfraum=False,
+                     min_anteil=None):
     """y-Achse des Feldes setzen: mit Bruch, wenn die Kurven weit
     auseinanderliegen, sonst das gewohnte feste Raster.
 
@@ -2913,14 +2931,21 @@ def _achse_mit_bruch(ax, bereiche, einheit, kopfraum=False):
         return False
     lo, hi = u[1], o[0]
     spanne = o[1] - u[0]
-    if (hi - lo) / spanne < ACHSENBRUCH_MIN_ANTEIL:
+    if (hi - lo) / spanne < (ACHSENBRUCH_MIN_ANTEIL if min_anteil is None
+                             else float(min_anteil)):
         _achsenraster(ax, einheit)
         return False
     vor, zurueck = _bruch_funktionen(lo, hi, spanne)
     ax.set_yscale("function", functions=(vor, zurueck))
     ax.set_ylim(u[0], o[1])
-    ticks = (list(np.arange(u[0], u[1] + u[2] / 2, u[2]))
-             + list(np.arange(o[0], o[1] + o[2] / 2, o[2])))
+    # Der oberste Strich des unteren Abschnitts liegt GENAU auf der
+    # Bruchkante. Dort steht aber keine Achse mehr, sondern die Luecke - eine
+    # Zahl an dieser Stelle liest sich, als ginge die Achse dort weiter.
+    # Deshalb faellt sie weg; die Kante markieren die beiden Bruchzeichen.
+    unten_ticks = list(np.arange(u[0], u[1] + u[2] / 2, u[2]))
+    if len(unten_ticks) > 1 and abs(unten_ticks[-1] - u[1]) < u[2] / 2:
+        unten_ticks = unten_ticks[:-1]
+    ticks = unten_ticks + list(np.arange(o[0], o[1] + o[2] / 2, o[2]))
     ax.set_yticks(ticks)
     # Jeder Abschnitt hat seine eigene Schrittweite und damit seine eigene
     # Zahl an Nachkommastellen - ein Tick zeigt nie mehr Stellen, als er
@@ -2965,7 +2990,7 @@ def _unused_mask(valley, fit):
 
 def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", traces=None,
                     out_dir=None, save=True, show=False, confirm_overwrite=None,
-                    legend_fontsize=9, fit_line=False, path_mode="valley",
+                    legend_fontsize=9, fit_line=True, path_mode="valley",
                     forbidden_factor=None, select="global",
                     guide_follow=GUIDE_FOLLOW_DEFAULT,
                     guide_halfwidth=GUIDE_HALFWIDTH_DEFAULT,
@@ -3002,16 +3027,14 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
     follow_als_kurve = {"score_hard": "uniformity_hard",
                         "score_weighted": "uniformity_weighted"}.get(follow, follow)
     if path_mode == "line":
-        # Im Geradenmodus steht die Kurvenauswahl fest: die Zielgroesse J und
-        # ihre beiden Haelften U_c und eta_c. Sieben Kurven auf vier Achsen
-        # waren neben der Karte nicht mehr zu lesen, und die vier
-        # Einzelgroessen stehen ohnehin im Panel-Plot daneben
-        # (plot_line_panels). Die Haken im Dialog wirken deshalb nur noch im
-        # Talpfad-Modus.
+        # Im Geradenmodus steht die Kurvenauswahl fest: NUR die Zielgroesse
+        # J. Alles Weitere - die Einzelgroessen und die Amplituden - steht im
+        # Panel-Plot daneben (plot_line_panels), jede Groesse in ihrem eigenen
+        # Feld. Die Haken im Dialog wirken deshalb nur im Talpfad-Modus.
         gewaehlt = [k for k in LINE_CUT_TRACES if k in verfuegbar]
     else:
-        gewaehlt = list(verfuegbar) if traces is None else [k for k in TRACE_ORDER
-                                                           if k in traces and k in verfuegbar]
+        vorgabe = VALLEY_TRACES_DEFAULT if traces is None else traces
+        gewaehlt = [k for k in TRACE_ORDER if k in vorgabe and k in verfuegbar]
         if follow_als_kurve in verfuegbar and follow_als_kurve not in gewaehlt:
             gewaehlt.insert(0, follow_als_kurve)
     if not gewaehlt:
@@ -3046,7 +3069,14 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
             gridspec_kw={"width_ratios": list(CUT_WIDTH_RATIOS)})
 
         # ---------------- links: Karte mit Pfad ----------------
-        Z = verboten_ausblenden(Z, results, forbidden_factor)
+        # Der verbotene Bereich wird hier NICHT ausgeblendet. In den
+        # Metrik-Karten ist das richtig - dort geht es um die Metriken
+        # selbst, und wo die Eck-Spots ueberlappen, gelten sie nicht. In
+        # dieser Karte geht es um den Verlauf von J und um die Lage der
+        # Geraden darin; ein weisses Dreieck unten links schneidet davon ein
+        # Stueck heraus, ohne dass die Gerade es je berueheren wuerde. Dass
+        # J dort keine brauchbare Falle beschreibt, steht in den
+        # Metrik-Karten und im Bericht.
         im = ax_map.pcolormesh(x_heat, width_vals * 1e-6, Z, shading="auto", cmap="magma_r")
         # Die Einheit gehoert an die Colorbar, sobald die Karte skaliert ist -
         # sonst stehen dort Prozentzahlen ohne Prozentzeichen.
@@ -3062,7 +3092,6 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
 
         if path_mode == "line":
             fit = valley["fit"]
-            ax_map.set_title(follow_map_title(follow))
             if any(marks.get(k) for k in ("path", "used", "unused")):
                 # Der Talpfad, auf den sich die Gerade stuetzt - dieselben
                 # drei Schalter wie in jeder anderen Karte.
@@ -3089,14 +3118,17 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
                             label=f"extrapolated ({int(extrap.sum())})",
                             **EXTRAPOLATED_MARKER)
         else:
-            ax_map.set_title(follow_map_title(follow))
             fit = fit_fuer_maske
-            # Im Talpfad-Modus IST der Pfad der Schnitt - er wird immer
-            # gezeichnet, der path-Schalter kann ihn nicht wegnehmen.
-            ax_map.plot(_break_at(x_pfad, unbenutzt), _break_at(y_pfad, unbenutzt),
-                        linewidth=1.2, color="red", marker="o", markersize=3.4,
-                        markeredgecolor="white", markeredgewidth=0.5,
-                        label="minimum path")
+            # Der Talpfad haengt jetzt am path-Schalter wie in jeder anderen
+            # Karte und ist voreingestellt AUS. In der fertigen Abbildung
+            # zaehlt die Gerade; die rote Punktkette daneben ist ihre
+            # Herleitung und gehoert zum Pruefen, nicht ins Dokument. Wer sie
+            # sehen will, hakt "Talpfad" im Dialog an.
+            if marks.get("path"):
+                ax_map.plot(_break_at(x_pfad, unbenutzt), _break_at(y_pfad, unbenutzt),
+                            linewidth=1.2, color="red", marker="o", markersize=3.4,
+                            markeredgecolor="white", markeredgewidth=0.5,
+                            label="minimum path")
             if marks.get("unused") and unbenutzt.any():
                 ax_map.plot(x_pfad[unbenutzt], y_pfad[unbenutzt],
                             label=f"not used ({int(unbenutzt.sum())})", **UNUSED_STYLE)
@@ -3148,9 +3180,16 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
                 ax_cut, _mit_waist_um(results, best_point), axis, label=True)
             marke = gezeichnet if gezeichnet is not False else None
         ax_cut.set_xlabel(short_axis_label(axis))
-        # In beiden Pfadmodi derselbe Titel: was geschnitten wurde, sagt der
-        # Titel der Karte links ("Linear fit" bzw. "Minimum path").
-        ax_cut.set_title("Cross section")
+        # Oben die Width, die die Gerade zu diesem Waist vorschreibt - aber
+        # NUR im Geradenmodus. Dort ist der Schnitt genau diese Gerade, die
+        # zweite Achse ist also exakt. Im Talpfad-Modus folgt der Schnitt dem
+        # Minimum und nicht der Geraden; eine Achse aus der Geradengleichung
+        # zeigte dort Werte, die zum Bild daneben nicht passen.
+        if path_mode == "line":
+            width_axis_on_top(ax_cut, valley.get("fit"))
+        # Keine Ueberschriften: was die beiden Panels zeigen, sagen die
+        # Achsen und die Colorbar, und in der Abbildung gehoert es in die
+        # Bildunterschrift.
         ax_cut.grid(True, alpha=0.25)
         # Zwei Legenden, je eine unter ihrem Panel: die Karte und der
         # Querschnitt zeigen verschiedene Dinge, und in einem gemeinsamen
@@ -3304,13 +3343,25 @@ def plot_line_panels(results, prefix, axis="waist_um", follow="penalty_raw",
             draw_working_point_line(
                 ax, best_point, axis,
                 label=(eigene_legende or ax is axes[0]))
+        # r_x und r_y liegen dicht beieinander (im 41x41-Satz 0.97 gegen
+        # 1.15), die Luecke dazwischen ist aber echt. Mit der gewoehnlichen
+        # Schwelle bleibt die Achse durchgehend, beide Kurven kleben oben
+        # aneinander und die Legende deckt r_y zu. In diesem EINEN Feld wird
+        # deshalb frueher aufgeschnitten - der Bruch schiebt r_y nach unten
+        # und macht zugleich sichtbar, dass die Achse dort springt.
+        ist_amplitude = TRACE_SPECS[gruppe["traces"][0]][1] == ""
         _achse_mit_bruch(ax, bereiche, TRACE_SPECS[gruppe["traces"][0]][1],
-                         kopfraum=eigene_legende)
+                         kopfraum=eigene_legende,
+                         min_anteil=AMPLITUDE_BRUCH_MIN_ANTEIL if ist_amplitude
+                         else None)
         ax.set_ylabel(_axis_label_for_group(gruppe["traces"]))
-        ax.set_title(gruppe["title"])
+        # Keine Ueberschrift: was im Feld steht, sagt die y-Achse, und in der
+        # Abbildung gehoert es in die Bildunterschrift.
         # Kurzform: drei Felder nebeneinander lassen je rund 2 Zoll, die
         # ausgeschriebene Fassung ueberlappte die der Nachbarfelder.
         ax.set_xlabel(short_axis_label(axis))
+        # Oben die Width, die die Gerade zu diesem Waist vorschreibt.
+        width_axis_on_top(ax, path.get("fit"))
         ax.grid(True, alpha=0.25)
 
     if eigene_legende:
@@ -3321,8 +3372,12 @@ def plot_line_panels(results, prefix, axis="waist_um", follow="penalty_raw",
             handles, labels = ax.get_legend_handles_labels()
             if not handles:
                 continue
-            legende = ax.legend(handles, labels, loc="upper right",
-                                ncol=legend_ncol(labels), framealpha=0.9)
+            # Oben LINKS und einspaltig: die Kurven steigen in allen drei
+            # Feldern nach rechts an, rechts oben sass der Kasten also
+            # genau auf ihnen. Einspaltig, weil zwei Eintraege nebeneinander
+            # den Kasten ueber die halbe Feldbreite ziehen.
+            legende = ax.legend(handles, labels, loc="upper left",
+                                ncol=1, framealpha=0.9)
             legende.set_in_layout(False)
     else:
         # Eine gemeinsame Legende unter der Figur. Anders als frueher
@@ -3399,6 +3454,29 @@ VALLEY_JUMP_FACTOR = 6.0
 # des Nutzers bleibt sie auch dort gesperrt, damit "Gerade" im Dialog
 # eindeutig an der µm-Achse haengt.
 VALLEY_FIT_AXIS = "waist_um"
+
+
+def width_axis_on_top(ax, fit, label=WIDTH_LABEL):
+    """Oben die Width, die die Fit-Gerade zum Waist darunter vorschreibt.
+
+    Der Schnitt laeuft ENTLANG dieser Geraden: zu jedem Waist auf der
+    unteren Achse gehoert genau eine Width, und die ist die zweite Haelfte
+    des Arbeitspunkts. Oben abzulesen erspart das Nachschlagen in der Karte.
+
+    Gibt die Achse zurueck, oder None, wenn es keine Gerade gibt (dann hat
+    der Waist keine eindeutige Width - eine zweite Achse waere geraten).
+    """
+    if not fit:
+        return None
+    a = float(fit.get("a", float("nan")))
+    b = float(fit.get("b", float("nan")))
+    if not (np.isfinite(a) and np.isfinite(b)) or a == 0.0:
+        return None
+    sek = ax.secondary_xaxis(
+        "top", functions=(lambda t: np.asarray(t, dtype=float) * a + b,
+                          lambda u: (np.asarray(u, dtype=float) - b) / a))
+    sek.set_xlabel(label)
+    return sek
 
 
 def valley_fit_supported(axis):

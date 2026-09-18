@@ -1,0 +1,19 @@
+2026-09-18_141455
+
+build: telescope f1 = 75.00 mm, f2 = 750.00 mm, fLO = 52.88 mm
+AOD: theta_max = 43.0 mrad, f_band = 36.0 MHz, offset = 100.0000 MHz
+lambda = 795.00 nm
+N_x x N_y = 3 x 4
+width_x = 0.370000 MHz, width_y = 0.370000 MHz
+waist (focus) = 1.0400 um, profile = Airy (factor 1.4830)
+r_x = 0.9700, r_y = 1.1600
+camera exposure = 0.000 us
+grid = 200^2, frames/period = 60, periods = 3
+trap frequency nu_r = 60.400 kHz
+figure 1: profile at t = 0, T_0/3, 2 T_0/3, colour scale I / <I>_t with <I>_t = time average of the atom weighted mean intensity (same as pulse_timing.py)
+figure 2: beat spectrum, nu_r and 2 nu_r marked
+f_0 = 61.666667 kHz  ->  T_0 = 16.2162 us
+spots = 12, degenerate groups = 1, resid = 0.1250 %
+sigma_t/<I> (plateau) = 71.61 %, modulation depth = 98.34 %
+phases x [deg] = 0.00, 12.50, 25.00
+phases y [deg] = 0.00, 98.00, 16.00, 114.00

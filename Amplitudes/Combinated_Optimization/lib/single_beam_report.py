@@ -104,13 +104,14 @@ TEXT_LABELS = {
 # ----------------------------------------------------------------------
 # Positions-Sweep: dieselben Groessen, einmal je Richtung
 # ----------------------------------------------------------------------
-# Symbol und Farbe bleiben, die Richtung kommt als Pfeil im Exponenten dazu
-# (eta_w mit Pfeil nach oben / nach rechts oben) - dieselbe Schreibweise wie
-# im Multitone-Atom-Versatz (atom_offset_report.py).
-# Die Richtung wird ZUSAETZLICH ueber den Linienstil kodiert (senkrecht
-# durchgezogen, diagonal gestrichelt): die beiden Kurven einer Groesse
-# laufen dicht beieinander, und Farbe allein traegt das nicht.
-RICHTUNG_EXPONENT = {"vertikal": r"\uparrow", "diagonal": r"\nearrow"}
+# Gefahren wird nur noch senkrecht, und die senkrechte Kurve traegt deshalb
+# KEINEN Richtungspfeil mehr: ein Pfeil unterscheidet nichts, wenn es nur
+# eine Richtung gibt, und "eta_w" liest sich besser als "eta_w hoch Pfeil".
+# Die diagonale Schreibweise bleibt stehen, damit aeltere Datensaetze mit
+# beiden Richtungen noch lesbar geplottet werden - dort ist der Pfeil dann
+# wieder ein Unterschied, zusammen mit dem Linienstil (senkrecht
+# durchgezogen, diagonal gestrichelt).
+RICHTUNG_EXPONENT = {"vertikal": "", "diagonal": r"\nearrow"}
 RICHTUNG_STIL = {"vertikal": "-", "diagonal": "--"}
 RICHTUNG_TEXT = {"vertikal": "senkrecht", "diagonal": "diagonal"}
 
@@ -133,7 +134,8 @@ for _basis in list(TRACES):
     for _richtung, _exp in RICHTUNG_EXPONENT.items():
         _label, _einheit, _farbe, _prozent = TRACES[_basis]
         TRACES[f"{_basis}__{_richtung}"] = (
-            _mit_exponent(_label, _exp), _einheit, _farbe, _prozent)
+            _mit_exponent(_label, _exp) if _exp else _label,
+            _einheit, _farbe, _prozent)
         TEXT_LABELS[f"{_basis}__{_richtung}"] = (
             f"{TEXT_LABELS[_basis]} ({_richtung[0]})")
 TRACE_ORDER = TRACE_ORDER + [f"{b}__{r}" for b in list(TRACE_ORDER)
@@ -279,8 +281,8 @@ LEGENDEN_ORT = "upper left"
 # schraege \mu ist die uebliche LaTeX-Schreibweise dafuer.
 UM = r"\mathrm{\mu m}"
 
-WAIST_LABEL = r"Waist in the atomic plane $w$ [$\mathrm{\mu m}$]"
-WIN_INPUT_LABEL = r"Waist before first lens $w_\mathrm{in}$ [$\mathrm{mm}$]"
+WAIST_LABEL = r"Waist in the atomic plane $w$ ($\mathrm{\mu m}$)"
+WIN_INPUT_LABEL = r"Waist before first lens $w_\mathrm{in}$ ($\mathrm{mm}$)"
 
 # Mindestabstand zweier Teilstriche der oberen Achse, als Anteil der
 # Achsenbreite (siehe _zweite_x_achse).
@@ -524,9 +526,9 @@ def _achsen_label(gruppe):
             labels.append(label)
     einheit = TRACES[gruppe[0]][1]
     text = ", ".join(labels)
-    # Einheit in eckigen Klammern - "Groesse [Einheit]", wie an den
+    # Einheit in runden Klammern - "Groesse (Einheit)", wie an den
     # x-Achsen auch.
-    return f"{text} [{einheit}]" if einheit else text
+    return f"{text} ({einheit})" if einheit else text
 
 
 # Leiter, aus der die Schrittweite der oberen Achse gewaehlt wird, und wie
@@ -652,20 +654,21 @@ def arbeitspunkt_werte(results, waist_um, keys=None):
 
 
 def _zeichne_arbeitspunkt(ax0, achsen_und_gruppen, x, werte, waist_um):
-    """Senkrechte Linie plus je einen Stern auf jeder Kurve. Gibt das
-    Handle fuer die Legende zurueck."""
-    # Die senkrechte Linie ist bewusst gestrichelt: sie ist keine Messkurve,
-    # sondern eine Markierung, und soll auch dort als solche erkennbar sein,
-    # wo sie eine Kurve kreuzt.
-    linie = ax0.axvline(waist_um, color=BEST_POINT_STYLE["color"],
-                        linestyle="--", linewidth=S(1.1), alpha=0.8, zorder=1.5,
-                        label=r"$w = %.3f\,\mathrm{\mu m}$" % waist_um)
-    for ax, gruppe in achsen_und_gruppen:
-        for key in gruppe:
-            y = float(np.interp(waist_um, x, werte[key]))
-            ax.plot([waist_um], [y], zorder=6,
-                    **SD(BEST_POINT_STYLE, markersize=S(11), markeredgewidth=S(1.0)))
-    return linie
+    """Nur noch die senkrechte Linie. Gibt das Handle fuer die Legende zurueck.
+
+    Die Sterne auf den Kurven sind raus: bei mehreren Kurven in einer Figur
+    waren es ebenso viele Marker, die alle dasselbe sagten wie die eine Linie,
+    und in der Abbildung im Dokument sieht ein Stern auf einer Kurve aus wie
+    ein Messpunkt. Die Zahlen am Arbeitspunkt stehen weiter im Bericht.
+
+    Die Linie ist bewusst gestrichelt: sie ist keine Messkurve, sondern eine
+    Markierung, und soll auch dort als solche erkennbar sein, wo sie eine
+    Kurve kreuzt. Gezeichnet wird sie nur, wenn sie ausdruecklich angefordert
+    ist - im Speicherdialog ist sie nicht mehr vorausgewaehlt.
+    """
+    return ax0.axvline(waist_um, color=BEST_POINT_STYLE["color"],
+                       linestyle="--", linewidth=S(1.1), alpha=0.8, zorder=1.5,
+                       label=r"$w = %.3f\,\mathrm{\mu m}$" % waist_um)
 
 
 def _luft_nach_oben(ax, werte_liste, anteil=LEGENDEN_LUFT):
@@ -701,7 +704,7 @@ def plot_curves(results, keys, filename, titel=None, out_dir=None, achsen="auto"
     Dateinamen - in einer Abbildung mit eigener Bildunterschrift ist sie
     doppelt.
 
-    arbeitspunkt: Waist in µm, der als senkrechte Linie und als Stern auf
+    arbeitspunkt: Waist in µm, der als senkrechte Linie
     jeder Kurve markiert wird. None = keiner.
 
     x_key/x_label/zweite_achse: die x-Achse. Vorgabe ist der Waist mit dem
@@ -852,7 +855,7 @@ def make_plots(results, out_dir=None, getrennt=True, achsen="auto",
 # ======================================================================
 # Positions-Sweep: Kurven ueber dem Atom-Versatz
 # ======================================================================
-OFFSET_LABEL = r"Atom offset from site centre $r$ [$\mathrm{\mu m}$]"
+OFFSET_LABEL = r"Atom offset from site centre $r$ ($\mathrm{\mu m}$)"
 OFFSET_LABEL_REL = r"$r / w$"
 
 
@@ -943,13 +946,16 @@ def make_offset_plots(results, out_dir=None, getrennt=True, achsen="auto",
                       penalty_plot=True, save=True, show=False,
                       confirm_overwrite=None, marker=False, prefix=None,
                       titel=False, legende=LEGENDEN_ORT, dichte=SCHRIFT_DICHTE):
-    """Dieselben drei Figuren wie beim Waist-Sweep, nur ueber dem Versatz
-    des Atoms - und mit beiden Richtungen nebeneinander."""
+    """EINE Figur: die atomgewichteten Groessen ueber dem Versatz des Atoms.
+
+    Die harten Groessen sind hier nicht gezeichnet, und die Penalty auch
+    nicht. Beim Versatz eines EINZELNEN Strahls sind die harten Metriken rein
+    geometrisch - Kreis bzw. Pitch-Quadrat gegen ein rotationssymmetrisches
+    Profil -, sie sagen nichts ueber das Atom aus, und die Penalty traegt
+    diesen Anteil mit. Gerechnet werden sie weiter und stehen im Bericht; nur
+    die Figuren sparen sie aus.
+    """
     prefix = offset_prefix(results) if prefix is None else prefix
-    hart_basis = (("uniformity_hart", "crosstalk_hart_kreis", "crosstalk_hart_pitch")
-                  if f"crosstalk_hart_kreis__{results['richtungen'][0]}" in results
-                  else ("uniformity_hart", "crosstalk_hart"))
-    hart_da = bool(offset_keys(results, hart_basis))
 
     def figur(basis_keys, dateiname, titeltext):
         lokal, keys = _richtungsfreie_uniformity(results, basis_keys)
@@ -963,20 +969,8 @@ def make_offset_plots(results, out_dir=None, getrennt=True, achsen="auto",
             x_key="offset_um", x_label=OFFSET_LABEL,
             zweite_achse=_zweite_x_achse_offset)
 
-    pfade = []
-    if getrennt or not hart_da:
-        pfade.append(figur(WEIGHTED_KEYS, f"{prefix}_weighted.pdf",
-                           "Atom position sweep, atom-weighted"))
-        if hart_da:
-            pfade.append(figur(hart_basis, f"{prefix}_hard.pdf",
-                               "Atom position sweep, hard region"))
-    else:
-        pfade.append(figur(tuple(hart_basis) + tuple(WEIGHTED_KEYS),
-                           f"{prefix}_metrics.pdf",
-                           "Atom position sweep"))
-    if penalty_plot and offset_keys(results, PENALTY_KEYS):
-        pfade.append(figur(PENALTY_KEYS, f"{prefix}_penalty.pdf",
-                           "Atom position sweep, penalty combination"))
+    pfade = [figur(WEIGHTED_KEYS, f"{prefix}_weighted.pdf",
+                   "Atom position sweep, atom-weighted")]
     return [q for q in pfade if q is not None]
 
 

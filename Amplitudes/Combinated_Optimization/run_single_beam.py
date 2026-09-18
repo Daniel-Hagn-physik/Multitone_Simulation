@@ -384,12 +384,18 @@ class SingleBeamDialog(QDialog):
         # ------------------------------------------------------------------
         g_ap = QGroupBox("Arbeitspunkt einzeichnen")
         f = QFormLayout()
-        self.ap_an = QCheckBox("senkrechte Linie und Stern auf jeder Kurve")
-        self.ap_an.setChecked(True)
+        self.ap_an = QCheckBox("senkrechte Linie bei diesem Waist")
+        # Aus als Vorgabe: in der Abbildung im Dokument ist die Markierung
+        # meistens nur eine Linie mehr. Die Werte am Arbeitspunkt stehen
+        # ohnehin im Bericht, auch wenn hier nichts gezeichnet wird.
+        self.ap_an.setChecked(False)
         self.ap_an.setToolTip(
-            "Markiert einen Waist in allen Figuren. Der Bericht bekommt dazu\n"
-            "einen Abschnitt mit den Werten aller Groessen an dieser Stelle,\n"
-            "zwischen den benachbarten Stuetzstellen interpoliert.")
+            "Zeichnet eine gestrichelte senkrechte Linie bei diesem Waist in\n"
+            "alle Figuren. Sterne auf den Kurven gibt es nicht mehr - sie sahen\n"
+            "in der Abbildung wie Messpunkte aus.\n\n"
+            "Der Bericht bekommt den Abschnitt mit den Werten aller Groessen an\n"
+            "dieser Stelle in JEDEM Fall, zwischen den benachbarten\n"
+            "Stuetzstellen interpoliert.")
         self.ap_quelle = QComboBox()
         for _key, text in ARBEITSPUNKT_QUELLEN:
             self.ap_quelle.addItem(text)
@@ -422,17 +428,13 @@ class SingleBeamDialog(QDialog):
         self.pos_n = QSpinBox()
         self.pos_n.setRange(2, 5001)
         self.pos_n.setValue(sb.OFFSET_STUETZSTELLEN_DEFAULT)
-        self.pos_vertikal = QCheckBox("senkrecht  (0, r)")
-        self.pos_vertikal.setChecked(True)
-        self.pos_diagonal = QCheckBox("diagonal  (r/sqrt2, r/sqrt2)")
-        self.pos_diagonal.setChecked(True)
-        for box in (self.pos_vertikal, self.pos_diagonal):
-            box.setToolTip(
-                "Eine waagerechte Richtung fehlt mit Absicht: das Strahlprofil ist\n"
-                "rotationssymmetrisch, waagerecht ist dasselbe wie senkrecht.\n"
-                "Diagonal ist es NICHT - nicht wegen des Strahls, sondern wegen der\n"
-                "Nachbar-Sites: die liegen auf einem Quadratgitter, und diagonal ist\n"
-                "die naechste Site sqrt(2) mal weiter weg.")
+        self.pos_richtung = QLabel("senkrecht  (0, r)")
+        self.pos_richtung.setToolTip(
+            "Die einzige Richtung, die hier etwas aussagt. Waagerecht ist dasselbe\n"
+            "wie senkrecht - das Strahlprofil ist rotationssymmetrisch. Diagonal\n"
+            "unterschied sich allein in den harten, geometrischen Groessen ueber\n"
+            "das Quadratgitter der Nachbar-Sites, und die werden beim Versatz nicht\n"
+            "mehr gezeichnet.")
         self.pos_folgt = QCheckBox("harte Region folgt dem Atom")
         self.pos_folgt.setChecked(bool(d["offset_hard_follows_atom"]))
         self.pos_folgt.setToolTip(
@@ -446,8 +448,7 @@ class SingleBeamDialog(QDialog):
         f.addRow("Versatz bis", self.pos_bis)
         f.addRow("eigener Wert (µm)", self.pos_bis_wert)
         f.addRow("Stuetzstellen", self.pos_n)
-        f.addRow(self.pos_vertikal)
-        f.addRow(self.pos_diagonal)
+        f.addRow("Richtung", self.pos_richtung)
         f.addRow(self.pos_folgt)
         g_pos.setLayout(f)
         haupt.addWidget(g_pos)
@@ -545,8 +546,7 @@ class SingleBeamDialog(QDialog):
 
     def _position_umschalten(self):
         an = self.pos_an.isChecked()
-        for widget in (self.pos_waist, self.pos_bis, self.pos_n,
-                       self.pos_vertikal, self.pos_diagonal):
+        for widget in (self.pos_waist, self.pos_bis, self.pos_n):
             widget.setEnabled(an)
         hart = (getattr(self, "hart_an", None) is None or self.hart_an.isChecked()
                 or self.penalty_plot.isChecked())
@@ -590,12 +590,6 @@ class SingleBeamDialog(QDialog):
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if antwort != QMessageBox.Yes:
                 return
-        if self.pos_an.isChecked() and not (
-                self.pos_vertikal.isChecked() or self.pos_diagonal.isChecked()):
-            QMessageBox.warning(
-                self, "Positions-Sweep",
-                "Mindestens eine Richtung anhaken - oder den Positions-Sweep abwaehlen.")
-            return
         self.accept()
 
     # ------------------------------------------------------------------
@@ -647,9 +641,7 @@ class SingleBeamDialog(QDialog):
             position_r_max=(None if self.pos_bis.currentIndex() == 0
                             else float(self.pos_bis_wert.value())),
             position_n=int(self.pos_n.value()),
-            position_richtungen=tuple(
-                r for r, box in (("vertikal", self.pos_vertikal),
-                                 ("diagonal", self.pos_diagonal)) if box.isChecked()),
+            position_richtungen=("vertikal",),
             arbeitspunkt_an=self.ap_an.isChecked(),
             arbeitspunkt_quelle=ARBEITSPUNKT_QUELLEN[self.ap_quelle.currentIndex()][0],
             arbeitspunkt_wert=float(self.ap_wert.value()),

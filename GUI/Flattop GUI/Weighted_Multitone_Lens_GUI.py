@@ -108,17 +108,25 @@ WEIGHTED_GRID_N_HIGHRES = 301  # Auflösung des lokalen 2D-Fensters (Export)
 WEIGHTED_CUT_POINTS = 400      # Punkte pro Schnittlinie im gewichteten Modus (interaktiv)
 WEIGHTED_CUT_POINTS_HIGHRES = 800
 
-# Schriftgrößen für den Export (PDF, das in LaTeX eingebunden wird -> muss
-# auch nach dem Verkleinern im Dokument lesbar sein).
-# Massstab: die Abbildung wird im Dokument auf ~16 cm Breite skaliert, aus
-# einer Figur von rund 12 Zoll Breite also mit etwa 0.5. Was im PDF 20 pt
-# gross ist, steht im Dokument als 10 pt - genau die Groesse des Fliesstextes.
-# Kleiner darf hier nichts sein, sonst ist es im Dokument unlesbar.
-EXPORT_FONTSIZE_SUPTITLE = 17
-EXPORT_FONTSIZE_TITLE = 20
-EXPORT_FONTSIZE_LABEL = 20
-EXPORT_FONTSIZE_TICK = 17
-EXPORT_FONTSIZE_LEGEND = 15
+# Export-Abbildung: 16 cm breit gespeichert - das ist die Textbreite des
+# Dokuments (A4, 2,5 cm Raender). Mit \includegraphics[width=\textwidth] wird
+# sie dann NICHT skaliert, und was hier 10 pt ist, ist im Dokument 10 pt:
+# dieselbe Groesse wie der Fliesstext.
+#
+# Vorher stand die Figur mit 12,5 Zoll (rund 31 cm) im PDF und wurde beim
+# Einbinden auf etwa die Haelfte gestaucht. Das hatte zwei Haken: die
+# Schriftgroessen 20/17/15 kamen unten als 10/8.5/7.5 pt an - also gerade
+# NICHT gleich gross -, und "bbox_inches=tight" schnitt je nach Layout
+# unterschiedlich viel Rand weg, sodass der 1x1-Export am Ende 8 % groessere
+# Schrift hatte als der 3x4. Beides faellt weg, wenn die Figur in ihrer
+# endgueltigen Groesse gespeichert wird.
+EXPORT_FIG_WIDTH_IN = 16.0 / 2.54        # 6.299 in = 16 cm
+EXPORT_FONTSIZE_SUPTITLE = 10
+# Panel-Ueberschriften gibt es im Export nicht mehr, daher auch keine eigene
+# Groesse dafuer - was die Teilbilder zeigen, steht in der Bildunterschrift.
+EXPORT_FONTSIZE_LABEL = 10
+EXPORT_FONTSIZE_TICK = 10
+EXPORT_FONTSIZE_LEGEND = 10
 
 # Der Export laeuft in demselben LaTeX-Stil wie die Plots der Scan-Skripte
 # (serif + Computer-Modern-Mathematik, siehe
@@ -641,7 +649,10 @@ class ExportOptionsDialog(QDialog):
         box_content = QGroupBox("Contents")
         v_content = QVBoxLayout(box_content)
         self.cb_title = QCheckBox("Parameter title above the figure")
-        self.cb_title.setChecked(True)
+        # Aus als Vorgabe: der Regelfall ist die Abbildung im LaTeX-Dokument,
+        # und dort gehoeren die Parameter in die Bildunterschrift. Die .txt
+        # neben dem PDF haelt sie in jedem Fall fest.
+        self.cb_title.setChecked(False)
         self.cb_title.setToolTip("Aus fuer Abbildungen im LaTeX-Dokument - dort gehoeren die\n"
                                  "Parameter in die Bildunterschrift. Sie werden in jedem Fall\n"
                                  "als .txt neben das PDF geschrieben.")
@@ -711,13 +722,18 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.state = {
             "N_x": 3,
             "N_y": 4,
-            "win": 1.05e-6,        # Waist NACH den Linsen (das, was tatsächlich für die Rechnung genutzt wird)
+            # --- Startwerte: der Arbeitspunkt, mit dem auch das Beating-GUI
+            # und die Scans laufen (3x4 Toene, Airy mit Faktor 1.4830,
+            # waist 1.04 um nach den Linsen, width 0.37 MHz,
+            # r_x = 0.97, r_y = 1.16). So zeigt das GUI beim Start dasselbe
+            # Profil, das in den Datensaetzen und Abbildungen steht.
+            "win": 1.04e-6,        # Waist NACH den Linsen (das, was tatsächlich für die Rechnung genutzt wird)
             "win_in": None,       # Waist VOR den Linsen (nur informativ bzw. im Eingangswaist-Modus die Stellgröße)
             "win_mode": "output", # 'output' = win direkt einstellen (bisheriges Verhalten)
                                   # 'input'  = win_in einstellen, win wird daraus berechnet
             "f1": 75e-3,
             "f2": 750e-3,
-            "width": 0.35e6,
+            "width": 0.37e6,
             "uniformity_side_length": 2.6e-6,
             # Form der harten Uniformity-Region: 'square' = Tonquadrat (folgt
             # dem Spot-Muster automatisch), 'circle' = Kreis fester Groesse.
@@ -732,10 +748,14 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             "uniformity_shape": "square",
             "uniformity_radius": 2.0e-6,
             "crosstalk_side_length": pitch,
-            "custom_amps": False,
-            "use_airy": False,
-            "amp_x": np.ones(3),
-            "amp_y": np.ones(4),
+            "use_airy": True,
+            # r_x = 0.97, r_y = 1.16 in der ueblichen Schreibweise: das
+            # Verhaeltnis sitzt auf den AUSSEREN Toenen, die inneren stehen
+            # auf 1 - amp_x = [r_x, 1, r_x], amp_y = [r_y, 1, 1, r_y].
+            # Dieselbe Umrechnung wie amps_from_ratio() im Beating-GUI.
+            "custom_amps": True,
+            "amp_x": np.array([0.97, 1.0, 0.97]),
+            "amp_y": np.array([1.16, 1.0, 1.0, 1.16]),
             "cut_row_idx": None,   # Fadenkreuz: Zeilenindex (bestimmt Schnitt entlang x, feste y-Position)
             "cut_col_idx": None,   # Fadenkreuz: Spaltenindex (bestimmt Schnitt entlang y, feste x-Position)
             # Vom Lens Design Tool (3-Linsen-Modell) übernommene, genauere Werte.
@@ -2699,21 +2719,35 @@ class WeightedFlatMultiToneWindow(QMainWindow):
 
         um = 1e6
         extent = [x[0] * um, x[-1] * um, y[0] * um, y[-1] * um]
-        self.cache["extent"] = extent
-        atom_cx_um, atom_cy_um = atom_cx * um, atom_cy * um
-        r_um = r_center * um
+        self.cache["extent"] = extent      # absolut - die interaktive Ansicht liest das
+
+        # Nullpunkt der ABBILDUNG in die Mitte des Musters. Gerechnet wird
+        # weiter in den globalen Koordinaten; deren Ursprung liegt weit
+        # ausserhalb des Bildes und hat auf einer Achse nichts zu suchen. Es
+        # verschiebt sich nur die Beschriftung, keine Zahl - und nur im
+        # Export, nicht in der Ansicht.
+        c0_um = r_center * um
+        extent = [e - c0_um for e in extent]
+        atom_cx_um, atom_cy_um = atom_cx * um - c0_um, atom_cy * um - c0_um
+        r_um = 0.0
         half_u_um, half_c_um, half_win_um = half_u * um, half_c * um, half_win * um
-        x_pos_um, y_pos_um = x_pos_m * um, y_pos_m * um
+        x_pos_um, y_pos_um = x_pos_m * um - c0_um, y_pos_m * um - c0_um
 
-        if self.state.get("uniformity_shape", "square") == "circle":
-            LBL_UNI = rf"Uniformity region ($r$ = {half_u*1e6:.2f} {MU_M})"
-        else:
-            LBL_UNI = rf"Uniformity region ({2*half_u*1e6:.2f} {MU_M})"
-        LBL_CROSS = rf"Crosstalk region ({2*half_c*1e6:.2f} {MU_M})"
+        # Ohne Masszahl: die drei Eintraege sollen in EINE Zeile unter die
+        # Abbildung passen, und die Kantenlaengen stehen in der .txt neben dem
+        # PDF und gehoeren in die Bildunterschrift.
+        LBL_UNI = "Uniformity region"
+        LBL_CROSS = "Crosstalk region"
+        # Die Aufenthaltswahrscheinlichkeit wird immer normiert geplottet -
+        # dann ist |Psi|^2 der kuerzere und ehrlichere Name dafuer.
+        LBL_PSI = r"$|\Psi|^2$"
 
-        LBL_X = rf"Position $x$ ({MU_M})"
-        LBL_Y = rf"Position $y$ ({MU_M})"
-        LBL_I = r"Intensity $I/I_{\mathrm{max}}$"
+        # Nur der Formelausdruck, kein Wort davor: "Position x" und
+        # "Intensity I/I_max" sagen nichts, was das Symbol nicht schon sagt,
+        # und in der Bildunterschrift steht es ohnehin ausgeschrieben.
+        LBL_X = rf"$x$ ({MU_M})"
+        LBL_Y = rf"$y$ ({MU_M})"
+        LBL_I = r"$I/I_{\mathrm{max}}$"
 
         profile_label = "Airy" if self.state["use_airy"] else "Gaussian"
         sub = r"_{\mathrm{w}}" if weighted else ""
@@ -2738,14 +2772,16 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             if opts["n_cuts"] == 1:
                 # Links gross der Schnitt, rechts darueber der herangezoomte
                 # Einzelspot und darunter die Nachbarn.
-                fig_save = plt.figure(figsize=(12.5, 8.2))
+                fig_save = plt.figure(figsize=(EXPORT_FIG_WIDTH_IN,
+                                              0.656 * EXPORT_FIG_WIDTH_IN))
                 gs_save = fig_save.add_gridspec(2, 2, width_ratios=[1.35, 1.0])
                 ax_cut_h = fig_save.add_subplot(gs_save[:, 0])
                 ax_zoom = fig_save.add_subplot(gs_save[0, 1])
                 ax_nb = fig_save.add_subplot(gs_save[1, 1])
                 ax_cut_v = None
             else:
-                fig_save = plt.figure(figsize=(12.5, 10.5))
+                fig_save = plt.figure(figsize=(EXPORT_FIG_WIDTH_IN,
+                                              0.840 * EXPORT_FIG_WIDTH_IN))
                 gs_save = fig_save.add_gridspec(2, 2, height_ratios=[1.3, 1.0])
                 ax_nb = fig_save.add_subplot(gs_save[0, 0])
                 ax_zoom = fig_save.add_subplot(gs_save[0, 1])
@@ -2803,7 +2839,8 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                 rgba_pdf[..., 2] = 1.0
                 rgba_pdf[..., 3] = 0.90 * W_pdf
                 ax.imshow(rgba_pdf, origin="lower",
-                          extent=[gx[0] * um, gx[-1] * um, gy[0] * um, gy[-1] * um],
+                          extent=[gx[0] * um - c0_um, gx[-1] * um - c0_um,
+                                  gy[0] * um - c0_um, gy[-1] * um - c0_um],
                           aspect="equal", interpolation="bilinear", zorder=6)
 
             def draw_crosshair(ax):
@@ -2816,7 +2853,8 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             # Keine weissen Spot-Marker mehr: das Muster zeigt seine Zentren
             # selbst, und bei wenigen Toenen sass der helle Punkt genau dort,
             # wo die Atomdichte hingehoert.
-            ax_nb.imshow(I_neighbor, origin="lower", extent=extent, aspect="equal", cmap="viridis")
+            im_nb = ax_nb.imshow(I_neighbor, origin="lower", extent=extent,
+                                 aspect="equal", cmap="viridis", vmin=0.0)
             if abs(self.state["atom_offset_x"]) > 0 or abs(self.state["atom_offset_y"]) > 0:
                 ax_nb.plot(atom_cx_um, atom_cy_um, "+", color="red", markersize=10,
                            markeredgewidth=1.5, zorder=8)
@@ -2824,29 +2862,41 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             draw_atom_density(ax_nb)
             draw_crosshair(ax_nb)
             configure_neighbor_view(ax_nb, r_um, pitch * um)
-            ax_nb.set_title("Neighbour sites", fontsize=EXPORT_FONTSIZE_TITLE)
+            # Keine Panel-Ueberschriften mehr: die Achsen sagen mit $x$ und
+            # $y$ schon, welcher Schnitt es ist, und was die Teilbilder zeigen,
+            # steht in der Bildunterschrift des Dokuments.
             ax_nb.set_xlabel(LBL_X, fontsize=EXPORT_FONTSIZE_LABEL)
             ax_nb.set_ylabel(LBL_Y, fontsize=EXPORT_FONTSIZE_LABEL)
             ax_nb.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
             ax_nb.locator_params(axis="both", nbins=5)
+            # Beide 2D-Ansichten stehen in Einheiten von I/I_max: der eigene
+            # Spot ist auf sein Maximum normiert, und jede der acht
+            # Nachbarkopien traegt mit Maximum 1 bei. Ohne Farbskala ist das
+            # Bild huebsch, aber man kann nichts daran ablesen.
+            cb_nb = fig_save.colorbar(im_nb, ax=ax_nb, fraction=0.046, pad=0.03)
+            cb_nb.set_label(LBL_I, fontsize=EXPORT_FONTSIZE_LABEL)
+            cb_nb.ax.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
 
             # ---- 2D: eigener Spot, herangezoomt ------------------------
-            ax_zoom.imshow(I_ort, origin="lower", extent=extent, aspect="equal", cmap="viridis")
+            im_zoom = ax_zoom.imshow(I_ort, origin="lower", extent=extent,
+                                     aspect="equal", cmap="viridis", vmin=0.0)
             draw_regions_2d(ax_zoom)
             draw_atom_density(ax_zoom)
             draw_crosshair(ax_zoom)
             ax_zoom.set_xlim(atom_cx_um - half_win_um, atom_cx_um + half_win_um)
             ax_zoom.set_ylim(atom_cy_um - half_win_um, atom_cy_um + half_win_um)
             ax_zoom.set_aspect("equal", adjustable="box")
-            ax_zoom.set_title("Spot profile", fontsize=EXPORT_FONTSIZE_TITLE)
             ax_zoom.set_xlabel(LBL_X, fontsize=EXPORT_FONTSIZE_LABEL)
             ax_zoom.set_ylabel(LBL_Y, fontsize=EXPORT_FONTSIZE_LABEL)
             ax_zoom.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
             ax_zoom.locator_params(axis="both", nbins=5)
+            cb_zoom = fig_save.colorbar(im_zoom, ax=ax_zoom, fraction=0.046, pad=0.03)
+            cb_zoom.set_label(LBL_I, fontsize=EXPORT_FONTSIZE_LABEL)
+            cb_zoom.ax.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
 
             # ---- Schnitte ----------------------------------------------
-            def draw_cut(ax, s_um, I_cut, pdf, center_um, axis_label, title, color,
-                         headroom=1.0):
+            def draw_cut(ax, s_um, I_cut, pdf, center_um, axis_label, color,
+                         titel=None, headroom=1.0):
                 if opts["regions_in_cut"]:
                     ax.axvspan(center_um - half_c_um, center_um + half_c_um,
                                facecolor=(1, 0, 0, 0.10), edgecolor="red", linewidth=1.2,
@@ -2857,7 +2907,7 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                                    zorder=1, label=LBL_UNI)
                 if pdf is not None:
                     ax.fill_between(s_um, 0, pdf, color="magenta", alpha=0.25, zorder=2,
-                                    label=r"Atom probability density (norm.)")
+                                    label=LBL_PSI)
                 ax.plot(s_um, I_cut, "-", color=color, linewidth=2, zorder=3, label="Intensity")
                 ax.set_xlim(s_um[0], s_um[-1])
                 # Luft nach oben fuer die Legende: bei EINEM Schnitt ist die
@@ -2868,17 +2918,19 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                 ax.set_xlabel(axis_label, fontsize=EXPORT_FONTSIZE_LABEL)
                 ax.set_ylabel(LBL_I, fontsize=EXPORT_FONTSIZE_LABEL)
                 ax.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
-                ax.set_title(title, fontsize=EXPORT_FONTSIZE_TITLE)
+                # Die einzige Ueberschrift, die im Export geblieben ist: bei
+                # zwei Schnitten sagt sie, welcher welcher ist. Die beiden
+                # 2D-Ansichten tragen keine - was sie zeigen, steht in der
+                # Bildunterschrift.
+                if titel:
+                    ax.set_title(titel, fontsize=EXPORT_FONTSIZE_LABEL)
                 ax.locator_params(axis="both", nbins=6)
 
-            if ax_cut_v is None:
-                draw_cut(ax_cut_h, x_line * um, I_cut_h, pdf_h, atom_cx_um, LBL_X,
-                         "Cross section", "tab:blue")
-            else:
-                draw_cut(ax_cut_h, x_line * um, I_cut_h, pdf_h, atom_cx_um, LBL_X,
-                         "Horizontal cross section", "tab:blue")
-                draw_cut(ax_cut_v, y_line * um, I_cut_v, pdf_v, atom_cy_um, LBL_Y,
-                         "Vertical cross section", "tab:green")
+            draw_cut(ax_cut_h, x_line * um - c0_um, I_cut_h, pdf_h, atom_cx_um,
+                     LBL_X, "tab:blue", titel="Horizontal")
+            if ax_cut_v is not None:
+                draw_cut(ax_cut_v, y_line * um - c0_um, I_cut_v, pdf_v, atom_cy_um,
+                         LBL_Y, "tab:green", titel="Vertical")
 
             # EINE Legende fuer die ganze Abbildung, unterhalb aller Achsen.
             # In den einzelnen Plots deckte sie bei dieser Schriftgroesse die
@@ -2886,16 +2938,19 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             legend_handles = region_patches()
             if show_pdf:
                 legend_handles.append(Patch(facecolor="magenta", alpha=0.30,
-                                            label="Atom probability density (norm.)"))
+                                            label=LBL_PSI))
+            # Alle Eintraege in EINE Zeile - mit den gekuerzten Beschriftungen
+            # passen sie bei 16 cm Breite nebeneinander.
+            n_col = len(legend_handles)
             try:
                 fig_save.legend(handles=legend_handles, loc="outside lower center",
-                                ncol=len(legend_handles), frameon=False,
+                                ncol=n_col, frameon=False,
                                 fontsize=EXPORT_FONTSIZE_LEGEND)
             except Exception:
                 # aeltere matplotlib-Versionen kennen "outside ..." nicht
                 fig_save.legend(handles=legend_handles, loc="lower center",
                                 bbox_to_anchor=(0.5, -0.03),
-                                ncol=len(legend_handles), frameon=False,
+                                ncol=n_col, frameon=False,
                                 fontsize=EXPORT_FONTSIZE_LEGEND)
 
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2904,7 +2959,11 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                                   f"{self.state['N_x']}x{self.state['N_y']}_{timestamp}.pdf")
             txt_file = out_file.with_suffix(".txt")
             try:
-                fig_save.savefig(out_file, bbox_inches="tight")
+                # Kein bbox_inches="tight": das schneidet die Figur auf ihren
+                # Inhalt zurecht, und die gespeicherte Breite waere nicht mehr
+                # die eingestellte - genau das hat die Schriftgroessen
+                # zwischen den Layouts auseinanderlaufen lassen.
+                fig_save.savefig(out_file)
                 # Parameter IMMER mitschreiben - auch (und gerade) wenn der
                 # Titel abgeschaltet ist, sonst waere die Abbildung nicht mehr
                 # reproduzierbar.
