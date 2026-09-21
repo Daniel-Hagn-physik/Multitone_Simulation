@@ -2115,8 +2115,12 @@ TRACE_SPECS = {
     # Die beiden Haelften von J. Sie stehen zwischen hart und gewichtet, und
     # genau ihre Kombination minimiert der Scan - im Schnitt entlang der
     # Geraden sind sie deshalb aussagekraeftiger als die vier Einzelgroessen.
-    "uniformity_kombi": (r"$U_c$", "%", "#117733", True),
-    "crosstalk_kombi": (r"$\eta_c$", "%", "#AA4499", True),
+    # Kombiniert: eigene Farbfamilie, klar getrennt von hart (Blau/Amber)
+    # und gewichtet (Gruen/Weinrot). Vorher lagen U_c (#117733) neben U_w
+    # (#009E73) und eta_c (#AA4499) neben eta_w (#882255) - jeweils zwei
+    # Toene derselben Farbe, im Einzelstrahl-Plot kaum zu unterscheiden.
+    "uniformity_kombi": (r"$U_c$", "%", "#D55E00", True),   # Zinnober
+    "crosstalk_kombi": (r"$\eta_c$", "%", "#332288", True),  # Indigo
 }
 
 # Reihenfolge der y-Achsen im Querschnitt (nur die angehakten erscheinen)

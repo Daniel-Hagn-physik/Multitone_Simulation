@@ -139,7 +139,7 @@ from kern.beating_physik import (
     # beat frequencies and phases
     unique_beat_frequencies, fundamental_beat_frequency, degenerate_groups,
     min_frames_per_period, resonance_check, schroeder_phases,
-    kitayoshi_phases, spot_phases_from_tones, quadrature_penalty, crest_factor,
+    kitayoshi_phases, quadratic_2pi_phases, spot_phases_from_tones, quadrature_penalty, crest_factor,
     CrestBasis, rf_voltage_ratios,
     # time evolution and statistics
     intensity_cube, boxcar_in_time, beat_orders, time_stats_exact,
@@ -639,8 +639,14 @@ class BeatingMultitoneWindow(QMainWindow):
 
         btns = QHBoxLayout()
         for label, fn in (("0", "zero"), ("Schroeder", "schroeder"),
-                          ("Kitayoshi", "kitayoshi"), ("randomise", "random")):
+                          ("Kitayoshi", "kitayoshi"),
+                          ("2\u03c0 n(n-1)/(N-1)", "quad2pi"),
+                          ("randomise", "random")):
             b = QPushButton(label)
+            if fn == "quad2pi":
+                b.setToolTip("phi_n = 2 pi * n(n-1) / (N-1),  n = 0 ... N-1\n"
+                             "Default start phases of the one-lens build and the\n"
+                             "first start point of the phase optimiser.")
             b.clicked.connect(lambda _, k=fn: self._apply_phase_preset(k))
             btns.addWidget(b)
         holder = QWidget(); holder.setLayout(btns)
@@ -855,6 +861,7 @@ class BeatingMultitoneWindow(QMainWindow):
                 store.append(sp)
 
     def _apply_phase_preset(self, kind):
+        self._read_widgets()     # N_x/N_y may have changed since the last recompute
         N_x, N_y = self.state["N_x"], self.state["N_y"]
         if kind == "zero":
             px, py = np.zeros(N_x), np.zeros(N_y)
@@ -862,6 +869,8 @@ class BeatingMultitoneWindow(QMainWindow):
             px, py = schroeder_phases(N_x), schroeder_phases(N_y)
         elif kind == "kitayoshi":
             px, py = kitayoshi_phases(N_x), kitayoshi_phases(N_y)
+        elif kind == "quad2pi":
+            px, py = quadratic_2pi_phases(N_x), quadratic_2pi_phases(N_y)
         else:
             rng = np.random.default_rng()
             px = rng.uniform(0, 2 * np.pi, N_x)
@@ -983,8 +992,16 @@ class BeatingMultitoneWindow(QMainWindow):
         QApplication.processEvents()
         rng = np.random.default_rng(7)
         best_f, best_v = 1e18, None
+        # First start point: the quadratic 2 pi phases, trigger where it is now.
+        v_quad = np.concatenate((quadratic_2pi_phases(N_x)[1:],
+                                 quadratic_2pi_phases(N_y)[1:],
+                                 [s["pulse_t0"] % T0]))
         for n in range(120):
-            v0 = np.concatenate((rng.uniform(0, 2 * np.pi, n_free), [rng.uniform(0, T0)]))
+            if n == 0:
+                v0 = v_quad
+            else:
+                v0 = np.concatenate((rng.uniform(0, 2 * np.pi, n_free),
+                                     [rng.uniform(0, T0)]))
             r = minimize(cost, v0, method="Nelder-Mead",
                          options=dict(maxiter=2000, xatol=1e-8, fatol=1e-12))
             if r.fun < best_f:
@@ -1146,10 +1163,19 @@ class BeatingMultitoneWindow(QMainWindow):
         self.state["one_lens"] = self.cb_one_lens.isChecked()
         self._sync_one_lens_enabled()
         if newly_on:
-            # Switching the build changes the geometry completely; the design
-            # window is the only sensible next step, so it opens by itself.
-            if self._open_one_lens_dialog():
-                return
+            # Switching the build changes the geometry completely. Default
+            # working point of the lab setup (f = 45 mm, w_in = 1.75 mm):
+            # 13 x 14 tones, width 1.56 MHz on both axes -> T_0 = 100 us,
+            # pitch/waist ~ 1. Other sets: 'Design for a target beating period'.
+            self._apply_one_lens_set(dict(
+                f_single=self.ONE_LENS_DEFAULT["f_single"],
+                win_in=self.ONE_LENS_DEFAULT["win_in"],
+                N_x=self.ONE_LENS_DEFAULT["N_x"], N_y=self.ONE_LENS_DEFAULT["N_y"],
+                width_x=self.ONE_LENS_DEFAULT["width"],
+                width_y=self.ONE_LENS_DEFAULT["width"], link_width=True,
+                target_period=self.ONE_LENS_DEFAULT["target_period"],
+                n_max=self.state["n_max"], t_exp=self.state["t_exp"]))
+            return
         self._on_param_changed()
 
     def _open_one_lens_dialog(self):
@@ -1165,7 +1191,16 @@ class BeatingMultitoneWindow(QMainWindow):
         dlg = one_lens_design.OneLensDesignDialog(self, self.state)
         if dlg.exec_() != dlg.Accepted or not dlg.result_candidate:
             return False
-        r = dlg.result_candidate
+        self._apply_one_lens_set(dlg.result_candidate)
+        return True
+
+    # Default working point of the single lens build (lab camera image).
+    ONE_LENS_DEFAULT = dict(f_single=45e-3, win_in=1.75e-3, N_x=13, N_y=14,
+                            width=1.56e6, target_period=100e-6)
+
+    def _apply_one_lens_set(self, r):
+        """Puts a single-lens parameter set into state and widgets and starts
+        from the quadratic 2 pi phases phi_n = 2 pi n(n-1)/(N-1)."""
         s = self.state
         s["one_lens"] = True
         s["f_single"] = r["f_single"]
@@ -1175,6 +1210,9 @@ class BeatingMultitoneWindow(QMainWindow):
         s["win_mode"] = "input"          # in front of the lens is what is known
         s["win_in"] = r["win_in"]
         s["win_in_single"] = r["win_in"]
+        s["N_x"], s["N_y"] = int(r["N_x"]), int(r["N_y"])   # phase fields need them
+        s["width_x"], s["width_y"] = r["width_x"], r["width_y"]
+        s["link_width"] = bool(r["link_width"])
         blocked = [self.cb_one_lens, self.sp_fsingle, self.cmb_winmode,
                    self.sp_win_in, self.sp_nx, self.sp_ny, self.sp_width,
                    self.sp_width_y, self.cb_link_width, self.sp_texp]
@@ -1198,6 +1236,8 @@ class BeatingMultitoneWindow(QMainWindow):
         self._sync_winmode_enabled()
         self._sync_width_enabled()
         self._rebuild_phase_fields()
+        self._write_phase_fields(quadratic_2pi_phases(r["N_x"]),
+                                 quadratic_2pi_phases(r["N_y"]))
         # Time sampling. The highest beat order is
         #     K = (N_x-1)*k_x + (N_y-1)*k_y,   k = df * T_target,
         # Nyquist wants more than 2K samples per fundamental period. With a
@@ -1216,7 +1256,6 @@ class BeatingMultitoneWindow(QMainWindow):
             w.setValue(val)
             w.blockSignals(False)
         self.recompute()
-        return True
 
     def _sync_width_enabled(self):
         self.sp_width_y.setEnabled(not self.cb_link_width.isChecked())

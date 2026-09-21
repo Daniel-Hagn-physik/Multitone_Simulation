@@ -635,6 +635,22 @@ def kitayoshi_phases(N):
     return np.pi / 2.0 - np.pi * k * (k + 1) / max(N, 1)
 
 
+def quadratic_2pi_phases(N):
+    """Quadratic tone phases spread over 2 pi:
+
+        phi_n = 2 pi * n(n-1) / (N-1) ,      n = 0 ... N-1
+
+    The same quadratic family as Schroeder/Kitayoshi (a linear chirp over
+    the tones), normalised to N-1 instead of N. phi_0 = 0.
+
+    NOTE: n(n-1) is always even, so modulo 2 pi the phases only take the
+    values 4 pi k/(N-1). For N = 3 all phases are 0, for N = 13 only
+    multiples of 60 degrees occur. Crest factors at equal amplitudes:
+    N = 4: 1.91, N = 13: 2.36, N = 14: 2.16 (Schroeder 2.00/1.88/1.94)."""
+    n = np.arange(N)
+    return 2.0 * np.pi / max(N - 1, 1) * n * (n - 1)
+
+
 def spot_phases_from_tones(phase_x, phase_y, N_x, N_y):
     """phi_spot(n,m) = phi_x(n) + phi_y(m), in the spot ordering of
     compute_centers_and_freqs() (fx outer, fy inner)."""
