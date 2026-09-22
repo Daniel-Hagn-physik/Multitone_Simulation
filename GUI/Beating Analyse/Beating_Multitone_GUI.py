@@ -147,6 +147,10 @@ from kern.beating_physik import (
     # the atom as a weight, and how evenly it is lit
     sigma_thermal, atom_beating_at_centre, atom_illumination_at_centre,
     atom_local_stack, beat_coeffs_mean,
+    # one lens: mirror-symmetric phases, maximum excitation at the centre
+    symmetric_tone_phases, n_free_symmetric, CentreExcitation,
+    optimise_symmetric_centre, build_field_stack,
+    aod_drive, dbm_to_w,
 )
 from kern.plotstil import FIG_WIDTH_IN, style_figure
 
@@ -260,6 +264,14 @@ class BeatingMultitoneWindow(QMainWindow):
             "eta_ls": 0.0,               # differential light shift / Rabi frequency
             # --- phase optimisation ---
             "crest_max": 1.9,            # crest factor the RF chain may reach
+            "p_in_aod": 0.300,           # W, optical power before the AOD
+            # Hardware, see section 15 of kern/beating_physik.py:
+            # AOD AA DTSXY-400-800 (test sheet S/N 3001-O211386), amplifier
+            # Mini-Circuits ZHL-03-5WF+.
+            "eta_single": 0.85,          # one AOD axis, 1st order, at p_sat
+            "aod_p_sat": 1.3,            # W RF per axis for maximum efficiency
+            "aod_p_peak": 4.0,           # W, instantaneous peak RF (lab practice)
+            "amp_p1db_dbm": 36.0,        # dBm, amplifier 1 dB compression
             "opt_tp": 1.0e-6,            # s, pulse length the optimiser works with
             "atom_T": 17.0e-6,           # K, atom temperature
             "atom_nu": 60.4e3,           # Hz, radial trap frequency
@@ -472,6 +484,7 @@ class BeatingMultitoneWindow(QMainWindow):
         self.lbl_amps.setWordWrap(True)
         self.lbl_amps.setStyleSheet("color: #555; font-size: 10px;")
         lay.addWidget(self.lbl_amps, 2, 0, 1, 2)
+        self._sync_one_lens_amps()
         return g
 
     def _group_pulse(self):
@@ -667,6 +680,8 @@ class BeatingMultitoneWindow(QMainWindow):
         lbl_what.setStyleSheet(
             "color: #234; font-size: 10px; background: #eef2f7; padding: 4px;")
         grid.addWidget(lbl_what, 0, 0, 1, 3)
+        self.lbl_opt_what = lbl_what
+        self._opt_what_telescope = lbl_what.text()
 
         self.sp_opt_tp = QDoubleSpinBox()
         self.sp_opt_tp.setRange(0.0001, 1000.0); self.sp_opt_tp.setDecimals(4)
@@ -714,6 +729,89 @@ class BeatingMultitoneWindow(QMainWindow):
             "then never add up anywhere.")
         grid.addWidget(QLabel("max. crest factor"), 2, 0)
         grid.addWidget(self.sp_crest_max, 2, 1)
+        self.lbl_crest_now = QLabel("-")
+        self.lbl_crest_now.setToolTip(
+            "Crest factor of the RF signal of each axis for the tones, widths,\n"
+            "amplitudes and phases set right now: sqrt(2) max|A| / rms|A| over\n"
+            "one envelope period (crest_factor() in kern/beating_physik.py).\n"
+            "Updated on every change, no Recompute needed. Red: above the limit.")
+        grid.addWidget(self.lbl_crest_now, 2, 2, 1, 2)
+        self.sp_crest_max.valueChanged.connect(self._update_crest_display)
+
+        # ---- what the crest factor costs in diffracted light ---------------
+        self.sp_p_in = QDoubleSpinBox()
+        self.sp_p_in.setRange(0.001, 100000.0); self.sp_p_in.setDecimals(1)
+        self.sp_p_in.setSingleStep(10.0); self.sp_p_in.setSuffix(" mW")
+        self.sp_p_in.setValue(self.state["p_in_aod"] * 1e3)
+        self.sp_p_in.setKeyboardTracking(False)
+        self.sp_p_in.setToolTip("Optical power before the first AOD.")
+        self.sp_eta1 = QDoubleSpinBox()
+        self.sp_eta1.setRange(0.001, 1.0); self.sp_eta1.setDecimals(2)
+        self.sp_eta1.setSingleStep(0.05); self.sp_eta1.setValue(self.state["eta_single"])
+        self.sp_eta1.setKeyboardTracking(False)
+        self.sp_eta1.setToolTip(
+            "Diffraction efficiency of ONE AOD axis into the 1st order at the\n"
+            "RF power of maximum efficiency. Test sheet DTSXY-400-800,\n"
+            "S/N 3001-O211386: single axis ~83-89 % at 1.3 W (785 nm),\n"
+            "XY together 62-70 %.")
+        self.sp_psat = QDoubleSpinBox()
+        self.sp_psat.setRange(0.01, 10.0); self.sp_psat.setDecimals(2)
+        self.sp_psat.setSingleStep(0.1); self.sp_psat.setSuffix(" W")
+        self.sp_psat.setValue(self.state["aod_p_sat"])
+        self.sp_psat.setKeyboardTracking(False)
+        self.sp_psat.setToolTip(
+            "beta: RF power per axis of maximum efficiency (saturation).\n"
+            "Own test sheet: operating point 1.3 W (785 nm). Mittenbuehler 2024\n"
+            "(same AOD type, other unit, 799.5 nm): 1.4-1.8 W.\n"
+            "Max. accepted mean RF power 2 W.")
+        self.sp_p1db = QDoubleSpinBox()
+        self.sp_p1db.setRange(0.0, 60.0); self.sp_p1db.setDecimals(1)
+        self.sp_p1db.setSingleStep(0.5); self.sp_p1db.setSuffix(" dBm")
+        self.sp_p1db.setValue(self.state["amp_p1db_dbm"])
+        self.sp_p1db.setKeyboardTracking(False)
+        self.sp_p1db.setToolTip(
+            "Output power at 1 dB compression of the RF amplifier - the\n"
+            "limit for the PEAK of the multitone envelope.\n"
+            "Mini-Circuits ZHL-03-5WF+: +36 dBm typ. (3.98 W).")
+        self.sp_ppk = QDoubleSpinBox()
+        self.sp_ppk.setRange(0.1, 100.0); self.sp_ppk.setDecimals(2)
+        self.sp_ppk.setSingleStep(0.5); self.sp_ppk.setSuffix(" W")
+        self.sp_ppk.setValue(self.state["aod_p_peak"])
+        self.sp_ppk.setKeyboardTracking(False)
+        self.sp_ppk.setToolTip(
+            "Largest INSTANTANEOUS RF power the AOD is given, C^2 * P_mean.\n"
+            "4 W = the protection limit used in this lab (Mittenbuehler 2024,\n"
+            "sec. 3.3: 2 W mean single tone per manual -> 4 W peak). Not a\n"
+            "datasheet number - raise it if the manufacturer allows more.")
+        for w in (self.sp_p_in, self.sp_eta1, self.sp_psat, self.sp_p1db, self.sp_ppk):
+            w.valueChanged.connect(self._update_crest_display)
+        grid.addWidget(QLabel("P before AOD"), 5, 0)
+        grid.addWidget(self.sp_p_in, 5, 1)
+        grid.addWidget(QLabel("AOD peak eff. alpha"), 5, 2)
+        grid.addWidget(self.sp_eta1, 5, 3)
+        grid.addWidget(QLabel("AOD saturation beta"), 6, 0)
+        grid.addWidget(self.sp_psat, 6, 1)
+        grid.addWidget(QLabel("amplifier P1dB"), 6, 2)
+        grid.addWidget(self.sp_p1db, 6, 3)
+        grid.addWidget(QLabel("AOD peak RF limit"), 7, 0)
+        grid.addWidget(self.sp_ppk, 7, 1)
+        self.lbl_eta_now = QLabel("-")
+        self.lbl_eta_now.setWordWrap(True)
+        self.lbl_eta_now.setStyleSheet("font-size: 10px; color: #234;")
+        self.lbl_eta_now.setToolTip(
+            "Efficiency of one axis (Mittenbuehler 2024, eq. 3.38; also eq. 200\n"
+            "of Crestfaktor_Randbedingung): only the TOTAL RF power counts,\n"
+            "    eta = alpha sin^2(pi/2 sqrt(P_rf / beta)).\n\n"
+            "RF power per axis, the smallest limit wins (P_peak = CF^2 P_rf):\n"
+            "  saturation   P_rf <= beta\n"
+            "  AOD thermal  P_rf <= 2 W\n"
+            "  AOD peak     P_peak <= limit field (4 W, lab practice)\n"
+            "  amplifier    P_peak <= 2 P1dB  (PEP <= P1dB)\n\n"
+            "Below CF_crit the crest factor costs no light (amber text: above).\n"
+            "Both AODs multiply.\n\n"
+            "Not included: intermodulation (Mittenbuehler: AOD -18 dB at 40\n"
+            "tones, none visible at 10), crossed-AOD coupling, cable losses.")
+        grid.addWidget(self.lbl_eta_now, 8, 0, 1, 4)
 
 
         # ---- the atom (only for the atom weighted target) ------------------
@@ -736,7 +834,6 @@ class BeatingMultitoneWindow(QMainWindow):
         self.lbl_sigma.setStyleSheet("color: #555; font-size: 10px;")
         grid.addWidget(QLabel("atom T"), 3, 0)
         grid.addWidget(self.sp_atom_T, 3, 1)
-        grid.addWidget(self.lbl_sigma, 3, 2)
         grid.addWidget(QLabel("trap frequency nu_r"), 3, 2)
         grid.addWidget(self.sp_atom_nu, 3, 3)
 
@@ -754,6 +851,7 @@ class BeatingMultitoneWindow(QMainWindow):
             "search, which weights with the atom itself.")
         grid.addWidget(QLabel("evaluation circle r"), 4, 0)
         grid.addWidget(self.sp_opt_radius, 4, 1)
+        grid.addWidget(self.lbl_sigma, 4, 2, 1, 2)     # own cell, no overlap
 
         holder2 = QWidget(); holder2.setLayout(grid)
         outer.addWidget(holder2)
@@ -782,6 +880,7 @@ class BeatingMultitoneWindow(QMainWindow):
             "on the maximum of the pulse area. A few tens of seconds.")
         self.btn_opt_pulse.clicked.connect(self._on_optimize_pulse)
         outer.addWidget(self.btn_opt_pulse)
+        self._sync_opt_mode()
 
         self._show_sigma()
 
@@ -884,6 +983,90 @@ class BeatingMultitoneWindow(QMainWindow):
             sp.blockSignals(True); sp.setValue(float(np.degrees(v)) % 360.0); sp.blockSignals(False)
         for sp, v in zip(self.phase_spins_y, py):
             sp.blockSignals(True); sp.setValue(float(np.degrees(v)) % 360.0); sp.blockSignals(False)
+        self._update_crest_display()
+
+    def _optimise_one_lens_centre(self):
+        """Mirror-symmetric tone phases with maximum excitation of the atom.
+
+            maximise  A = theta(r0) / (T_p <I(r0)>)     over psi_n = psi_(N-1-n)
+            keep      crest_x, crest_y <= C
+
+        The optimiser works with the pulse centred on t = 0 (see section 14 of
+        kern/beating_physik.py). What is written to the fields is the same
+        signal shifted in time by tau = 1/width_x, i.e. the phases
+
+            phi_n = psi_n - 2 pi (f_n - f_0) tau ,     t_0 = tau - T_p/2 ,
+
+        so that the quadratic phases 2 pi n(n-1)/(N-1) - the first start
+        point - appear in the fields unchanged when width_x = width_y."""
+        s = self.state
+        N_x, N_y = s["N_x"], s["N_y"]
+        t_p = s["opt_tp"]
+        cxs, cys, f_spots, _, _, fx_freq, fy_freq = compute_centers_and_freqs(
+            N_x, N_y, s["width_x"], s["width_y"], s["f1"], s["f2"], s["offset"],
+            s["one_lens"], s["f_single"])
+        amp = amp_spots_from_ratios(s["r_x"], s["r_y"], N_x, N_y)
+        cx0, cy0 = float(np.mean(cxs)), float(np.mean(cys))
+        g = build_field_stack(np.array([[cx0]]), np.array([[cy0]]), cxs, cys, amp,
+                              s["win"], s["use_airy"], s["airy_factor"])[:, 0, 0]
+        sig = sigma_thermal(s["atom_nu"], s["atom_T"])
+        F_loc = W = dX = dY = None
+        if np.isfinite(sig) and sig > 0:
+            _, _, Xs, Ys, F_loc, W = atom_local_stack(
+                cxs, cys, amp, s["win"], s["use_airy"], s["airy_factor"], sig,
+                n_sigma=3.0, n_grid=31, center=(cx0, cy0))
+            dX, dY = Xs - cx0, Ys - cy0
+        ce = CentreExcitation(g, f_spots, t_p, F_loc, W, dX, dY)
+
+        # first start: the quadratic phases in their symmetric form 2 pi n^2/(N-1)
+        def quad_sym(N):
+            n = np.arange(N)
+            return 2.0 * np.pi * n ** 2 / max(N - 1, 1)
+        start = np.concatenate((quad_sym(N_x)[1:1 + n_free_symmetric(N_x)],
+                                quad_sym(N_y)[1:1 + n_free_symmetric(N_y)]))
+
+        self.lbl_status.setStyleSheet("color: #555; font-size: 10px;")
+
+        def progress(i, n, best):
+            self.lbl_status.setText(
+                f"symmetric phase search: start {i}/{n}, best A = {best:.2f} x <A>")
+            QApplication.processEvents()
+
+        progress(0, 24, float("nan"))
+        res = optimise_symmetric_centre(
+            N_x, N_y, f_spots, fx_freq, fy_freq, ce, t_p, s["crest_max"],
+            amps_x=rf_voltage_ratios(s["r_x"], N_x),
+            amps_y=rf_voltage_ratios(s["r_y"], N_y),
+            start_half=start, n_starts=24, progress=progress)
+
+        psi_x, psi_y = res["psi_x"], res["psi_y"]
+        u_w, gx, gy = ce.check(spot_phases_from_tones(psi_x, psi_y, N_x, N_y))
+        # time shift to the convention of the fields (see docstring)
+        tau = 1.0 / s["width_x"] if s["width_x"] > 0 else 0.0
+        px = psi_x - 2.0 * np.pi * (fx_freq - fx_freq[0]) * tau
+        py = psi_y - 2.0 * np.pi * (fy_freq - fy_freq[0]) * tau
+        f0 = fundamental_beat_frequency(f_spots)
+        t0 = tau - t_p / 2.0
+        if f0 > 0:
+            t0 %= 1.0 / f0
+        self._write_phase_fields(px, py)
+        self.sp_t0.blockSignals(True); self.sp_t0.setValue(t0 * 1e6)
+        self.sp_t0.blockSignals(False)
+        self.state["pulse_t0"] = t0
+        C = s["crest_max"]
+        warn = "" if max(res["crest_x"], res["crest_y"]) <= C + 1e-3 \
+            else "  [crest limit not met!]"
+        off = float(np.hypot(gx, gy))
+        self._opt_note = (
+            f"One lens, symmetric phases (T_p = {t_p * 1e6:.3f} us): "
+            f"A(t_0) = {res['ratio']:.2f} x <A> at the centre, "
+            f"pulse centre at t = {tau * 1e6:.3f} us, t_0 = {t0 * 1e6:.3f} us, "
+            f"crest {res['crest_x']:.2f}/{res['crest_y']:.2f} of {C:.2f} allowed"
+            + (f"; check on the atom (sigma = {sig * 1e9:.1f} nm): "
+               f"U_W = {u_w * 100:.3f} %, spot {off * 1e9:.2f} nm off centre"
+               if np.isfinite(u_w) else "")
+            + warn)
+        self.recompute()
 
     def _on_snap_flat(self):
         """Move the pulse start to the flattest useful point of the area curve."""
@@ -939,6 +1122,11 @@ class BeatingMultitoneWindow(QMainWindow):
         from scipy.optimize import minimize
         self._read_widgets()
         s = self.state
+        if s["one_lens"]:
+            # 13 x 14 spots are 16 600 pairs - the U_W matrix below would not
+            # fit into memory. The one lens build centres by symmetry instead.
+            self._optimise_one_lens_centre()
+            return
         N_x, N_y = s["N_x"], s["N_y"]
         n_free = max(0, N_x - 1) + max(0, N_y - 1)
         ab, ai, sig = self._atom_beating()
@@ -1157,6 +1345,60 @@ class BeatingMultitoneWindow(QMainWindow):
         self.sp_fsingle.setEnabled(one)
         self.sp_f1.setEnabled(not one)
         self.sp_f2.setEnabled(not one)
+        self._sync_one_lens_amps()
+        self._sync_opt_mode()
+
+    def _sync_one_lens_amps(self):
+        """One lens: all tones at equal amplitude, r_x = r_y = 1 and locked.
+        The telescope values are kept and come back when the box is unticked."""
+        if not hasattr(self, "sp_rx"):
+            return
+        one = self.state["one_lens"]
+        spins = (self.sp_rx, self.sp_ry)
+        if one:
+            if getattr(self, "_r_saved", None) is None:
+                self._r_saved = (self.sp_rx.value(), self.sp_ry.value())
+            for sp in spins:
+                sp.blockSignals(True); sp.setValue(1.0); sp.blockSignals(False)
+            self.state["r_x"] = self.state["r_y"] = 1.0
+        elif getattr(self, "_r_saved", None) is not None:
+            for sp, v in zip(spins, self._r_saved):
+                sp.blockSignals(True); sp.setValue(v); sp.blockSignals(False)
+            self.state["r_x"], self.state["r_y"] = self._r_saved
+            self._r_saved = None
+        for sp in spins:
+            sp.setEnabled(not one)
+            sp.setToolTip("One lens: all tones at equal amplitude (r = 1)." if one else "")
+        self._update_crest_display()
+
+    OPT_WHAT_ONE_LENS = (
+        "One lens: maximises the pulse area at the atom (profile centre), "
+        "A(t_0)/<A>, with the RF crest factor of each axis <= the limit below. "
+        "The tone phases are kept MIRROR-SYMMETRIC, phi_n = phi_(N-1-n) at the "
+        "pulse centre. Then I(-x,t) = I(x,-t), and a pulse placed symmetrically "
+        "around that instant collects a mirror-symmetric pulse area - the spot "
+        "is centred on the atom by symmetry, not by search. First start: the "
+        "quadratic phases 2 pi n(n-1)/(N-1).")
+
+    def _sync_opt_mode(self):
+        """One target per build, and the text and button say which."""
+        if not hasattr(self, "btn_opt_pulse"):
+            return
+        if self.state["one_lens"]:
+            self.lbl_opt_what.setText(self.OPT_WHAT_ONE_LENS)
+            self.btn_opt_pulse.setText(
+                "Optimise symmetric phases for maximum excitation of the atom")
+            self.btn_opt_pulse.setToolTip(
+                "Mirror-symmetric tone phases, pulse centred on the symmetry\n"
+                "instant, maximum pulse area at the centre within the crest\n"
+                "limit. Writes the phases and t_0. About a minute at 13 x 14.")
+        else:
+            self.lbl_opt_what.setText(self._opt_what_telescope)
+            self.btn_opt_pulse.setText(
+                "Optimise phases and t_0 for even illumination of the atom")
+            self.btn_opt_pulse.setToolTip(
+                "Runs the phase search on the target selected above and puts t_0\n"
+                "on the maximum of the pulse area. A few tens of seconds.")
 
     def _on_one_lens_changed(self, _):
         newly_on = self.cb_one_lens.isChecked() and not self.state["one_lens"]
@@ -1328,7 +1570,59 @@ class BeatingMultitoneWindow(QMainWindow):
             self.sp_win.setValue(s["win"] * 1e6)
             self.sp_win.blockSignals(False)
 
+    def _update_crest_display(self, *args):
+        """Crest factor of the current setting, straight from the widgets."""
+        if not all(hasattr(self, a) for a in ("lbl_crest_now", "sp_rx", "phase_spins_x")):
+            return
+        try:
+            N_x, N_y = self.sp_nx.value(), self.sp_ny.value()
+            w_x = self.sp_width.value() * 1e6
+            w_y = w_x if self.cb_link_width.isChecked() else self.sp_width_y.value() * 1e6
+            off = self.sp_offset.value() * 1e6
+            out = []
+            for N, w, r, spins, key in (
+                    (N_x, w_x, self.sp_rx.value(), self.phase_spins_x, "phase_x"),
+                    (N_y, w_y, self.sp_ry.value(), self.phase_spins_y, "phase_y")):
+                if len(spins) == N:
+                    ph = np.radians([sp.value() for sp in spins])
+                else:                       # fields not rebuilt yet
+                    ph = np.zeros(N)
+                    old = np.asarray(self.state[key], dtype=float)
+                    ph[:min(N, old.size)] = old[:min(N, old.size)]
+                out.append(crest_factor(multitone_frequencies(N, off, w), ph,
+                                        amps=rf_voltage_ratios(r, N)))
+            C = self.sp_crest_max.value()
+            if hasattr(self, "lbl_eta_now"):
+                s = self.state
+                s["p_in_aod"] = self.sp_p_in.value() * 1e-3
+                s["eta_single"] = self.sp_eta1.value()
+                s["aod_p_sat"] = self.sp_psat.value()
+                s["amp_p1db_dbm"] = self.sp_p1db.value()
+                s["aod_p_peak"] = self.sp_ppk.value()
+                dx, dy = (self._drive(v) for v in out)
+                ex, ey = dx["eta"], dy["eta"]
+                s["eta_est_x"], s["eta_est_y"] = ex, ey
+                p_in = self.sp_p_in.value()
+                self.lbl_eta_now.setText(
+                    f"AOD x: {dx['p_rf']:.2f} W RF, {ex * 100:.0f} % ({dx['limit']} "
+                    f"limit)  |  AOD y: {dy['p_rf']:.2f} W RF, {ey * 100:.0f} % "
+                    f"({dy['limit']} limit)  ->  {ex * ey * 100:.0f} % through both "
+                    f"= {p_in * ex * ey:.0f} mW of {p_in:.0f} mW in the profile.  "
+                    f"No light lost up to CF = {dx['cf_crit']:.2f}.")
+                over = [a for a, d in (("x", dx), ("y", dy))
+                        if out["xy".index(a)] > dx["cf_crit"] + 1e-3]
+                self.lbl_eta_now.setStyleSheet(
+                    "font-size: 10px; color: %s;" % ("#8a5a00" if over else "#234"))
+            bad = max(out) > C + 1e-3
+            self.lbl_crest_now.setText(
+                f"now: x {out[0]:.2f} / y {out[1]:.2f}" + ("  > limit" if bad else ""))
+            self.lbl_crest_now.setStyleSheet(
+                "font-size: 10px; color: %s;" % ("#b00020" if bad else "#2f6b45"))
+        except Exception as exc:          # a display must never break the GUI
+            self.lbl_crest_now.setText(f"crest: - ({exc.__class__.__name__})")
+
     def _on_param_changed(self, *args):
+        self._update_crest_display()
         if self._building:
             return
         if self.state["auto_update"]:
@@ -1386,6 +1680,7 @@ class BeatingMultitoneWindow(QMainWindow):
     # --------------------------------------------------------
     def recompute(self):
         self._read_widgets()
+        self._update_crest_display()
         s = self.state
 
         was_running = self.timer.isActive()
@@ -2034,6 +2329,98 @@ class BeatingMultitoneWindow(QMainWindow):
         style_figure(fig)
         fig.savefig(path, format="pdf")
 
+    def _crest_now(self):
+        """Crest factors (x, y) of the current state - the same numbers as
+        the live display next to the crest limit."""
+        s = self.state
+        out = []
+        for N, w, r, key in ((s["N_x"], s["width_x"], s["r_x"], "phase_x"),
+                             (s["N_y"], s["width_y"], s["r_y"], "phase_y")):
+            ph = np.zeros(N)
+            old = np.asarray(s[key], dtype=float)
+            ph[:min(N, old.size)] = old[:min(N, old.size)]
+            out.append(crest_factor(multitone_frequencies(N, s["offset"], w), ph,
+                                    amps=rf_voltage_ratios(r, N)))
+        return out[0], out[1]
+
+    def _drive(self, cf, eta_single=None):
+        """aod_drive() with the hardware numbers of the state."""
+        s = self.state
+        return aod_drive(cf, s["eta_single"] if eta_single is None else eta_single,
+                         dbm_to_w(s["amp_p1db_dbm"]), s["aod_p_sat"],
+                         s["aod_p_peak"], 2.0)
+
+    def _diffraction_numbers(self):
+        """Everything the diffraction section reports, as one dict."""
+        s = self.state
+        cx, cy = self._crest_now()
+        dx, dy = self._drive(cx), self._drive(cy)
+        p_in = float(s["p_in_aod"])
+        return dict(cx=cx, cy=cy, e1=float(s["eta_single"]), p_in=p_in,
+                    ex=dx["eta"], ey=dy["eta"], px=dx["p_rf"], py=dy["p_rf"],
+                    lx=dx["limit"], ly=dy["limit"], cf_crit=dx["cf_crit"],
+                    p_sat=float(s["aod_p_sat"]), p1db=float(s["amp_p1db_dbm"]),
+                    p_pk=float(s["aod_p_peak"]),
+                    p_out=p_in * dx["eta"] * dy["eta"], C=float(s["crest_max"]))
+
+    def _save_diffraction_pdf(self, path):
+        """Diffraction efficiency against the RF crest factor, own page.
+
+        P_rf = min(P_sat, 2 P1dB/CF^2), eta/eta_1 = sin^2(pi/2 sqrt(P_rf/P_sat))
+        (section 15 of kern/beating_physik.py). Marked: the crest factors of
+        the current x and y tone sets, the crest limit and CF_crit, up to
+        which the crest factor costs no light. Right axis: power after BOTH
+        AODs if both axes had that crest factor."""
+        d = self._diffraction_numbers()
+        cf_hi = max(6.0, 1.15 * max(d["cx"], d["cy"], d["C"], d["cf_crit"]))
+        cf = np.linspace(np.sqrt(2.0), cf_hi, 600)
+        rel = np.array([self._drive(v, 1.0)["eta"] for v in cf])
+
+        fig = Figure(figsize=(FIG_WIDTH_IN, 0.55 * FIG_WIDTH_IN), dpi=100)
+        FigureCanvas(fig)
+        ax = fig.add_subplot(111)
+        ax.plot(cf, rel, color="#3b6ea5", lw=1.4)
+        ax.axvline(d["C"], color="gray", ls="--", lw=0.9)
+        ax.text(d["C"], 0.03, " limit %.2f" % d["C"], color="gray",
+                fontsize=8, va="bottom", ha="left")
+        if np.isfinite(d["cf_crit"]):
+            ax.axvline(d["cf_crit"], color="#2f6b45", ls=":", lw=0.9)
+            ax.text(d["cf_crit"], 1.02, "CF$_{crit}$ %.2f" % d["cf_crit"],
+                    color="#2f6b45", fontsize=8, va="bottom", ha="center")
+        for v, lab, col in ((d["cx"], "x", "tab:red"), (d["cy"], "y", "tab:orange")):
+            r = self._drive(v, 1.0)["eta"]
+            ax.plot([v], [r], "o", color=col, ms=5, zorder=3)
+            ax.annotate(f"{lab}: CF {v:.2f}, {r * 100:.0f} %", (v, r),
+                        xytext=(6, -22) if lab == "x" else (6, -38),
+                        ha="left", va="center",
+                        textcoords="offset points", fontsize=8, color=col,
+                        arrowprops=dict(arrowstyle="-", color=col, lw=0.5,
+                                        shrinkA=0, shrinkB=3))
+        ax.set_xlim(cf[0], cf[-1])
+        ax.set_ylim(0.0, 1.08)
+        ax.set_xlabel("RF crest factor CF")
+        ax.set_ylabel(r"$\eta\,/\,\alpha$ (one AOD)")
+        ax.grid(alpha=0.3, lw=0.5)
+        ax2 = ax.twinx()
+        ax2.set_ylim(0.0, 1.08)
+        ticks = np.linspace(0.0, 1.0, 6)
+        ax2.set_yticks(ticks)
+        ax2.set_yticklabels([f"{d['p_in'] * 1e3 * (d['e1'] * t) ** 2:.0f}"
+                             for t in ticks])
+        ax2.set_ylabel("P after both AODs (mW),\nboth axes at this CF")
+        ax.text(0.97, 0.95,
+                f"$P_{{in}}$ = {d['p_in'] * 1e3:.0f} mW, $\\alpha$ = {d['e1']:.2f}, "
+                f"$\\beta$ = {d['p_sat']:.2f} W\n"
+                f"P1dB = {d['p1db']:+.1f} dBm, AOD peak {d['p_pk']:.1f} W\n"
+                f"$\\eta_x$ = {d['ex'] * 100:.0f} %, $\\eta_y$ = {d['ey'] * 100:.0f} %"
+                f"  ->  {d['ex'] * d['ey'] * 100:.0f} %\n"
+                f"P in the profile = {d['p_out'] * 1e3:.0f} mW",
+                transform=ax.transAxes, ha="right", va="top", fontsize=8,
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#bbb", lw=0.6))
+        fig.tight_layout()
+        style_figure(fig)
+        fig.savefig(path, format="pdf")
+
     def _save_spectrum_pdf(self, path):
         """The beat spectrum on its own page, nu_r and 2 nu_r marked."""
         fig = Figure(figsize=(FIG_WIDTH_IN, 0.55 * FIG_WIDTH_IN), dpi=100)
@@ -2403,12 +2790,14 @@ class BeatingMultitoneWindow(QMainWindow):
                 f"{tag}_{stamp}")
         p_per = self.out_dir / (name + "_period3.pdf")
         p_spec = self.out_dir / (name + "_spectrum.pdf")
+        p_diff = self.out_dir / (name + "_diffraction.pdf")
         try:
             old_ft = matplotlib.rcParams.get("pdf.fonttype")
             matplotlib.rcParams["pdf.fonttype"] = 42      # editable text
             try:
                 self._save_period_pdf(p_per)
                 self._save_spectrum_pdf(p_spec)
+                self._save_diffraction_pdf(p_diff)
             finally:
                 if old_ft is not None:
                     matplotlib.rcParams["pdf.fonttype"] = old_ft
@@ -2439,7 +2828,31 @@ class BeatingMultitoneWindow(QMainWindow):
                      "figure 1: profile at t = 0, T_0/3, 2 T_0/3, colour "
                      "scale I / <I>_t with <I>_t = time average of the atom "
                      "weighted mean intensity (same as pulse_timing.py)",
-                     "figure 2: beat spectrum, nu_r and 2 nu_r marked"]
+                     "figure 2: beat spectrum, nu_r and 2 nu_r marked",
+                     "figure 3: diffraction efficiency vs RF crest factor"]
+            dd = self._diffraction_numbers()
+            lines += ["",
+                      "--- diffraction efficiency (estimate) ---",
+                      "model: eta = alpha * sin^2(pi/2 * sqrt(P_rf / beta)) per AOD "
+                      "(Mittenbuehler 2024 eq. 3.38; Crestfaktor_Randbedingung eq. 200),",
+                      "       P_rf = min(beta, 2 W, min(2 P1dB, P_peak,AOD) / CF^2); "
+                      "no intermodulation, no crossed-AOD coupling, no cable losses",
+                      "hardware: AOD AA DTSXY-400-800 (test sheet S/N 3001-O211386), "
+                      "amplifier Mini-Circuits ZHL-03-5WF+",
+                      f"power before the AOD P_in = {dd['p_in'] * 1e3:.1f} mW, "
+                      f"alpha (peak efficiency, one axis) = {dd['e1']:.3f}",
+                      f"AOD beta = {dd['p_sat']:.3f} W per axis, AOD peak RF limit "
+                      f"{dd['p_pk']:.2f} W, amplifier P1dB = {dd['p1db']:+.1f} dBm = "
+                      f"{dbm_to_w(dd['p1db']):.2f} W  ->  CF_crit = {dd['cf_crit']:.3f}",
+                      f"RF per axis: x {dd['px']:.3f} W ({dd['lx']} limit), "
+                      f"y {dd['py']:.3f} W ({dd['ly']} limit)",
+                      f"crest factor x = {dd['cx']:.3f}, y = {dd['cy']:.3f}  "
+                      f"(limit {dd['C']:.2f})",
+                      f"eta_x = {dd['ex'] * 100:.1f} %, eta_y = {dd['ey'] * 100:.1f} %, "
+                      f"both AODs = {dd['ex'] * dd['ey'] * 100:.1f} %",
+                      f"power in the profile (before further optics) = "
+                      f"{dd['p_out'] * 1e3:.1f} mW",
+                      ""]
             if c:
                 lines += [f"f_0 = {c['f0'] * 1e-3:.6f} kHz  ->  T_0 = "
                           f"{c['T0'] * 1e6:.4f} us",
@@ -2454,8 +2867,8 @@ class BeatingMultitoneWindow(QMainWindow):
             (self.out_dir / (name + ".txt")).write_text("\n".join(lines),
                                                         encoding="utf-8")
             self.lbl_status.setText(
-                f"saved: {short_name(p_per)}, _spectrum.pdf (+ .txt)")
-            self.lbl_status.setToolTip(f"{p_per}\n{p_spec}")
+                f"saved: {short_name(p_per)}, _spectrum.pdf, _diffraction.pdf (+ .txt)")
+            self.lbl_status.setToolTip(f"{p_per}\n{p_spec}\n{p_diff}")
         except Exception as exc:
             QMessageBox.critical(self, "Saving failed", str(exc))
 

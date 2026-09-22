@@ -169,15 +169,22 @@ class PowerBudgetDialog(QDialog):
             "atom.")
         self.sp_T = self._dspin(17.0, 0.01, 10000.0, 2, 1.0, "uK")
         self.sp_nu = self._dspin(60.4, 0.1, 100000.0, 2, 1.0, "kHz")
-        self.sp_pin = self._dspin(300.0, 0.001, 1e6, 3, 10.0, "mW")
+        self.sp_pin = self._dspin(float(s.get("p_in_aod", 0.3)) * 1e3,
+                                  0.001, 1e6, 3, 10.0, "mW")
         self.sp_pin.setToolTip("Optical power BEFORE the AOD - what the beam\n"
                                "brings along.")
-        self.sp_eff_x = self._dspin(0.70, 0.001, 1.0, 4, 0.05)
+        # default: the crest-factor estimate of the main window, if there
+        _e = s.get("eta_est_x")
+        self.sp_eff_x = self._dspin(float(_e) if _e and np.isfinite(_e) else 0.70,
+                                     0.001, 1.0, 4, 0.05)
         self.sp_eff_x.setToolTip(
             "Total diffraction efficiency of the x-AOD into the 1st order, over\n"
             "ALL of its tones together - the quantity one measures at the\n"
             "setup. The split between the tones is already in r_x.")
-        self.sp_eff_y = self._dspin(0.70, 0.001, 1.0, 4, 0.05)
+        # default: the crest-factor estimate of the main window, if there
+        _e = s.get("eta_est_y")
+        self.sp_eff_y = self._dspin(float(_e) if _e and np.isfinite(_e) else 0.70,
+                                     0.001, 1.0, 4, 0.05)
         self.sp_eff_y.setToolTip("Same for the y-AOD. The two multiply - the spot\n"
                                  "is diffracted twice.")
         self.sp_trans = self._dspin(0.80, 0.001, 1.0, 4, 0.05)

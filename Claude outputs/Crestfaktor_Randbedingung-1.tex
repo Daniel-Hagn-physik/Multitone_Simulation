@@ -197,6 +197,7 @@ sie ist die Trennung der beiden Zeitskalen aus Schritt~3. Der Rest ist durch
 \begin{equation}
   \left|\bigl\langle \tfrac12|A|^2\cos(4\pi f_\mathrm{c}t+2\theta)\bigr\rangle\right|
   \;\lesssim\; \frac{1}{\pi\,2f_\mathrm{c}\,T}
+  \label{eq:carrierrest}
 \end{equation}
 beschränkt; am Arbeitspunkt mit $T=\SI{5.405}{\micro\second}$ (eine Periode $T_\mathrm{env}$ der Einhüllenden, Abschnitt~\ref{sec:fenv}) sind das
 $2{,}9\cdot10^{-4}$. Es bleibt also
@@ -2135,78 +2136,255 @@ $b=98^\circ$, ist $\beta_0 = 114^\circ-294^\circ = -180^\circ$ und
 $\beta_1=+180^\circ$: \textbf{genau der Punkt, der von der Rampe am weitesten
 entfernt ist.}
 
-\paragraph{Die Einhüllende der zentrierten Familie ist reell.}
-Wie bei $N=3$ rechnet man direkt. Mit $f_\mathrm{c}=\bar f$ liegen die vier
-Töne bei $\hat n f_\mathrm{env}$, $\hat n\in\{-\tfrac32,-\tfrac12,\tfrac12,\tfrac32\}$.
-Setze $u := \pi f_\mathrm{env} t$; eine Periode $T_\mathrm{env}$ entspricht
-$u\in[0,\pi)$. Die Phasen schreibt man wie in Abschnitt~\ref{sec:crestback}
-als $\varphi_n = c/2+\chi_n$ mit $\chi_{3-n}=-\chi_n$, hier
-$\chi_3 = c/2 =: \chi_\mathrm{a}$ (außen) und
-$\chi_2 = c/2-b =: \chi_\mathrm{i}$ (innen). Die Amplituden sind
-$[\varrho,1,1,\varrho]$ mit $\varrho=\sqrt{r_y}$. Dann
+\paragraph{Die Einhüllende der zentrierten Familie ist reell -- Schritt für Schritt.}
+Wie bei $N=3$ rechnet man direkt. Weil hier mehr passiert als dort, in
+kleinen Schritten.
+
+\smallskip
+\noindent\textit{Schritt a: Wo die Töne relativ zu \boldmath$f_\mathrm{c}$ liegen.}
+Die Töne sind $f_n = f_\mathrm{off} + n\,f_\mathrm{env}$, $n=0,1,2,3$. Ihr
+Mittelwert ist
+$\bar f = f_\mathrm{off} + \tfrac{0+1+2+3}{4}\,f_\mathrm{env} = f_\mathrm{off}+\tfrac32 f_\mathrm{env}$.
+Mit $f_\mathrm{c}=\bar f$ (erlaubt, weil $f_\mathrm{c}$ beliebig ist,
+Abschnitt~1) ist
+\begin{equation}
+  f_n - f_\mathrm{c} = \bigl(n-\tfrac32\bigr) f_\mathrm{env} =: \hat n\, f_\mathrm{env},
+  \qquad \hat n \in \bigl\{-\tfrac32,\,-\tfrac12,\,+\tfrac12,\,+\tfrac32\bigr\} .
+\end{equation}
+Die Töne liegen jetzt symmetrisch um null: Ton $0$ und Ton $3$ bei
+$\mp\tfrac32 f_\mathrm{env}$ (das \emph{äußere} Paar), Ton $1$ und Ton $2$ bei
+$\mp\tfrac12 f_\mathrm{env}$ (das \emph{innere} Paar).
+
+\smallskip
+\noindent\textit{Schritt b: Eine bequeme Zeitvariable.}
+Ton $n$ trägt in $A(t)$ den Faktor
+$e^{\mathrm{i}(2\pi\hat n f_\mathrm{env}t + \varphi_n)}$. Die halbzahligen
+$\hat n$ sind lästig; mit
+\begin{equation}
+  u := \pi f_\mathrm{env}\,t
+  \qquad\Longrightarrow\qquad
+  2\pi\hat n f_\mathrm{env} t = 2\hat n\,u \in \{-3u,\,-u,\,+u,\,+3u\}
+\end{equation}
+werden daraus ganze Vielfache. Eine Periode $t\in[0,T_\mathrm{env})$
+entspricht $u\in[0,\pi)$.
+
+\smallskip
+\noindent\textit{Schritt c: Die Phasen nach der Zentrierung zerlegen.}
+Das Zentrierungskriterium verlangt $\varphi_n+\varphi_{3-n}=c$. Man zieht
+von jeder Phase die Hälfte davon ab,
+\begin{equation}
+  \chi_n := \varphi_n - \tfrac{c}{2}
+  \qquad\Longrightarrow\qquad
+  \chi_n + \chi_{3-n} = \varphi_n+\varphi_{3-n} - c = 0,
+  \qquad\text{also}\qquad \chi_{3-n} = -\chi_n .
+\end{equation}
+Die $\chi$ gespiegelter Töne sind entgegengesetzt gleich. Frei bleiben zwei
+Werte, einer pro Paar; man nennt sie
+\begin{equation}
+  \chi_\mathrm{a} := \chi_3 = -\chi_0 \quad\text{(außen)},
+  \qquad
+  \chi_\mathrm{i} := \chi_2 = -\chi_1 \quad\text{(innen)} .
+\end{equation}
+Mit $\varphi = [\,0,\,b,\,c-b,\,c\,]$ und am Arbeitspunkt ($c=114^\circ$,
+$b=98^\circ$):
+\begin{center}
+\begin{tabular}{@{}cccccc@{}}
+  \toprule
+  $n$ & $\hat n$ & $a_n$ & $\varphi_n$ & $\chi_n=\varphi_n-c/2$ allgemein & am Arbeitspunkt\\
+  \midrule
+  0 & $-\tfrac32$ & $\varrho$ & $0$     & $-c/2 = -\chi_\mathrm{a}$     & $-57^\circ$\\
+  1 & $-\tfrac12$ & $1$       & $b$     & $b-c/2 = -\chi_\mathrm{i}$    & $+41^\circ$\\
+  2 & $+\tfrac12$ & $1$       & $c-b$   & $c/2-b = \chi_\mathrm{i}$     & $-41^\circ$\\
+  3 & $+\tfrac32$ & $\varrho$ & $c$     & $c/2 = \chi_\mathrm{a}$       & $+57^\circ$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\smallskip
+\noindent\textit{Schritt d: Einsetzen und \boldmath$e^{\mathrm{i}c/2}$ ausklammern.}
+Jeder Term ist
+$a_n e^{\mathrm{i}(2\hat n u+\varphi_n)} = e^{\mathrm{i}c/2}\cdot a_n e^{\mathrm{i}(2\hat n u+\chi_n)}$,
+der Faktor $e^{\mathrm{i}c/2}$ ist für alle vier gleich. Die vier Terme
+nach Division durch ihn, mit $\hat n$ und $\chi_n$ aus der Tabelle:
 \begin{align}
   A(t)\,e^{-\mathrm{i}c/2}
-  &= \varrho\,e^{-\mathrm{i}(3u+\chi_\mathrm{a})}
-   + e^{-\mathrm{i}(u+\chi_\mathrm{i})}
-   + e^{+\mathrm{i}(u+\chi_\mathrm{i})}
-   + \varrho\,e^{+\mathrm{i}(3u+\chi_\mathrm{a})}\\
-  &= 2\varrho\cos(3u+\chi_\mathrm{a}) + 2\cos(u+\chi_\mathrm{i}) .
+  &= \underbrace{\varrho\,e^{\mathrm{i}(-3u-\chi_\mathrm{a})}}_{n=0}
+   + \underbrace{e^{\mathrm{i}(-u-\chi_\mathrm{i})}}_{n=1}
+   + \underbrace{e^{\mathrm{i}(+u+\chi_\mathrm{i})}}_{n=2}
+   + \underbrace{\varrho\,e^{\mathrm{i}(+3u+\chi_\mathrm{a})}}_{n=3} .
 \end{align}
-Jetzt die Zeitverschiebung $u\to u-\chi_\mathrm{i}$, die nach dem ersten
-Absatz das Maximum nicht ändert:
+
+\smallskip
+\noindent\textit{Schritt e: Paarweise zusammenfassen.}
+Term $0$ und Term $3$ haben denselben Betrag $\varrho$ und entgegengesetzte
+Exponenten, ebenso Term $1$ und Term $2$. Mit
+$e^{\mathrm{i}x}+e^{-\mathrm{i}x} = 2\cos x$:
+\begin{align}
+  \varrho\bigl[e^{-\mathrm{i}(3u+\chi_\mathrm{a})}+e^{+\mathrm{i}(3u+\chi_\mathrm{a})}\bigr]
+  &= 2\varrho\cos(3u+\chi_\mathrm{a}),\\
+  e^{-\mathrm{i}(u+\chi_\mathrm{i})}+e^{+\mathrm{i}(u+\chi_\mathrm{i})}
+  &= 2\cos(u+\chi_\mathrm{i}),
+\end{align}
+also
+\begin{equation}
+  A(t)\,e^{-\mathrm{i}c/2} = 2\varrho\cos(3u+\chi_\mathrm{a}) + 2\cos(u+\chi_\mathrm{i}) .
+  \label{eq:n4pair}
+\end{equation}
+Das ist eine \emph{reelle} Zahl. Genau das leistet die Zentrierung: Sie
+macht gespiegelte Zeiger zu konjugierten Paaren, deren Summe keinen
+Imaginärteil hat. Der Betrag ist damit schlicht
+$|A| = |2\varrho\cos(3u+\chi_\mathrm{a}) + 2\cos(u+\chi_\mathrm{i})|$; am
+Arbeitspunkt $|A| = |2\varrho\cos(3u+57^\circ) + 2\cos(u-41^\circ)|$.
+
+\smallskip
+\noindent\textit{Schritt f: Den Zeitnullpunkt verschieben.}
+Ein anderer Zeitnullpunkt ändert das Maximum über eine volle Periode nicht,
+er ändert nur, \emph{wann} es erreicht wird. Man wählt ihn so, dass das
+innere Paar keine Phase mehr hat: neue Variable $u' := u + \chi_\mathrm{i}$,
+also $u = u'-\chi_\mathrm{i}$. Dann
+\begin{align}
+  u+\chi_\mathrm{i} &= u',\\
+  3u+\chi_\mathrm{a} &= 3u' - 3\chi_\mathrm{i} + \chi_\mathrm{a} = 3u' + \gamma,
+  \qquad \gamma := \chi_\mathrm{a}-3\chi_\mathrm{i} .
+\end{align}
+Nennt man $u'$ wieder $u$:
 \begin{empheq}[box=\fbox]{equation}
   A\,e^{-\mathrm{i}c/2} \;=\; 2\varrho\cos(3u+\gamma) + 2\cos u,
   \qquad
-  \gamma := \chi_\mathrm{a}-3\chi_\mathrm{i} = 3b-c = -\beta_0 .
+  \gamma = \chi_\mathrm{a}-3\chi_\mathrm{i}
+         = \tfrac{c}{2} - 3\bigl(\tfrac{c}{2}-b\bigr) = 3b-c = -\beta_0 .
   \label{eq:n4env}
 \end{empheq}
-Hier sieht man, warum bei $N=4$ ein Parameter überlebt und bei $N=3$ keiner.
-Eine Zeitverschiebung verschiebt $u$ und $3u$ \emph{verschieden stark}. Man
-kann damit die Phase des inneren Paares wegschieben, aber nicht gleichzeitig
-die des äußeren. Bei $N=3$ gab es nur ein Paar, und $\chi$ verschwand
-vollständig.
+Am Arbeitspunkt: $\gamma = 57^\circ - 3\cdot(-41^\circ) = 57^\circ+123^\circ = 180^\circ$,
+oder ebenso $3\cdot98^\circ-114^\circ = 180^\circ$.
+
+Die Periode bleibt richtig: Mit $u\to u+\pi$ wechseln $\cos u$ und
+$\cos(3u+\gamma)$ beide das Vorzeichen, der Ausdruck also auch, der Betrag
+nicht -- $|A|$ hat in $u$ die Periode $\pi$, wie es nach Schritt~b sein muss.
+
+\smallskip
+\noindent\textit{Schritt g: Warum bei \boldmath$N=4$ ein Parameter überlebt.}
+Eine Zeitverschiebung $\Delta t$ dreht jeden Ton um $2\pi(f_n-f_\mathrm{c})\Delta t$,
+also proportional zu seiner Frequenz: das innere Paar um $\Delta u$, das
+äußere um $3\Delta u$. Man kann damit $\chi_\mathrm{i}$ auf null schieben,
+aber $\chi_\mathrm{a}$ wandert dabei um das Dreifache mit. Was sich nicht
+wegschieben lässt, ist genau die Kombination $\chi_\mathrm{a}-3\chi_\mathrm{i}=\gamma$.
+Gegenprobe mit einer Rampe $\varphi_n\to\varphi_n+\delta n$: Dann wird
+$c\to c+3\delta$ und $\chi_n\to\chi_n+\delta\hat n$, also
+$\chi_\mathrm{a}\to\chi_\mathrm{a}+\tfrac32\delta$ und
+$\chi_\mathrm{i}\to\chi_\mathrm{i}+\tfrac12\delta$, und
+$\gamma\to\gamma+\tfrac32\delta-3\cdot\tfrac12\delta=\gamma$ -- unverändert,
+wie es für eine Zeitverschiebung sein muss. Bei $N=3$ gab es nur ein Paar
+($\hat n=\pm1$) und einen mittleren Ton bei $\hat n=0$, den keine
+Zeitverschiebung dreht; das eine $\chi$ ließ sich vollständig wegschieben.
 
 \paragraph{Die beiden Grenzfälle.}
-\emph{Rampe}, $\gamma=0$: Bei $u=0$ stehen beide Kosinus auf $1$,
+\emph{Rampe}, $\gamma=0$: $A\,e^{-\mathrm{i}c/2} = 2\varrho\cos3u + 2\cos u$.
+Bei $u=0$ stehen beide Kosinus auf $1$, und größer als $2\varrho+2$ kann der
+Betrag nach der Dreiecksungleichung nie werden:
 \begin{equation}
   \max|A| = 2\varrho+2 = \textstyle\sum_n a_n = 4{,}1540659,
-  \qquad \crest_y = 2{,}8264839 .
+  \qquad \crest_y = \sqrt2\,\frac{4{,}1540659}{2{,}0784610} = 2{,}8264839 .
 \end{equation}
-\emph{Arbeitspunkt}, $\gamma=\pi$: Das äußere Paar steht bei $u=0$ in
-Gegenphase zum inneren. Mit $v:=\cos u\in[-1,1]$ und
-$\cos 3u = 4v^3-3v$ wird Gl.~\eqref{eq:n4env} ein Polynom in $v$:
+
+\emph{Arbeitspunkt}, $\gamma=\pi$: Mit $\cos(3u+\pi) = -\cos3u$ wird
 \begin{equation}
-  A\,e^{-\mathrm{i}c/2} = 2v - 2\varrho\,(4v^3-3v) = (2+6\varrho)\,v - 8\varrho\,v^3 =: G(v) .
+  A\,e^{-\mathrm{i}c/2} = 2\cos u - 2\varrho\cos 3u .
 \end{equation}
-$G$ ist ungerade, also reicht $v\ge0$. Nullsetzen der Ableitung,
-$G'(v) = 2+6\varrho - 24\varrho v^2 = 0$, gibt
+Bei $u=0$ stehen die beiden Paare jetzt \emph{gegeneinander}: $2-2\varrho$,
+fast null. Wo liegt das Maximum?
+
+\smallskip
+\noindent\textit{Schritt h: Auf ein Polynom zurückführen.}
+Die Dreifachwinkelformel folgt aus dem Additionstheorem,
+$\cos3u = \cos(2u+u) = \cos2u\cos u - \sin2u\sin u
+= (2\cos^2u-1)\cos u - 2\sin^2u\cos u = 4\cos^3u - 3\cos u$.
+Mit $v := \cos u$:
 \begin{equation}
-  v_*^2 = \frac{1+3\varrho}{12\varrho},
+  G(v) := A\,e^{-\mathrm{i}c/2}
+  = 2v - 2\varrho\,(4v^3-3v)
+  = (2+6\varrho)\,v - 8\varrho\,v^3 .
+\end{equation}
+Während $u$ eine Periode $[0,\pi)$ durchläuft, nimmt $v=\cos u$ jeden Wert in
+$[-1,1]$ an. Das Maximum von $|A|$ über die Zeit ist also das Maximum von
+$|G(v)|$ über $v\in[-1,1]$.
+
+\smallskip
+\noindent\textit{Schritt i: Nur \boldmath$v\ge0$ ansehen.}
+$G(-v) = -G(v)$, $G$ ist ungerade; $|G|$ ist deshalb symmetrisch, und es
+reicht $v\in[0,1]$. Kandidaten für das Maximum sind die Ränder und die
+Nullstellen der Ableitung:
+\begin{equation}
+  G(0) = 0, \qquad
+  G(1) = 2+6\varrho-8\varrho = 2-2\varrho, \qquad
+  G'(v) = (2+6\varrho) - 24\varrho\,v^2 .
+\end{equation}
+
+\smallskip
+\noindent\textit{Schritt j: Die Extremstelle.}
+$G'(v_*)=0$:
+\begin{equation}
+  v_*^2 = \frac{2+6\varrho}{24\varrho} = \frac{1+3\varrho}{12\varrho} .
+\end{equation}
+Wegen $G''(v) = -48\varrho v < 0$ für $v>0$ ist das ein Maximum. Es liegt
+im Intervall, solange $v_*\le1$, also $1+3\varrho\le12\varrho$, also
+$\varrho\ge1/9$ -- für jede sinnvolle Amplitude erfüllt.
+
+\smallskip
+\noindent\textit{Schritt k: Der Wert.}
+Man setzt $v_*^2$ in die Klammer von $G(v_*) = v_*\bigl[(2+6\varrho) - 8\varrho v_*^2\bigr]$ ein:
+\begin{equation}
+  8\varrho\,v_*^2 = 8\varrho\cdot\frac{1+3\varrho}{12\varrho} = \tfrac23(1+3\varrho),
   \qquad
-  G(v_*) = v_*\bigl[(2+6\varrho) - 8\varrho\,v_*^2\bigr]
-         = v_*\cdot\tfrac43(1+3\varrho) ,
+  (2+6\varrho) - \tfrac23(1+3\varrho) = 2(1+3\varrho)-\tfrac23(1+3\varrho) = \tfrac43(1+3\varrho) .
 \end{equation}
-und damit
+Also
+\begin{equation}
+  G(v_*) = \tfrac43(1+3\varrho)\cdot v_*
+         = \tfrac43(1+3\varrho)\sqrt{\frac{1+3\varrho}{12\varrho}}
+         = \tfrac43\,\frac{(1+3\varrho)^{3/2}}{2\sqrt{3\varrho}}
+         = \tfrac23\,\frac{(1+3\varrho)^{3/2}}{\sqrt{3\varrho}} ,
+\end{equation}
+mit $\sqrt{12\varrho} = 2\sqrt{3\varrho}$ im vorletzten Schritt. Der Rand
+$|G(1)| = |2-2\varrho|$ ist für $\varrho$ um $1$ viel kleiner, also
 \begin{empheq}[box=\fbox]{equation}
   \max_t|A| = \frac{2}{3}\,\frac{(1+3\varrho)^{3/2}}{\sqrt{3\varrho}},
   \qquad
   \crest_y = \sqrt2\,\frac{\tfrac23(1+3\varrho)^{3/2}/\sqrt{3\varrho}}{\sqrt{2\varrho^2+2}} .
   \label{eq:n4closed}
 \end{empheq}
-Gültig, solange $v_*\le1$, also $\varrho\ge1/9$; der Randwert
-$|G(1)| = |2-2\varrho|$ ist dann kleiner. Eingesetzt mit
-$\varrho=\sqrt{1{,}16}=1{,}0770330$:
+
+\smallskip
+\noindent\textit{Schritt l: Zahlen.} Mit $\varrho=\sqrt{1{,}16}=1{,}0770330$:
 \begin{center}
 \begin{tabular}{@{}lr@{}}
   \toprule
   $1+3\varrho$ & $4{,}2310991$\\
-  $v_* = \cos u_*$ & $0{,}5721652$ \quad($u_* = 55{,}1^\circ$)\\
-  $\max|A|$ & $3{,}2278503$\\
-  $\sqrt{\sum a_n^2} = \sqrt{2r_y+2}$ & $2{,}0784610$\\
-  $\crest_y$ & $\mathbf{2{,}1962739}$\\
+  $12\varrho$ & $12{,}9243955$\\
+  $v_*^2 = 4{,}2310991/12{,}9243955$ & $0{,}3273731$\\
+  $v_* = \cos u_*$ & $0{,}5721652$ \quad($u_*=55{,}10^\circ$ in der verschobenen Zeit)\\
+  $\tfrac43(1+3\varrho)$ & $5{,}6414655$\\
+  $\max|A| = 5{,}6414655\cdot0{,}5721652$ & $3{,}2278503$\\
+  Randwert $|G(1)| = |2-2\varrho|$ & $0{,}1540659$\\
+  $\sqrt{\sum a_n^2} = \sqrt{2r_y+2} = \sqrt{4{,}32}$ & $2{,}0784610$\\
+  $\crest_y = \sqrt2\cdot3{,}2278503/2{,}0784610$ & $\mathbf{2{,}1962739}$\\
   \bottomrule
 \end{tabular}
 \end{center}
+
+\smallskip
+\noindent\textit{Schritt m: Zurück in die echte Zeit.}
+Das Maximum liegt bei $v=+v_*$, also $u'=55{,}10^\circ$, und wegen
+$|G(-v)|=|G(v)|$ ebenso bei $v=-v_*$, $u'=180^\circ-55{,}10^\circ=124{,}90^\circ$.
+Mit $u = u'-\chi_\mathrm{i} = u'+41^\circ$ und $t = u/(\pi f_\mathrm{env}) = (u/180^\circ)\,T_\mathrm{env}$:
+\begin{equation}
+  u = 96{,}10^\circ \;\Rightarrow\; t = \SI{4.3288}{\micro\second},
+  \qquad
+  u = 165{,}90^\circ \;\Rightarrow\; t = \SI{7.4730}{\micro\second},
+\end{equation}
+genau die beiden Zeitpunkte aus Abschnitt~\ref{sec:handcalc} und
+Abschnitt~\ref{sec:ycrest}.
+
 Das ist auf acht Stellen der numerisch gefundene Wert aus
 Abschnitt~\ref{sec:crestback}, jetzt aber mit Begründung. Zum Vergleich bei
 gleichen Amplituden, $\varrho=1$: $\max|A| = \tfrac23\cdot8/\sqrt3 = 3{,}0792$,
@@ -2383,6 +2561,148 @@ check([100.000e6, 100.185e6, 100.370e6], [0.97, 1, 0.97], [0, 12.5, 25])
 check([100e6 + k*370e3/3 for k in range(4)], [1.16, 1, 1, 1.16],
       [0, 98, 16, 114])
 \end{verbatim}
+
+\subsection{Der Crestfaktor der \boldmath$y$-Achse vollständig nachgerechnet}
+\label{sec:ycrest}
+
+Abschnitt~\ref{sec:handcalc} rechnet den Zähler $\max|A|$. Hier die ganze
+Kette für die $y$-Achse mit der eingestellten Phasenwahl, vom Eingang bis zum
+Crestfaktor, mit jedem Zwischenwert.
+
+\paragraph{Schritt 1: Eingangsgrößen.}
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  Töne & $f_m = \SI{100}{\mega\hertz} + m\,f_\mathrm{env}$, $m=0\dots3$ & $f_\mathrm{env} = \SI{123.33}{\kilo\hertz}$, $T_\mathrm{env}=\SI{8.1081}{\micro\second}$\\
+  Leistungsgewichte & $[\,1{,}16;\;1;\;1;\;1{,}16\,]$ & $r_y = 1{,}16$\\
+  Spannungsamplituden & $a = [\,\varrho;\;1;\;1;\;\varrho\,]$ & $\varrho = \sqrt{1{,}16} = 1{,}0770330$\\
+  Phasen & $\varphi = [\,0;\;98;\;16;\;114\,]^\circ$ & \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Schritt 2: Die Phasenwahl einordnen.}
+Paarsummen $\varphi_0+\varphi_3 = 0^\circ+114^\circ = 114^\circ$ und
+$\varphi_1+\varphi_2 = 98^\circ+16^\circ = 114^\circ$: Das Zentrierungskriterium
+ist mit $c_y = 114^\circ$ erfüllt, und in der Schreibweise
+$[\,0,\,b,\,c_y-b,\,c_y\,]$ ist $b=98^\circ$. Der einzige crestwirksame
+Parameter ist nach Gl.~\eqref{eq:n4env}
+\begin{equation}
+  \gamma = 3b - c_y = 294^\circ - 114^\circ = 180^\circ ,
+\end{equation}
+der Wert, bei dem die Familie ihr Minimum hat (Abschnitt~\ref{sec:n4}). Der
+Crestfaktor sieht \emph{nur} $\gamma$. $c_y$ und eine zusätzliche Rampe
+bleiben frei für die Optik; zu jedem $c_y$ gehört dasselbe Optimum bei
+$b = (c_y+180^\circ)/3$.
+
+\paragraph{Schritt 3: \boldmath$|A(t)|^2$ ausmultipliziert.}
+Nach Gl.~\eqref{eq:abs2fourier} ist $|A|^2 = c_0 + 2\,\mathrm{Re}\sum_{k=1}^{3} c_k\,e^{\mathrm{i}k\theta}$
+mit $\theta := 2\pi f_\mathrm{env} t$ und $c_k = \sum_{n-m=k} a_n a_m e^{\mathrm{i}(\varphi_n-\varphi_m)}$.
+Die sechs Mischterme:
+\begin{center}
+\begin{tabular}{@{}cccccc@{}}
+  \toprule
+  $(n,m)$ & $k=n-m$ & $f_n-f_m$ & $a_na_m$ & $\varphi_n-\varphi_m$ & gehört zu\\
+  \midrule
+  $(1,0)$ & 1 & \SI{123.3}{\kilo\hertz} & $\varrho = 1{,}0770330$ & $+98^\circ$ & $c_1$\\
+  $(2,1)$ & 1 & \SI{123.3}{\kilo\hertz} & $1$ & $-82^\circ = 98^\circ-180^\circ$ & $c_1$\\
+  $(3,2)$ & 1 & \SI{123.3}{\kilo\hertz} & $\varrho = 1{,}0770330$ & $+98^\circ$ & $c_1$\\
+  $(2,0)$ & 2 & \SI{246.7}{\kilo\hertz} & $\varrho = 1{,}0770330$ & $+16^\circ$ & $c_2$\\
+  $(3,1)$ & 2 & \SI{246.7}{\kilo\hertz} & $\varrho = 1{,}0770330$ & $+16^\circ$ & $c_2$\\
+  $(3,0)$ & 3 & \SI{370.0}{\kilo\hertz} & $\varrho^2 = 1{,}16$ & $+114^\circ$ & $c_3$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+Innerhalb jedes $c_k$ haben alle Terme dieselbe Richtung, bis auf das
+Vorzeichen des mittleren Paares in $c_1$ -- das ist das $\gamma=180^\circ$.
+Deshalb lassen sich die Koeffizienten geschlossen angeben:
+\begin{align}
+  c_0 &= \textstyle\sum_n a_n^2 = 2\varrho^2+2 = 2\,r_y+2 = 4{,}32 ,\\
+  c_1 &= (2\varrho-1)\,e^{\mathrm{i}\,98^\circ} ,\qquad |c_1| = 1{,}1540659 ,\\
+  c_2 &= 2\varrho\,e^{\mathrm{i}\,16^\circ} ,\qquad\;\;\;\; |c_2| = 2{,}1540659 ,\\
+  c_3 &= \varrho^2\,e^{\mathrm{i}\,114^\circ} ,\qquad\;\;\, |c_3| = 1{,}16 ,
+\end{align}
+und damit die ganze Einhüllende in einer Zeile:
+\begin{empheq}[box=\fbox]{equation}
+  |A(t)|^2 = 4{,}32 + 2(2\varrho-1)\cos(\theta+98^\circ)
+             + 4\varrho\cos(2\theta+16^\circ)
+             + 2\varrho^2\cos(3\theta+114^\circ) .
+  \label{eq:yabs2}
+\end{empheq}
+Zum Vergleich die Rampe $b=38^\circ$: Dort ist das mittlere Paar
+gleichgerichtet, $|c_1| = 2\varrho+1 = 3{,}154$ statt $1{,}154$, und alle
+drei Kosinus erreichen gleichzeitig $+1$ -- das Maximum ist dann
+$(\sum a_n)^2$.
+
+\paragraph{Schritt 4: Der Nenner.}
+Über eine volle Periode $T_\mathrm{env}$ durchläuft $\theta$ genau
+$[0,2\pi)$, jeder Kosinus in Gl.~\eqref{eq:yabs2} macht $k$ volle
+Schwingungen und mittelt zu null. Es bleibt
+\begin{equation}
+  \langle|A|^2\rangle = c_0 = 4{,}32,
+  \qquad
+  \mathrm{rms}|A| = \sqrt{4{,}32} = 2{,}0784610 .
+\end{equation}
+Die Phasen $98^\circ$, $16^\circ$, $114^\circ$ stehen nur \emph{im}
+Kosinus und können daran nichts ändern. Mit dem falschen Fenster $1/\Delta f$
+käme für diesen Phasensatz $1{,}1264$ heraus.
+
+\paragraph{Schritt 5: Der Zähler.}
+Gl.~\eqref{eq:yabs2} auf $4\cdot10^6$ Punkten über $\theta\in[0,2\pi)$
+maximiert:
+\begin{equation}
+  \max|A|^2 = 10{,}4190173 ,\qquad \max|A| = 3{,}2278503 ,
+\end{equation}
+identisch mit der Handrechnung aus Abschnitt~\ref{sec:handcalc}. Das Maximum
+wird pro Periode \emph{zweimal} angenommen, bei $\theta = 192{,}2^\circ$
+($t=\SI{4.3288}{\micro\second}$) und $\theta = 331{,}8^\circ$
+($t=\SI{7.4730}{\micro\second}$). Der Grund steht in
+Abschnitt~\ref{sec:handcalc}: $G(v)$ ist ungerade, $A\,e^{-\mathrm{i}57^\circ}$
+erreicht einmal $+3{,}228$ und einmal $-3{,}228$, im Betrag dasselbe.
+
+\paragraph{Schritt 6: Crestfaktor.}
+\begin{align}
+  \frac{\max|A|}{\mathrm{rms}|A|} &= \frac{3{,}2278503}{2{,}0784610} = 1{,}5530002 ,\\
+  \crest_y &= \sqrt2\cdot1{,}5530002 = \mathbf{2{,}1962739} ,\\
+  \crest_y^2 &= 4{,}8236 \;\;\hat{=}\;\; \SI{6.83}{\deci\bel}\ \text{PAPR}.
+\end{align}
+Zur Einordnung zwischen den Schranken aus Gl.~\eqref{eq:sqrt2n}:
+\begin{center}
+\begin{tabular}{@{}lccc@{}}
+  \toprule
+  & $\crest_y$ & PAPR & $P_\mathrm{mittel}\le P_{1\mathrm{dB}}/\crest^2$\\
+  \midrule
+  Untergrenze, ein Ton & $\sqrt2 = 1{,}4142$ & \SI{3.01}{\deci\bel} & --\\
+  frei optimiert, Zentrierung verletzt & $1{,}7661$ & \SI{4.94}{\deci\bel} & --\\
+  \textbf{Arbeitspunkt, $\gamma=180^\circ$} & $\mathbf{2{,}1963}$ & \SI{6.83}{\deci\bel} & \SI{0.825}{\watt}\\
+  Rampe, $\gamma=0$ (z.\,B.\ alle Phasen null) & $2{,}8265$ & \SI{9.03}{\deci\bel} & \SI{0.498}{\watt}\\
+  \bottomrule
+\end{tabular}
+\end{center}
+Die Phasenwahl bringt gegenüber der Rampe einen Faktor $1{,}656$ in der
+erlaubten mittleren Leistung, \SI{2.2}{\deci\bel}.
+
+\paragraph{Schritt 7: Gegenprobe am vollen HF-Signal.}
+Zum Schluss ohne Einhüllende: $s(t) = \sum_m a_m\cos(2\pi f_m t + \varphi_m)$
+mit dem \SI{100}{\mega\hertz}-Träger, $3\cdot10^7$ Stützstellen über
+$T_\mathrm{env}$ (etwa 37 Punkte pro Trägerperiode):
+\begin{center}
+\begin{tabular}{@{}lrr@{}}
+  \toprule
+  & volles Signal & Einhüllende\\
+  \midrule
+  $\langle s^2\rangle$ bzw.\ $\tfrac12\langle|A|^2\rangle$ & $2{,}159544$ & $2{,}160000$\\
+  $\max|s|$ bzw.\ $\max|A|$ & $3{,}227847$ & $3{,}227850$\\
+  $\crest$ & $2{,}196503$ & $2{,}196274$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+Die relative Abweichung von $1\cdot10^{-4}$ kommt fast ganz aus
+$\langle s^2\rangle$: Der Rest des Terms mit doppelter Trägerfrequenz,
+Gl.~\eqref{eq:carrierrest}, ist über $T_\mathrm{env}=\SI{8.108}{\micro\second}$
+auf $1/(2\pi f_\mathrm{c}T) \approx 2\cdot10^{-4}$ beschränkt und liegt darunter.
+Der Crestfaktor der Einhüllenden ist also auf vier Stellen der
+Crestfaktor des echten Signals.
 
 \subsection{Wofür der Crestfaktor am Ende entscheidend ist}
 

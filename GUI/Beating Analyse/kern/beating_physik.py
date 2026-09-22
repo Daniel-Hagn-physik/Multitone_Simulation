@@ -2113,3 +2113,236 @@ def atom_illumination_at_centre(centers_x, centers_y, amp_spots, waist, use_airy
         n_sigma=n_sigma, n_grid=n_grid, center=(cx0, cy0))
     obj = AtomIllumination(F, k, f0, W, t_p, dx=Xs - cx0, dy=Ys - cy0)
     return obj, (xs, ys, F, W)
+
+
+# ============================================================================
+# 14. Spiegelsymmetrische Tonphasen: maximale Anregung in der Mitte
+# ============================================================================
+# Fuer grosse Felder (Ein-Linsen-Aufbau, 13x14 = 182 Spots) ist die
+# U_W-Suche aus Abschnitt 13 nicht bezahlbar: 16 600 Spotpaare, die Matrix M
+# haette 2.8*10^8 Eintraege. Hier wird die Zentrierung nicht gesucht, sondern
+# durch SYMMETRIE erzwungen, und nur noch die Anregung optimiert.
+#
+# SYMMETRIE. Die Toene einer Achse liegen symmetrisch um die Mittenfrequenz,
+# Delta_n = -Delta_{N-1-n}, die Spots symmetrisch um die Mitte, x_n = -x_{N-1-n},
+# die Amplituden ebenso (r fuer beide Randtoene). Sind auch die Tonphasen
+# spiegelsymmetrisch, psi_n = psi_{N-1-n}, dann folgt durch Umbenennen n -> N-1-n
+#
+#     E(-x, t) = sum g(x - x_n) e^{i(-2 pi Delta_n t + psi_n)} ,
+#     I(-x, t) = I(x, -t)          fuer ALLE t.
+#
+# Ein Puls, der symmetrisch um t = 0 liegt, sammelt also eine spiegel-
+# symmetrische Flaeche auf: theta(-x) = theta(x), exakt, fuer jede Wahl der
+# symmetrischen Phasen. Der Schwerpunkt sitzt auf dem Atom, der Gradient quer
+# durch die Wolke ist null - pro Achse getrennt, also auch in 2D.
+#
+# Die quadratischen Phasen phi_n = 2 pi n(n-1)/(N-1) gehoeren dazu: mit dem
+# linearen Zusatz 2 pi n/(N-1) werden sie zu psi_n = 2 pi n^2/(N-1), und
+# (N-1-n)^2 = n^2 mod (N-1). Ein linearer Phasenzusatz ist nur eine
+# Zeitverschiebung, tau = 1/width. Mit phi_n ist der symmetrische Puls also um
+# t = 1/width zentriert (0.641 us bei 1.56 MHz).
+#
+# ZIELGROESSE. Mit dem Puls symmetrisch um t = 0 ist der Zeitkern reell,
+#
+#     theta(r0) = sum_{s,s'} K_{ss'} Re[e_s e_s'^*] ,
+#     K_{ss'} = T_p sinc((f_s - f_s') T_p) ,   e_s = g_s(r0) e^{i phi_s},
+#
+# und das Zeitmittel ist <I(r0)> = sum ueber frequenzgleiche Paare. Maximiert
+# wird A = theta(r0) / (T_p <I(r0)>) bei crest_x, crest_y <= C.
+
+
+def symmetric_tone_phases(half, N):
+    """Volle spiegelsymmetrische Phasen psi_n = psi_{N-1-n} aus der freien
+    Haelfte. psi_0 = 0 (globale Phase je Achse), `half` enthaelt psi_1 ...
+    psi_{ceil(N/2)-1}."""
+    h = (N + 1) // 2
+    v = np.concatenate(([0.0], np.asarray(half, dtype=float)[:h - 1]))
+    full = np.empty(N)
+    full[:h] = v
+    full[N - 1 - np.arange(h)] = v
+    return full
+
+
+def n_free_symmetric(N):
+    """Zahl der freien Phasen einer Achse unter der Spiegelsymmetrie."""
+    return max(0, (N + 1) // 2 - 1)
+
+
+class CentreExcitation:
+    """Pulsflaeche am Atomort r0 fuer einen Puls symmetrisch um t = 0.
+
+    Gilt fuer Omega ~ I. Das Atom (sigma ~ 100 nm) ist gegen den Spot
+    (Mikrometer) punktfoermig; die Ausdehnung wird erst in check() wieder
+    beruecksichtigt."""
+
+    def __init__(self, g, f_spots, t_p, F_local=None, W=None, dx=None, dy=None):
+        self.g = np.asarray(g, dtype=float)
+        f = np.asarray(f_spots, dtype=float)
+        self.t_p = float(t_p)
+        dF = f[:, None] - f[None, :]
+        self.K = self.t_p * np.sinc(dF * self.t_p)          # reell, symmetrisch
+        self.Kavg = (np.abs(dF) < 1.0).astype(float)          # frequenzgleiche Paare
+        self.F_local, self.W, self.dx, self.dy = F_local, W, dx, dy
+
+    def _parts(self, phases):
+        c = self.g * np.cos(phases)
+        s = self.g * np.sin(phases)
+        return c, s
+
+    def ratio(self, phases):
+        """A = theta(r0) / (T_p <I(r0)>_t)."""
+        c, s = self._parts(np.asarray(phases, dtype=float))
+        th = c @ self.K @ c + s @ self.K @ s
+        av = c @ self.Kavg @ c + s @ self.Kavg @ s
+        return float(th / (self.t_p * av)) if av > 0 else 0.0
+
+    def check(self, phases):
+        """(U_W, dx, dy) auf dem lokalen Atomgitter - Kontrolle der Symmetrie.
+        dx, dy: Schwerpunktversatz der Pulsflaeche in m."""
+        if self.F_local is None:
+            return float("nan"), float("nan"), float("nan")
+        ph = np.asarray(phases, dtype=float)[:, None]
+        G = self.F_local.reshape(self.F_local.shape[0], -1)
+        C, S = G * np.cos(ph), G * np.sin(ph)
+        th = np.sum(C * (self.K @ C), axis=0) + np.sum(S * (self.K @ S), axis=0)
+        w = self.W.ravel()
+        mu = float(np.sum(w * th) / np.sum(w))
+        var = float(np.sum(w * (th - mu) ** 2) / np.sum(w))
+        cx = float(np.sum(w * th * self.dx.ravel()) / np.sum(w * th))
+        cy = float(np.sum(w * th * self.dy.ravel()) / np.sum(w * th))
+        return float(np.sqrt(max(var, 0.0)) / mu), cx, cy
+
+
+def optimise_symmetric_centre(N_x, N_y, f_spots, fx_freq, fy_freq, g, t_p,
+                              crest_max, amps_x=None, amps_y=None,
+                              start_half=None, n_starts=24, seed=7,
+                              progress=None):
+    """Spiegelsymmetrische Tonphasen mit maximaler Anregung am Atomort.
+
+        maximiere  A = theta(r0) / (T_p <I(r0)>)      ueber psi (symmetrisch)
+        unter      crest_x, crest_y <= crest_max
+
+    Der Puls liegt symmetrisch um t = 0. Die Strafe fuer den Crest-Faktor wird
+    stufenweise verschaerft (20 -> 300 -> 5000): mit der harten Strafe von
+    Anfang an bleibt Nelder-Mead an der Grenze haengen, bevor es die
+    Anregung gefunden hat.
+
+    start_half: erster Startpunkt (freie Haelften x und y hintereinander),
+    danach Zufallsstarts. progress(i, n, best) wird nach jedem Start gerufen.
+
+    Rueckgabe dict(psi_x, psi_y, ratio, crest_x, crest_y)."""
+    from scipy.optimize import minimize
+    ce = g if isinstance(g, CentreExcitation) else CentreExcitation(g, f_spots, t_p)
+    cb_x = CrestBasis(fx_freq, amps=amps_x)
+    cb_y = CrestBasis(fy_freq, amps=amps_y)
+    nx, ny = n_free_symmetric(N_x), n_free_symmetric(N_y)
+    C_aim = crest_max - 0.01
+
+    def unpack(v):
+        return symmetric_tone_phases(v[:nx], N_x), symmetric_tone_phases(v[nx:], N_y)
+
+    def cost(v, wgt):
+        px, py = unpack(v)
+        pen = 0.0
+        for cc in (cb_x(px), cb_y(py)):
+            if np.isfinite(cc) and cc > C_aim:
+                pen += wgt * (cc - C_aim) ** 2
+        return -ce.ratio(spot_phases_from_tones(px, py, N_x, N_y)) + pen
+
+    rng = np.random.default_rng(seed)
+    best_f, best_v = np.inf, np.zeros(nx + ny)
+    if nx + ny == 0:
+        n_starts = 1
+    for i in range(n_starts):
+        if i == 0 and start_half is not None:
+            x0 = np.asarray(start_half, dtype=float)
+        else:
+            x0 = rng.uniform(0, 2 * np.pi, nx + ny)
+        if nx + ny:
+            for wgt in (20.0, 300.0, 5000.0):
+                r = minimize(cost, x0, args=(wgt,), method="Nelder-Mead",
+                             options=dict(maxiter=4000, xatol=1e-7, fatol=1e-10))
+                x0 = r.x
+            f_end = cost(x0, 5000.0)
+        else:
+            f_end = cost(x0, 5000.0)
+        if f_end < best_f:
+            best_f, best_v = float(f_end), x0
+        if progress is not None:
+            progress(i + 1, n_starts, -best_f)
+    px, py = unpack(best_v)
+    return dict(psi_x=px, psi_y=py,
+                ratio=ce.ratio(spot_phases_from_tones(px, py, N_x, N_y)),
+                crest_x=cb_x(px), crest_y=cb_y(py))
+
+
+# ============================================================================
+# 15. Beugungseffizienz des AOD in Abhaengigkeit vom Crest-Faktor
+# ============================================================================
+# EFFIZIENZ (Mittenbuehler 2024, Gl. 3.12/3.38-3.40; Crestfaktor_Randbedingung
+# Abschn. 9.5, Gl. 200): alle Toene einer Achse teilen sich EINEN Kanal aus dem
+# ungebeugten Strahl, die Gesamteffizienz haengt nur von der gesamten
+# RF-Leistung ab,
+#
+#     eta = alpha * sin^2( pi/2 * sqrt(P_rf / beta) ) ,     eta_n = eta * P_n/P_rf ,
+#
+# alpha = Spitzeneffizienz, beta = RF-Leistung der Spitzeneffizienz. Die
+# Tonphasen kommen darin nicht vor.
+#
+# WIEVIEL RF-LEISTUNG DARF REIN. Mit C = Crest-Faktor des reellen Signals s(t)
+# ist die momentane Spitzenleistung P_pk = C^2 P_rf. Grenzen:
+#
+#   Verstaerker linear:  Spitzenhuellkurvenleistung PEP = P_pk/2 <= P1dB
+#                        (P1dB gilt fuer einen Dauerstrich-Ton, dessen
+#                        Momentanspitze 2 P1dB ist)  ->  P_pk <= 2 P1dB
+#   AOD, Laborpraxis:    P_pk <= 4 W (Mittenbuehler 2024, Abschn. 3.3: 2 W
+#                        mittlere Einzelton-Leistung laut Handbuch, "therefore
+#                        we limit the peak RF power to 4 W")
+#   AOD, thermisch:      P_rf <= 2 W (mittlere Leistung, Handbuch/Test Sheet)
+#   Saettigung:          P_rf <= beta (mehr bringt kein Licht mehr)
+#
+#     P_rf = min( beta, P_mean_max, min(2 P1dB, P_pk_AOD) / C^2 ) .
+#
+# Unterhalb CF_krit = sqrt(min(2 P1dB, P_pk_AOD)/beta) kostet der Crest-Faktor
+# kein Licht.
+#
+# Hardware (Standardwerte im GUI):
+#   AOD  AA DTSXY-400-800, Test Sheet S/N 3001-O211386 (785 nm): 1.3 W je
+#        Achse, eine Achse ~83-89 %, XY "1-1" 62-70 % (> 58 %), max. 2 W.
+#        Mittenbuehler (S/N 1001-O190072, 799.5 nm): alpha ~80-90 %,
+#        beta 1.4-1.8 W je nach Frequenz und Achse, global 1.8 W.
+#   Verstaerker Mini-Circuits ZHL-03-5WF+: P1dB +36 dBm typ. (3.98 W),
+#        OIP3 +49 dBm. (Mittenbuehler nennt +39 dBm / 8 W - das Datenblatt
+#        sagt +36 dBm.)
+#   -> P_pk-Grenze 4 W (AOD) vor 7.96 W (Verstaerker); CF_krit = 1.75 bei
+#      beta = 1.3 W.
+#
+# NICHT enthalten: Intermodulation. Messwerte Mittenbuehler: Verstaerker
+# -27 dB bei 40 Toenen, AOD -18 dB bei 40 Toenen und ~50 % Effizienz, bei
+# 10 Toenen im AOD keine sichtbar. Ausserdem: Kopplungsterm Xi der gekreuzten
+# AODs (Mittenbuehler Gl. 3.28, am Bandrand bis -20 %, in der Mitte ~0),
+# Frequenzgang, Kabelverluste.
+
+
+def dbm_to_w(p_dbm):
+    return 10.0 ** ((float(p_dbm) - 30.0) / 10.0)
+
+
+def aod_drive(cf, alpha=0.85, p_amp_1db=3.98, beta=1.3, p_pk_aod=4.0,
+              p_mean_max=2.0):
+    """RF-Leistung und Beugungseffizienz einer AOD-Achse bei Crest-Faktor cf.
+
+    Rueckgabe dict(p_rf [W], eta, limit, cf_crit, p_pk [W])."""
+    cf = float(cf)
+    p_pk_max = min(2.0 * p_amp_1db, p_pk_aod)
+    pk_who = "amplifier" if 2.0 * p_amp_1db <= p_pk_aod else "AOD peak"
+    cf_crit = float(np.sqrt(p_pk_max / beta)) if beta > 0 else float("nan")
+    if not np.isfinite(cf) or cf <= 0 or beta <= 0:
+        return dict(p_rf=float("nan"), eta=float("nan"), limit="-",
+                    cf_crit=cf_crit, p_pk=float("nan"))
+    cands = [(beta, "saturation"), (p_mean_max, "AOD mean"),
+             (p_pk_max / cf ** 2, pk_who)]
+    p_rf, limit = min(cands, key=lambda c: c[0])
+    eta = alpha * np.sin(0.5 * np.pi * np.sqrt(min(p_rf / beta, 1.0))) ** 2
+    return dict(p_rf=float(p_rf), eta=float(eta), limit=limit,
+                cf_crit=cf_crit, p_pk=float(cf ** 2 * p_rf))
