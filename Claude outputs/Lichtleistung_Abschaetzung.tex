@@ -247,73 +247,248 @@ Abb.~\ref{fig:etaP}.
 %======================================================================
 \section{Was die Kamera braucht}
 
-Die Abschnitte oben sagen, wie viel Licht \emph{ankommt}. Ob ein Pixel davon
-genug bekommt, ist eine andere Frage -- und sie dreht die Richtung um.
-
-Bei 1:1-Abbildung f\"allt auf ein Pixel von \SI{1,45}{\micro\meter} Kantenl\"ange
-der Bruchteil
-\begin{equation}
-  \frac{A_\mathrm{px}}{A_\mathrm{Plateau}} = 2{,}36\cdot10^{-4}
-  \label{eq:pxanteil}
-\end{equation}
-der Profilleistung (Plateaufl\"ache \SI{8165}{\micro\meter\squared}, aus dem
-Zeitmittel des $13\times14$-Profils). Mit dem Gate der L\"ange $t_g$, der
-Quanteneffizienz $\mathrm{QE}$ und $h\nu$ bei \SI{795}{\nano\meter} sind das
-\begin{equation}
-  N_{\mathrm{e}^-} = \frac{P_\mathrm{Profil}\,\cdot 2{,}36\cdot10^{-4}\cdot t_g\cdot \mathrm{QE}}{h\nu}
-  \qquad\text{Elektronen je Plateau-Pixel.}
-  \label{eq:elektronen}
-\end{equation}
+Bis hierher ging es um Watt im Profil. Die Kamera z\"ahlt aber keine Watt,
+sondern Elektronen in einem Pixel, und zwar nur w\"ahrend des Gates.
 
 \begin{table}[htbp]
 \centering\small
-\begin{tabular}{lccl}
+\begin{tabular}{ll}
 \toprule
-$P_\mathrm{Profil}$ (Puls) & $P_\mathrm{in}$ vor dem AOD & $N_{\mathrm{e}^-}$ & Bewertung\\
+\multicolumn{2}{l}{IDS U3-38J0XLE-M-GL Rev.1.2 (1008753), Datenblatt 28.09.2026 \cite{kamera}}\\
 \midrule
-\SI{0,06}{\micro\watt} & \SI{0,08}{\micro\watt} & 500  & SNR des Hubs $\approx10$, untere Grenze\\
-\SI{0,24}{\micro\watt} & \SI{0,34}{\micro\watt} & 2000 & SNR $\approx20$, guter Arbeitspunkt\\
-\SI{0,47}{\micro\watt} & \SI{0,67}{\micro\watt} & 4000 & im hellen Moment ($+\SI{44}{\percent}$) knapp\\
-\SI{1}{\micro\watt}    & \SI{1,4}{\micro\watt}  & 8500 & ges\"attigt\\
+Sensor & Sony IMX415-AAMR-C, CMOS mono, 1/2.8''\\
+Shutter & \textbf{Rolling shutter}; \glqq Global start\grqq{} nicht vorhanden\\
+Aufl\"osung, Pixel & $3864\times2176$, \SI{1,45}{\micro\meter}, ADC \SI{12}{bit}\\
+Bildrate & \SI{25}{fps} @ \SI{10}{bit} (Freilauf wie Trigger)\\
+Belichtungszeit & \SI{0,019}{\milli\second} bis \SI{1999}{\milli\second}\\
+Trigger & nur Software; \textbf{kein Hardware-Trigger}, kein I/O-Stecker\\
+Flash-Ausgang & nicht vorhanden\\
+AOI & vertikal erh\"oht die Bildrate, horizontal nicht\\
 \bottomrule
 \end{tabular}
-\caption{$t_g=\SI{30}{\micro\second}$, 1:1, $\mathrm{QE}=0{,}30$,
-S\"attigungsladung \SI{6000}{\elementarycharge} angenommen; $P_\mathrm{in}$ mit
-$\eta_x\eta_y=\SI{69,8}{\percent}$ (Schroeder-Phasen).}
+\caption{Die Zeilenzeit folgt aus der Bildrate:
+$1/(\SI{25}{\per\second}\cdot2176)=\SI{18,4}{\micro\second}$. Dass nur die
+\emph{vertikale} AOI die Bildrate erh\"oht, best\"atigt, dass die Zeit in den
+Zeilen steckt.}
+\label{tab:kameradaten}
+\end{table} Dieser
+Abschnitt rechnet die Kette in f\"unf Schritten durch. Alle Zwischenergebnisse
+sind f\"ur den vorgeschlagenen Arbeitspunkt $P_\mathrm{Profil}=\SI{0,235}{\micro\watt}$
+angegeben, damit man jede Zeile nachrechnen kann.
+
+\subsection*{Schritt 1: Welcher Bruchteil des Lichts trifft ein Pixel?}
+
+Das Profil ist ein Flattop: Die Leistung verteilt sich gleichm\"a\ss{}ig \"uber die
+Plateaufl\"ache. Ein Pixel bekommt also den Anteil, den seine Fl\"ache an dieser
+Fl\"ache hat. Bei 1:1-Abbildung ist die Bildgr\"o\ss{}e gleich der Objektgr\"o\ss{}e, also
+\begin{equation}
+  A_\mathrm{px} = (\SI{1,45}{\micro\meter})^2 = \SI{2,10}{\micro\meter\squared},
+  \qquad
+  A_\mathrm{Plateau} = \SI{8165}{\micro\meter\squared}
+  \;\Rightarrow\;
+  \frac{A_\mathrm{px}}{A_\mathrm{Plateau}} = 2{,}58\cdot10^{-4}.
+  \label{eq:flaechen}
+\end{equation}
+Die Plateaufl\"ache ist die Fl\"ache, auf der das Zeitmittel \"uber der halben
+Maximalintensit\"at liegt -- dieselbe Definition, die auch die Auswertung im GUI
+benutzt.
+
+Das ist noch nicht ganz der gesuchte Anteil, denn nicht alles Licht landet im
+Plateau: die Airy-Ringe und die abfallenden R\"ander tragen rund \SI{8}{\percent}
+der Gesamtleistung, die au\ss{}erhalb liegen. Aus dem gerechneten Profil folgt
+deshalb der etwas kleinere Wert
+\begin{equation}
+  \varphi \;\equiv\; \frac{P_\mathrm{px}}{P_\mathrm{Profil}} = 2{,}36\cdot10^{-4}.
+  \label{eq:phi}
+\end{equation}
+Mit $P_\mathrm{Profil}=\SI{0,235}{\micro\watt}$ sind das
+$P_\mathrm{px}=\SI{55,5}{\pico\watt}$ auf einem Pixel im Plateau. Die hellsten
+Pixel liegen nur \SI{7}{\percent} dar\"uber -- bei 1:1 ist ein Pixel klein gegen
+den Spotabstand von \SI{6,5}{\micro\meter}, es sieht also nicht einzelne Spots,
+sondern das flache Mittel.
+
+\subsection*{Schritt 2: Wie viel Energie ist das im Gate?}
+
+Die Kamera sammelt nur, solange der AOM offen ist. Bei $t_g=\SI{30}{\micro\second}$
+\begin{equation}
+  E_\mathrm{px} = P_\mathrm{px}\cdot t_g = \SI{55,5}{\pico\watt}\cdot\SI{30}{\micro\second}
+  = \SI{1,66}{\femto\joule}.
+  \label{eq:energie}
+\end{equation}
+Dass das eine winzige Energie ist, liegt an beidem: kleines Pixel und kurzes
+Fenster. Genau deshalb kippt die Frage sp\"ater von \glqq reicht das Licht\grqq{}
+zu \glqq wie stark muss ich abschw\"achen\grqq.
+
+\subsection*{Schritt 3: Wie viele Photonen sind das?}
+
+Ein Photon bei \SI{795}{\nano\meter} tr\"agt
+\begin{equation}
+  h\nu = \frac{hc}{\lambda} = \SI{2,50e-19}{\joule} \;(=\SI{1,56}{\electronvolt}),
+  \qquad
+  n_\gamma = \frac{E_\mathrm{px}}{h\nu} = \frac{\SI{1,66e-15}{\joule}}{\SI{2,50e-19}{\joule}}
+  = 6660 .
+  \label{eq:photonen}
+\end{equation}
+
+\subsection*{Schritt 4: Wie viele davon werden zu Elektronen?}
+
+Nicht jedes Photon erzeugt ein Signal. Der Anteil, der es tut, ist die
+Quanteneffizienz $\mathrm{QE}$. F\"ur den IMX415 -- ein r\"uckseitig belichteter
+Sensor -- nehme ich bei \SI{795}{\nano\meter} $\mathrm{QE}=0{,}30$ an; im Gr\"unen
+liegt er deutlich h\"oher, im Nahinfraroten f\"allt er ab. Damit
+\begin{equation}
+  N_{\mathrm{e}^-} = \mathrm{QE}\cdot n_\gamma = 0{,}30\cdot6660 = 2000 .
+  \label{eq:elektronen}
+\end{equation}
+Alles zusammengefasst ist das
+\begin{equation}
+  \boxed{\;N_{\mathrm{e}^-}
+  = \frac{P_\mathrm{Profil}\;\varphi\;t_g\;\mathrm{QE}}{h\nu}\;}
+  \qquad \varphi = 2{,}36\cdot10^{-4} .
+  \label{eq:kette}
+\end{equation}
+Die Formel ist in allen vier Gr\"o\ss{}en linear: doppelte Leistung, doppeltes Gate
+oder doppelte QE geben doppelt so viele Elektronen.
+
+\subsection*{Schritt 5: Ist das genug -- und nicht zu viel?}
+
+\paragraph{Nach unten begrenzt das Schrotrauschen.} Die Zahl der Elektronen
+schwankt von Bild zu Bild um $\sqrt{N_{\mathrm{e}^-}}$; das ist keine Eigenschaft
+der Kamera, sondern der Photonenstatistik. Bei $N_{\mathrm{e}^-}=2000$ sind das
+$\sqrt{2000}=45$ Elektronen oder \SI{2,2}{\percent}. Gesucht ist der Hub der
+Schwebung, der bei \SI{30}{\micro\second} Gate im Median \SI{44}{\percent} des
+Mittelwerts betr\"agt (Schroeder-Phasen), also $0{,}44\cdot2000=880$ Elektronen.
+Das Verh\"altnis
+\begin{equation}
+  \mathrm{SNR} = \frac{0{,}44\,N_{\mathrm{e}^-}}{\sqrt{N_{\mathrm{e}^-}}}
+               = 0{,}44\sqrt{N_{\mathrm{e}^-}} \approx 20
+  \label{eq:snr}
+\end{equation}
+gilt \emph{pro Pixel und pro Bild}. Das Ausleserauschen von wenigen Elektronen
+f\"allt daneben nicht ins Gewicht.
+
+Tats\"achlich ist es noch besser: Das Muster ist nicht pixelfein, seine Struktur
+ist einige zehn Mikrometer gro\ss{}. \"Uber ein Gebiet von \SI{10}{\micro\meter}
+Kantenl\"ange mitteln rund 48 Pixel dasselbe Signal, was die Sichtbarkeit
+nochmals um etwa $\sqrt{48}\approx7$ verbessert. F\"ur den blo\ss{}en Nachweis
+w\"urden also auch \SI{0,06}{\micro\watt} reichen; die \SI{0,235}{\micro\watt} sind
+der Wert, bei dem man dem \emph{einzelnen} Pixel schon glauben kann.
+
+\paragraph{Nach oben begrenzt die S\"attigung.} Ein Pixel von
+\SI{1,45}{\micro\meter} fasst gesch\"atzt rund \SI{6000}{\elementarycharge}
+(aus dem Datenblatt zu best\"atigen). Weil die Einzelbilder um $\pm\SI{44}{\percent}$
+um den Mittelwert schwanken, muss der \emph{Mittelwert} entsprechend darunter
+liegen: bei $N_{\mathrm{e}^-}=4000$ erreicht das hellste Bild schon
+$1{,}44\cdot4000\approx5800$. Sinnvoll ist deshalb ein Mittelwert von etwa einem
+Drittel bis der H\"alfte der S\"attigung.
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabular}{ccccl}
+\toprule
+$P_\mathrm{Profil}$ & $P_\mathrm{in}$ vor dem AOD & Photonen & $N_{\mathrm{e}^-}$ & Bewertung\\
+\midrule
+\SI{0,06}{\micro\watt} & \SI{0,08}{\micro\watt} & 1670  & 500  & SNR $\approx10$; f\"ur den Nachweis genug\\
+\SI{0,235}{\micro\watt} & \SI{0,34}{\micro\watt} & 6660  & 2000 & SNR $\approx20$; empfohlener Arbeitspunkt\\
+\SI{0,47}{\micro\watt} & \SI{0,67}{\micro\watt} & 13300 & 4000 & helles Bild bei 5800, knapp unter S\"attigung\\
+\SI{1}{\micro\watt}    & \SI{1,4}{\micro\watt}  & 28400 & 8500 & ges\"attigt, unbrauchbar\\
+\bottomrule
+\end{tabular}
+\caption{Gl.~\eqref{eq:kette} mit $t_g=\SI{30}{\micro\second}$, 1:1,
+$\mathrm{QE}=0{,}30$. $P_\mathrm{in}$ folgt aus
+$\eta_x\eta_y=\SI{69,8}{\percent}$ (Schroeder-Phasen, Tab.~\ref{tab:phasen}).}
 \label{tab:kamera}
 \end{table}
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\textwidth]{licht_kamera.pdf}
-  \caption{Elektronen je Plateau-Pixel nach Gl.~\eqref{eq:elektronen}. Der
-  gr\"une Streifen ist der Arbeitsbereich: gen\"ugend Abstand zum Ausleserauschen
-  und noch Platz f\"ur den Hub der Schwebung von \SI{44}{\percent}.}
+  \caption{Gl.~\eqref{eq:kette} \"uber der Leistung im Profil. Der gr\"une Streifen
+  ist der Arbeitsbereich: genug Abstand zum Ausleserauschen und noch Platz f\"ur
+  den Hub von \SI{44}{\percent}. Gestrichelt dieselbe Rechnung bei vierfacher
+  Vergr\"o\ss{}erung, wo ein Pixel $1/16$ so viel Licht sammelt.}
   \label{fig:kamera}
 \end{figure}
 
-\paragraph{Die Folgerung.} Gebraucht werden \emph{Mikrowatt}, nicht Milliwatt.
-Von den \SI{209}{\milli\watt}, die bei \SI{300}{\milli\watt} Eingang im Profil
-ank\"amen, m\"usste um rund \SI{58}{\deci\bel} abgeschw\"acht werden. Die
-Lichtleistung ist f\"ur diese Messung also keine Randbedingung; entscheidend ist,
-\emph{einstellen} zu k\"onnen, so dass das Plateau im Einzelbild bei etwa einem
-Drittel bis der H\"alfte der Vollaussteuerung liegt.
+\subsection*{Der Rolling Shutter und warum das Licht takten muss}
 
-\paragraph{Wie die Zahlen skalieren.}
+Beim Rolling Shutter laufen Reset und Auslesen zeilenweise gemeinsam durch den
+Sensor. Jede Zeile belichtet zwar volle $t_g$, aber Zeile $n$ beginnt
+\SI{18,4}{\micro\second} sp\"ater als Zeile $n-1$. \"Uber die 58 Zeilen, die das
+Profil bei 1:1 bedeckt, sind das \SI{1,07}{\milli\second} -- rund
+\textbf{elf Beat-Perioden}. Ein Bild ist also kein Momentbild, sondern eine
+Treppe durch die Zeit, und daran \"andert auch ein einzeln ausgel\"ostes Bild
+nichts: Der Trigger legt nur fest, wann die Treppe beginnt.
+
+Drei der \"ublichen Auswege fallen bei dieser Kamera aus, und zwar laut
+Datenblatt (Tab.~\ref{tab:kameradaten}): Es gibt \textbf{keinen
+Hardware-Trigger}, \textbf{keinen Flash-Ausgang} und \textbf{kein Global
+Start}. Die Kamera kann also weder vom AWG getaktet werden noch selbst den AWG
+takten, und sie kann ihre Zeilen nicht gemeinsam starten.
+
+Was bleibt, ist der Weg \"uber das Licht -- und der ist ohnehin der sauberste:
 \begin{itemize}
-\item \textbf{Vergr\"o\ss{}erung $M$:} ein Pixel sammelt $M^{-2}$ so viel. Mit
-  $M=4$, sinnvoll f\"ur saubere Spotprofile, werden aus \SI{0,24}{\micro\watt}
-  rund \SI{3,8}{\micro\watt}.
-\item \textbf{Pulsl\"ange:} linear. Bei \SI{10}{\micro\second} das Dreifache --
-  und k\"urzer als etwa \SI{10}{\micro\second} ist wegen der Schall-Laufzeit im
-  AOD (\SI{5,4}{\micro\second}) ohnehin nicht sinnvoll.
-\item \textbf{QE und S\"attigungsladung} sind Annahmen f\"ur den IMX415 bei
-  \SI{795}{\nano\meter}; beide sind aus der QE-Kurve bzw.\ dem Datenblatt zu
-  best\"atigen. Ein Faktor~2 dort verschiebt alle Zahlen um denselben Faktor.
-\item \textbf{Ausleserauschen} (wenige \si{\elementarycharge}) spielt im
-  Arbeitsbereich keine Rolle; es dominiert das Schrotrauschen mit
-  $1/\sqrt{N_{\mathrm{e}^-}}$.
+\item Der AOM \"offnet \textbf{in jeder Grundperiode} an derselben Stelle, also
+  alle \SI{100}{\micro\second} bei derselben Beat-Phase
+  (\texttt{GATE\_PER\_PERIOD} im Skript).
+\item Dann sammelt \emph{jede} Zeile, egal wann sie \"offnet, eine Folge
+  identischer Schnappschüsse derselben Phase. Die Treppe f\"allt heraus, ein
+  Trigger wird nicht gebraucht, die Kamera l\"auft frei.
+\item Ist die Belichtung ein ganzzahliges Vielfaches von \SI{100}{\micro\second}
+  -- etwa \SI{5,0}{\milli\second} f\"ur 50 Pulse --, bekommt jede Zeile gleich
+  viele Pulse. Angeschnittene Pulse an den Fensterr\"andern bleiben als
+  Abweichung von etwa $1/n$, hier \SI{2}{\percent}.
+\item Die $n$ Pulse addieren sich: f\"ur dieselbe Elektronenzahl je Pixel wird
+  nur $1/n$ der Leistung gebraucht. Bei 50 Pulsen sind das statt
+  \SI{0,235}{\micro\watt} noch \SI{5}{\nano\watt} im Profil -- praktischer ist
+  es, weniger Pulse zu setzen oder k\"urzer zu belichten.
+\item Der Videomodus ist dabei kein Sonderfall: Auch dort nimmt die Kamera
+  einzelne Bilder auf, eines nach dem anderen. Mitteln \"uber $n$ Bilder
+  verbessert die SNR um $\sqrt{n}$.
 \end{itemize}
+
+Die Zeitaufl\"osung kommt damit vollst\"andig vom AWG, der sie auf ein Sample
+genau setzt. Der Delay-Scan ist das Verschieben des Pulses innerhalb der
+Periode.
+
+\subsection*{Was das praktisch hei\ss{}t}
+
+Gebraucht werden \emph{Mikrowatt} im Profil, nicht Milliwatt. Von den
+\SI{209}{\milli\watt}, die bei \SI{300}{\milli\watt} vor dem AOD ank\"amen, w\"are
+um rund \SI{59}{\deci\bel} abzuschw\"achen. Die verf\"ugbare Laserleistung ist f\"ur
+diese Messung also keine Randbedingung -- man muss sie nur fein genug
+\emph{einstellen} k\"onnen. Zwei Stellhebel gibt es daf\"ur:
+
+\begin{itemize}
+\item \textbf{optisch abschw\"achen} (Graufilter, Polarisator, weniger
+  Laserleistung) -- \"andert nichts an der Physik des Musters;
+\item \textbf{das Gate verk\"urzen} -- linear in der Zeit, aber nicht unter etwa
+  \SI{10}{\micro\second}, weil der Schall \SI{5,4}{\micro\second} braucht, um den
+  Strahl im AOD zu durchqueren, und weil der Hub mit k\"urzerem Gate ohnehin
+  gr\"o\ss{}er wird (bei \SI{10}{\micro\second}: \SI{62}{\percent} statt
+  \SI{44}{\percent}).
+\end{itemize}
+
+\paragraph{Wie die Zahlen mit den Annahmen wandern.}
+\begin{itemize}
+\item \textbf{Vergr\"o\ss{}erung $M$:} ein Pixel sammelt $M^{-2}$ so viel, weil das
+  Bild um $M^2$ gr\"o\ss{}er wird. Mit $M=4$ -- sinnvoll, wenn man die einzelnen
+  Spots und nicht nur die Schwebung aufl\"osen will -- werden aus
+  \SI{0,235}{\micro\watt} rund \SI{3,8}{\micro\watt}.
+\item \textbf{Gatel\"ange:} linear. Das Datenblatt erlaubt der Kamera
+  \SI{0,019}{\milli\second} als k\"urzeste Belichtung; f\"ur die Messung ist das
+  unerheblich, weil das Gate die Zeit bestimmt. Der Hub w\"are bei
+  \SI{19}{\micro\second} \SI{53}{\percent} statt \SI{44}{\percent}.
+\item \textbf{QE:} Der Wert \SI{30}{\percent} ist gesch\"atzt. Liegt er bei
+  \SI{15}{\percent}, verdoppeln sich alle Leistungsangaben.
+\item \textbf{S\"attigungsladung:} ebenfalls gesch\"atzt; sie verschiebt nur die
+  obere Grenze, nicht den Rest.
+\item \textbf{Mittelung \"uber Bilder:} $n$ Bilder bei gleicher Beat-Phase
+  verbessern die SNR um $\sqrt{n}$ -- damit kommt man auch mit weniger Licht
+  aus, solange die Beat-Phase reproduzierbar ist (was das AOM-Gate ja gerade
+  sicherstellt).
+\end{itemize}
+
 
 \section{Vorbehalte}
 
@@ -344,6 +519,8 @@ Drittel bis der H\"alfte der Vollaussteuerung liegt.
 \bibitem{messung} Messreihen \texttt{5W\_CH0/CH1\_with\_preamp} (24.09.2026) und
   \texttt{5W\_CH0/CH1\_AODconfig(6dB)} (25.09.2026),
   \texttt{Amplifier\_characterization}.
+\bibitem{kamera} IDS Imaging, Datenblatt U3-38J0XLE-M-GL Rev.1.2
+  (Artikel 1008753), Stand 28.09.2026.
 \bibitem{spectrum} Spectrum Instrumentation, M4i.6622-x8,
   \url{https://spectrum-instrumentation.com/products/details/M4i6622-x8.php}.
 \bibitem{testsheet} AA Opto-Electronic, Test Sheet DTSXY-400-800, S/N

@@ -17,13 +17,17 @@ erweitert um alles, was fuer die Kameramessung am Ein-Linsen-Aufbau gebraucht wi
     und demselben Takt kommen, liegt der Puls sampelgenau zu den Tonphasen -
     das ist der Trigger-Delay t_0 der Simulation.
 
-Warum das Gate ueberhaupt: die Kamera (IDS U3-38J0XLE, IMX415) hat einen
-Rolling Shutter mit rund 17.9 us Zeilenzeit. Eine 30-us-Belichtung belichtet
-zwar jede Zeile 30 us lang, aber jede Zeile zu einer anderen Zeit - ueber das
-Profil verteilt sind das rund zehn Beat-Perioden. Also wird nicht die Kamera
-getaktet, sondern das Licht: Belichtung laenger als der Auslesedurchlauf des
-ROI (128 Zeilen -> 2.3 ms, also z.B. 5 ms), und in das gemeinsame Zeitfenster
-faellt der AOM-Puls.
+Warum das Gate ueberhaupt: die Kamera (IDS U3-38J0XLE-M-GL Rev.1.2, IMX415)
+hat laut Datenblatt einen Rolling Shutter, 25 fps bei 2176 Zeilen, also 18.4 us
+Zeilenzeit. Eine 30-us-Belichtung belichtet zwar jede Zeile 30 us lang, aber
+jede Zeile zu einer anderen Zeit - ueber die 58 Zeilen des Profils sind das
+1.07 ms oder elf Beat-Perioden. Dieselbe Datenblattseite sagt ausserdem: kein
+Hardware-Trigger, kein Flash-Ausgang, kein Global Start. Die Kamera kann den
+AWG also weder takten noch von ihm getaktet werden.
+
+Deshalb taktet das Licht: der AOM oeffnet in JEDER Grundperiode an derselben
+Stelle. Dann sieht jede Zeile, egal wann sie oeffnet, dieselbe Beat-Phase, die
+Kamera laeuft frei, und die Zeitaufloesung kommt allein vom AWG.
 
 Der AOM taktet, nicht der AOD: die Toene laufen durch, das Interferenzmuster
 steht eingeschwungen, und der Puls schneidet nur ein Stueck heraus. Beim Tasten
@@ -71,8 +75,19 @@ GATE_START = 20e-6             # s, Lage im Segment; das ist der Delay t_0.
                                # Mindestens ~10 us, damit der AOD gefuellt ist.
 GATE_AMP = 1.0 * units.V       # Pegel fuer den AM-Eingang des AOM-Treibers
 GATE_UNIPOLAR = True           # True: 0 .. GATE_AMP (mit Offset), False: +-GATE_AMP
-GATE_PER_PERIOD = False        # True: Puls in JEDER Grundperiode (Dauerbetrieb,
-                               # z.B. fuer die Photodiode), False: einmal je Segment
+GATE_PER_PERIOD = True         # True: Puls in JEDER Grundperiode, immer bei
+                               # DERSELBEN Beat-Phase. Das ist der Standardfall
+                               # fuer die Kamera: sie laeuft frei, jede Zeile
+                               # sammelt identische Schnappschuesse, der Rolling
+                               # Shutter faellt heraus. Belichtung als ganzes
+                               # Vielfaches von T0 waehlen (z.B. 5.0 ms = 50
+                               # Pulse), dann bekommt jede Zeile gleich viele.
+                               # Die n Pulse addieren sich: fuer dieselbe
+                               # Elektronenzahl je Pixel wird nur 1/n der
+                               # Lichtleistung gebraucht.
+                               # False: einmal je Segment (Einzelpuls, braucht
+                               # eine getriggerte Kamera - die U3-38J0XLE hat
+                               # keinen Hardware-Trigger).
 
 # --- Segment ----------------------------------------------------------------
 N_PERIODS = 140                # Grundperioden je Segment -> 14 ms bei T0 = 100 us
