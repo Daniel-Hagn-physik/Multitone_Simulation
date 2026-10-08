@@ -57,6 +57,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.patches import Rectangle, Circle, Patch
+from matplotlib.ticker import MultipleLocator, FormatStrFormatter
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -611,8 +612,8 @@ class ExportOptionsDialog(QDialog):
     """Fragt vor dem Speichern ab, wie die Abbildung aussehen soll.
 
     Der Aufbau haengt an der Zahl der Schnitte:
-      1 Schnitt  - links der grosse Nachbar-Plot, rechts darueber der
-                   herangezoomte Einzelspot, darunter der Schnitt.
+      1 Schnitt  - alle drei Panels in einer Zeile: Nachbarn, der
+                   herangezoomte Einzelspot, der Schnitt.
       2 Schnitte - obere Zeile beide 2D-Ansichten, untere Zeile der
                    horizontale und der vertikale Schnitt.
     Bei 1x1 gibt es nur einen Schnitt: das Muster ist dann punktsymmetrisch,
@@ -628,8 +629,8 @@ class ExportOptionsDialog(QDialog):
         box_cuts = QGroupBox("Cross sections")
         v_cuts = QVBoxLayout(box_cuts)
         self.rb_one = QRadioButton("1 - horizontal only")
-        self.rb_one.setToolTip("Links der grosse Nachbar-Plot, rechts darueber der\n"
-                               "herangezoomte Einzelspot und darunter der Schnitt.")
+        self.rb_one.setToolTip("Eine Zeile mit drei Panels: Nachbarn, herangezoomter\n"
+                               "Einzelspot und der Schnitt.")
         self.rb_two = QRadioButton("2 - horizontal and vertical")
         self.rb_two.setToolTip("Obere Zeile beide 2D-Ansichten, untere Zeile beide Schnitte.")
         v_cuts.addWidget(self.rb_one)
@@ -2589,8 +2590,8 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         """Speichert die Abbildung als PDF. Layout und Inhalt legt vorher ein
         kleiner Dialog fest (ExportOptionsDialog).
 
-        EIN Schnitt:  links der grosse Nachbar-Plot, rechts darueber der
-        herangezoomte Einzelspot und darunter der Schnitt.
+        EIN Schnitt:  eine Zeile mit drei Panels - Nachbarn, der
+        herangezoomte Einzelspot und der Schnitt.
         ZWEI Schnitte: obere Zeile beide 2D-Ansichten, untere Zeile der
         horizontale und der vertikale Schnitt.
 
@@ -2770,16 +2771,23 @@ class WeightedFlatMultiToneWindow(QMainWindow):
 
         with plt.rc_context(EXPORT_RC):
             if opts["n_cuts"] == 1:
-                # Links gross der Schnitt, rechts darueber der herangezoomte
-                # Einzelspot und darunter die Nachbarn.
+                # Alle drei Panels in EINER Zeile: links die Nachbarn, in der
+                # Mitte der herangezoomte Einzelspot, rechts der Schnitt.
+                # Vorher war der Schnitt eine ganze Spalte hoch und damit
+                # unnoetig gross gegenueber den beiden 2D-Ansichten.
+                # Hoehe so, dass die quadratischen 2D-Panels die Zeile
+                # ausfuellen: bei 16 cm Breite bleiben nach Achsen- und
+                # Farbskalen-Rand rund 4 cm Datenbreite pro Panel uebrig.
+                one_row = True
                 fig_save = plt.figure(figsize=(EXPORT_FIG_WIDTH_IN,
-                                              0.656 * EXPORT_FIG_WIDTH_IN))
-                gs_save = fig_save.add_gridspec(2, 2, width_ratios=[1.35, 1.0])
-                ax_cut_h = fig_save.add_subplot(gs_save[:, 0])
-                ax_zoom = fig_save.add_subplot(gs_save[0, 1])
-                ax_nb = fig_save.add_subplot(gs_save[1, 1])
+                                              0.360 * EXPORT_FIG_WIDTH_IN))
+                gs_save = fig_save.add_gridspec(1, 3)
+                ax_cut_h = fig_save.add_subplot(gs_save[0, 0])
+                ax_nb = fig_save.add_subplot(gs_save[0, 1])
+                ax_zoom = fig_save.add_subplot(gs_save[0, 2])
                 ax_cut_v = None
             else:
+                one_row = False
                 fig_save = plt.figure(figsize=(EXPORT_FIG_WIDTH_IN,
                                               0.840 * EXPORT_FIG_WIDTH_IN))
                 gs_save = fig_save.add_gridspec(2, 2, height_ratios=[1.3, 1.0])
@@ -2873,9 +2881,10 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             # Spot ist auf sein Maximum normiert, und jede der acht
             # Nachbarkopien traegt mit Maximum 1 bei. Ohne Farbskala ist das
             # Bild huebsch, aber man kann nichts daran ablesen.
-            cb_nb = fig_save.colorbar(im_nb, ax=ax_nb, fraction=0.046, pad=0.03)
-            cb_nb.set_label(LBL_I, fontsize=EXPORT_FONTSIZE_LABEL)
-            cb_nb.ax.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
+            if not one_row:
+                cb_nb = fig_save.colorbar(im_nb, ax=ax_nb, fraction=0.046, pad=0.03)
+                cb_nb.set_label(LBL_I, fontsize=EXPORT_FONTSIZE_LABEL)
+                cb_nb.ax.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
 
             # ---- 2D: eigener Spot, herangezoomt ------------------------
             im_zoom = ax_zoom.imshow(I_ort, origin="lower", extent=extent,
@@ -2890,7 +2899,25 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             ax_zoom.set_ylabel(LBL_Y, fontsize=EXPORT_FONTSIZE_LABEL)
             ax_zoom.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
             ax_zoom.locator_params(axis="both", nbins=5)
-            cb_zoom = fig_save.colorbar(im_zoom, ax=ax_zoom, fraction=0.046, pad=0.03)
+            if one_row:
+                # EINE Farbskala fuer beide 2D-Ansichten: sie zeigen dieselbe
+                # Groesse I/I_max. Das spart eine komplette Skala samt
+                # Beschriftung und macht die Panels entsprechend groesser.
+                vmax_common = max(im_nb.get_clim()[1], im_zoom.get_clim()[1])
+                im_nb.set_clim(0.0, vmax_common)
+                im_zoom.set_clim(0.0, vmax_common)
+                # Die zweite y-Beschriftung ist redundant - die Ticks sagen
+                # schon, dass es Mikrometer sind.
+                ax_zoom.set_ylabel("")
+                cb_zoom = fig_save.colorbar(im_zoom, ax=[ax_nb, ax_zoom],
+                                            fraction=0.046, pad=0.03)
+                # Wenige Marken: 0, 0.25, 0.5, 0.75, 1. Mehr liest ohnehin
+                # niemand aus einer 3 cm hohen Skala ab.
+                cb_zoom.ax.yaxis.set_major_locator(MultipleLocator(0.25))
+                cb_zoom.ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
+            else:
+                cb_zoom = fig_save.colorbar(im_zoom, ax=ax_zoom,
+                                            fraction=0.046, pad=0.03)
             cb_zoom.set_label(LBL_I, fontsize=EXPORT_FONTSIZE_LABEL)
             cb_zoom.ax.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
 
@@ -2927,7 +2954,18 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                 ax.locator_params(axis="both", nbins=6)
 
             draw_cut(ax_cut_h, x_line * um - c0_um, I_cut_h, pdf_h, atom_cx_um,
-                     LBL_X, "tab:blue", titel="Horizontal")
+                     LBL_X, "tab:blue",
+                     # Bei nur einem Schnitt ist "Horizontal" ueberfluessig:
+                     # fuer einen einzelnen Spot gibt es keinen zweiten.
+                     titel=None if one_row else "Horizontal")
+            if one_row:
+                # Gleiche grobe Teilung wie auf der Farbskala.
+                ax_cut_h.yaxis.set_major_locator(MultipleLocator(0.25))
+                ax_cut_h.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
+                # Gleich grosse Kaesten: die beiden 2D-Panels sind durch
+                # aspect="equal" quadratisch, der Schnitt bekommt dieselbe
+                # Form - sonst steht er als einziger hochkant daneben.
+                ax_cut_h.set_box_aspect(1.0)
             if ax_cut_v is not None:
                 draw_cut(ax_cut_v, y_line * um - c0_um, I_cut_v, pdf_v, atom_cy_um,
                          LBL_Y, "tab:green", titel="Vertical")
@@ -2963,6 +3001,17 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                 # Inhalt zurecht, und die gespeicherte Breite waere nicht mehr
                 # die eingestellte - genau das hat die Schriftgroessen
                 # zwischen den Layouts auseinanderlaufen lassen.
+                if one_row and cb_zoom is not None:
+                    # constrained_layout gibt der Farbskala die volle
+                    # Zeilenhoehe; die Panels sind durch aspect="equal" aber
+                    # niedriger. Layout einmal rechnen lassen, einfrieren und
+                    # die Skala exakt auf die Panelhoehe setzen.
+                    fig_save.canvas.draw()
+                    fig_save.set_constrained_layout(False)
+                    box = ax_zoom.get_position()
+                    cpos = cb_zoom.ax.get_position()
+                    cb_zoom.ax.set_position([cpos.x0, box.y0,
+                                             cpos.width, box.height])
                 fig_save.savefig(out_file)
                 # Parameter IMMER mitschreiben - auch (und gerade) wenn der
                 # Titel abgeschaltet ist, sonst waere die Abbildung nicht mehr

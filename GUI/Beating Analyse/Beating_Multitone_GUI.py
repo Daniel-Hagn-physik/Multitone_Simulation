@@ -187,6 +187,21 @@ OUT_DIR_CANDIDATES = (
 ]
 
 
+def nice_symmetric_tick(limit):
+    """Groesster "runder" Wert <= limit, aus der Leiter 1, 2, 2.5, 4, 5 mal
+    Zehnerpotenz. Damit bekommen x- und y-Achse dieselben drei Marken
+    (-t, 0, +t), ohne dass eine Zahl am Bildrand klebt."""
+    limit = float(limit)
+    if not np.isfinite(limit) or limit <= 0:
+        return 1.0
+    dec = 10.0 ** np.floor(np.log10(limit))
+    best = dec
+    for f in (1.0, 2.0, 2.5, 4.0, 5.0):
+        if f * dec <= limit:
+            best = f * dec
+    return float(best)
+
+
 def short_name(path, keep=34):
     """Shorten a file name for display, with an ellipsis in the middle.
 
@@ -2112,7 +2127,7 @@ class BeatingMultitoneWindow(QMainWindow):
         self.ax_st.plot(t_p * 1e6, none * 100, color="#1b1b1b", ls=":", lw=1.6,
                         label=f"untriggered (contrast {ct(none):.0f} %)")
         self.ax_st.axvline(pz["t_p"] * 1e6, color="#888", lw=0.9)
-        self.ax_st.set_xlabel("pulse length (us)", fontsize=8)
+        self.ax_st.set_xlabel(r"pulse length ($\mathrm{\mu}$s)", fontsize=8)
         self.ax_st.set_ylabel("excitation (%)", fontsize=8)
         eta = self.state["eta_ls"]
         cap = ("" if eta <= 0 else
@@ -2307,19 +2322,38 @@ class BeatingMultitoneWindow(QMainWindow):
         x_um, y_um = c["x"] * 1e6 - cx0, c["y"] * 1e6 - cy0
         extent = [x_um[0], x_um[-1], y_um[0], y_um[-1]]
 
-        fig = Figure(figsize=(FIG_WIDTH_IN, 0.42 * FIG_WIDTH_IN), dpi=100)
+        # Hoehe aus der Geometrie statt geraten: die Panelbreite folgt aus
+        # Rand und Spaltenabstand, die Panelhoehe aus aspect="equal". Dazu
+        # Platz fuer Titel und x-Beschriftung - dann steht der Titel direkt
+        # ueber dem Bild und unten bleibt kein leeres Band.
+        W_CM, LEFT, RIGHT, WSPACE = FIG_WIDTH_IN * 2.54, 0.108, 0.878, 0.12
+        TOP_CM, BOT_CM = 0.62, 1.25
+        panel_w_cm = W_CM * (RIGHT - LEFT) / (3.0 + 2.0 * WSPACE)
+        asp = (y_um[-1] - y_um[0]) / max(x_um[-1] - x_um[0], 1e-12)
+        panel_h_cm = panel_w_cm * min(max(asp, 0.4), 1.8)
+        h_cm = TOP_CM + panel_h_cm + BOT_CM
+
+        fig = Figure(figsize=(FIG_WIDTH_IN, h_cm / 2.54), dpi=100)
         FigureCanvas(fig)
         axes = fig.subplots(1, 3, sharex=True, sharey=True)
         im = None
         for ax, k, lab in zip(axes, idx, labels):
             im = ax.imshow(c["cube"][k] / mean_I, extent=extent, origin="lower",
                            cmap="inferno", vmin=0.0, vmax=vmax, aspect="equal")
-            ax.set_title("%s   (%.2f us)" % (lab, c["t"][k] * 1e6))
-            ax.set_xlabel("x (um)")
-        axes[0].set_ylabel("y (um)")
-        fig.subplots_adjust(left=0.108, right=0.878, bottom=0.17, top=0.88,
-                            wspace=0.12)
-        cax = fig.add_axes([0.893, 0.17, 0.016, 0.71])
+            ax.set_title(r"%s   (%.2f $\mathrm{\mu}$s)" % (lab, c["t"][k] * 1e6))
+            ax.set_xlabel(r"$x$ ($\mathrm{\mu}$m)")
+        axes[0].set_ylabel(r"$y$ ($\mathrm{\mu}$m)")
+        # Beide Achsen bekommen dieselben drei Marken: -t, 0, +t. Bei einem
+        # Fenster von +-5 um sind das -4, 0, 4.
+        t_tick = nice_symmetric_tick(0.85 * min(abs(x_um[0]), abs(x_um[-1]),
+                                                abs(y_um[0]), abs(y_um[-1])))
+        for ax in axes:
+            ax.set_xticks([-t_tick, 0.0, t_tick])
+        axes[0].set_yticks([-t_tick, 0.0, t_tick])
+        fig.subplots_adjust(left=LEFT, right=RIGHT, bottom=BOT_CM / h_cm,
+                            top=1.0 - TOP_CM / h_cm, wspace=WSPACE)
+        cax = fig.add_axes([0.893, BOT_CM / h_cm, 0.016,
+                            1.0 - (TOP_CM + BOT_CM) / h_cm])
         # Keine Pfeilspitze: die Skala reicht ueber alles, was in den drei
         # Bildern vorkommt, also gibt es nichts, was ueber sie hinausginge.
         cb = fig.colorbar(im, cax=cax)
@@ -2327,6 +2361,12 @@ class BeatingMultitoneWindow(QMainWindow):
         # quantity, same words, so nobody has to check whether they match.
         cb.set_label(r"$%s(t)\,/\,\langle %s\rangle_t$" % (gname, gname))
         style_figure(fig)
+        # Die Panels sind durch aspect="equal" niedriger als ihre Zelle. Erst
+        # zeichnen lassen, dann die Farbskala exakt auf die Kastenhoehe eines
+        # Panels setzen - sonst ragt sie oben und unten darueber hinaus.
+        fig.canvas.draw()
+        box = axes[-1].get_position()
+        cax.set_position([0.893, box.y0, 0.016, box.height])
         fig.savefig(path, format="pdf")
 
     def _crest_now(self):
@@ -2473,8 +2513,8 @@ class BeatingMultitoneWindow(QMainWindow):
                               label="frequency degenerate")
         self.ax_main.axhline(y_um[cut_row], color="cyan", lw=0.8, alpha=0.8)
         self.ax_main.axvline(x_um[cut_col], color="magenta", lw=0.8, alpha=0.8)
-        self.ax_main.set_xlabel("x (um)")
-        self.ax_main.set_ylabel("y (um)")
+        self.ax_main.set_xlabel(r"$x$ ($\mathrm{\mu}$m)")
+        self.ax_main.set_ylabel(r"$y$ ($\mathrm{\mu}$m)")
         T0_us = c["T0"] * 1e6
         per_lbl = (f"   ({t_us[k] / T0_us:.3f} $T_0$)" if np.isfinite(T0_us) and T0_us > 0
                    else "")
@@ -2507,8 +2547,8 @@ class BeatingMultitoneWindow(QMainWindow):
                               cmap="inferno", vmin=0.0, vmax=vmax,
                               extent=[x_um[0], x_um[-1], t_us[0], t_hi])
             self._art["st_cur"] = self.ax_st.axhline(t_us[k], color="w", lw=1.0)
-            self.ax_st.set_xlabel("x (um)", fontsize=8)
-            self.ax_st.set_ylabel("t (us)", fontsize=8)
+            self.ax_st.set_xlabel(r"$x$ ($\mathrm{\mu}$m)", fontsize=8)
+            self.ax_st.set_ylabel(r"$t$ ($\mathrm{\mu}$s)", fontsize=8)
             self.ax_st.set_title(f"Space-time map I(x, t) at y = {y_um[cut_row]:.3f} um",
                                  fontsize=9)
         elif panel == 8:
@@ -2528,7 +2568,7 @@ class BeatingMultitoneWindow(QMainWindow):
                 jt = pz["jitter"]
                 jtxt = ("no first-order sensitivity" if not np.isfinite(jt)
                         else f"{jt * 1e9:.0f} ns per 1 % area error")
-                self.ax_st.set_xlabel("pulse start $t_0$ (us)", fontsize=8)
+                self.ax_st.set_xlabel(r"pulse start $t_0$ ($\mathrm{\mu}$s)", fontsize=8)
                 self.ax_st.set_ylabel("pulse area / mean", fontsize=8)
                 self.ax_st.set_title(
                     f"Pulse area over the start time   |   at the current $t_0$: {jtxt}",
@@ -2556,7 +2596,7 @@ class BeatingMultitoneWindow(QMainWindow):
                                     xytext=(6, 8), textcoords="offset points",
                                     fontsize=7, color="#2f6b45")
                 self.ax_st.axvline(pz["t0"] * 1e6, color="#b3402f", lw=1.4)
-                self.ax_st.set_xlabel("pulse start t_0 (us)", fontsize=8)
+                self.ax_st.set_xlabel(r"pulse start $t_0$ ($\mathrm{\mu}$s)", fontsize=8)
                 self.ax_st.set_ylabel("U of the pulse area (%)", fontsize=8)
                 self.ax_st.set_title(
                     f"pi pulse {pz['t_p'] * 1e6:.2f} us   |   at t_0 = "
@@ -2604,7 +2644,7 @@ class BeatingMultitoneWindow(QMainWindow):
                                        min((pz_["t0"] + pz_["t_p"]) * 1e6, t_us[-1]),
                                        color="#3b6ea5", alpha=0.12, lw=0)
                 self._art["u_cur"] = self.ax_st.axvline(t_us[k], color="k", lw=0.9)
-                self.ax_st.set_xlabel("t (us)", fontsize=8)
+                self.ax_st.set_xlabel(r"$t$ ($\mathrm{\mu}$s)", fontsize=8)
                 self.ax_st.set_ylabel("U = std/mean (%)", fontsize=8)
                 self._art["u_title"] = self.ax_st.set_title(
                     self._u_title(c, k), fontsize=8.5)
@@ -2638,8 +2678,8 @@ class BeatingMultitoneWindow(QMainWindow):
             self.ax_st.contour(x_um, y_um, c["I_avg"] / norm,
                                levels=[0.5 * c["I_avg"].max() / norm],
                                colors="w", linewidths=0.9, linestyles="--")
-            self.ax_st.set_xlabel("x (um)", fontsize=8)
-            self.ax_st.set_ylabel("y (um)", fontsize=8)
+            self.ax_st.set_xlabel(r"$x$ ($\mathrm{\mu}$m)", fontsize=8)
+            self.ax_st.set_ylabel(r"$y$ ($\mathrm{\mu}$m)", fontsize=8)
             self.ax_st.set_title(title, fontsize=8.5)
             if self._panel_cbar is not None:
                 try:
@@ -2661,7 +2701,7 @@ class BeatingMultitoneWindow(QMainWindow):
             x_um, c["cube"][k, cut_row, :] / norm, color="tab:orange", lw=1.3,
             label="instantaneous")
         self.ax_cut.axvline(x_um[cut_col], color="magenta", lw=0.8, alpha=0.7)
-        self.ax_cut.set_xlabel("x (um)", fontsize=8)
+        self.ax_cut.set_xlabel(r"$x$ ($\mathrm{\mu}$m)", fontsize=8)
         self.ax_cut.set_ylabel("I / I_max", fontsize=8)
         self.ax_cut.set_title("x cut", fontsize=9)
         self.ax_cut.tick_params(labelsize=7)
@@ -2686,7 +2726,7 @@ class BeatingMultitoneWindow(QMainWindow):
                 self.ax_time.axvline(p * T0_us, color="gray", ls=":", lw=0.6)
         lo, hi = float(tr.min()), float(tr.max())
         depth = (hi - lo) / (hi + lo) if (hi + lo) > 0 else 0.0
-        self.ax_time.set_xlabel("t (us)", fontsize=8)
+        self.ax_time.set_xlabel(r"$t$ ($\mathrm{\mu}$s)", fontsize=8)
         self.ax_time.set_ylabel("I / I_max", fontsize=8)
         extra = (f"\npi pulse {pz['t_p'] * 1e6:.2f} us from {pz['t0'] * 1e6:.2f} us: "
                  f"U(area) {pz['u_now'] * 100:.0f} %" if pz else "")

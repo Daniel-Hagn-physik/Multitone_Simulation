@@ -571,7 +571,7 @@ class PulseTimingDialog(QDialog):
         if span_s >= 1e-3:
             return 1e3, "ms"
         if span_s >= 1e-6:
-            return 1e6, r"$\mu$s"
+            return 1e6, r"$\mathrm{\mu}$s"
         return 1e9, "ns"
 
     def _panel_intensity(self, ax, L, title=True):
@@ -699,8 +699,8 @@ class PulseTimingDialog(QDialog):
             ax.set_xlabel(r"$x - x_{\mathrm{atom}}$ (nm)")
             ax.set_ylabel(r"$y - y_{\mathrm{atom}}$ (nm)")
         else:
-            ax.set_xlabel(r"x ($\mu$m)")
-            ax.set_ylabel(r"y ($\mu$m)")
+            ax.set_xlabel(r"$x$ ($\mathrm{\mu}$m)")
+            ax.set_ylabel(r"$y$ ($\mathrm{\mu}$m)")
         if title:
             ax.set_title(ttl)
 
