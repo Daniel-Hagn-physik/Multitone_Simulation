@@ -685,7 +685,7 @@ class PulseTimingDialog(QDialog):
         if atom:
             cx0, cy0 = 0.0, 0.0                     # atom at the origin now
             ang = np.linspace(0, 2 * np.pi, 300)
-            for n in (1, 2):
+            for n in (3,):                          # only the 3 sigma region
                 ax.plot((cx0 + n * L["sig_atom"] * np.cos(ang)) * sc,
                         (cy0 + n * L["sig_atom"] * np.sin(ang)) * sc,
                         color="white", lw=1.4, path_effects=stroke)
@@ -696,8 +696,8 @@ class PulseTimingDialog(QDialog):
             ax.contour(x * sc, y * sc, L["mask"].astype(float), levels=[0.5],
                        colors="white", linewidths=1.4)
         if atom:
-            ax.set_xlabel(r"$x - x_{\mathrm{atom}}$ (nm)")
-            ax.set_ylabel(r"$y - y_{\mathrm{atom}}$ (nm)")
+            ax.set_xlabel(r"$x$ (nm)")
+            ax.set_ylabel(r"$y$ (nm)")
         else:
             ax.set_xlabel(r"$x$ ($\mathrm{\mu}$m)")
             ax.set_ylabel(r"$y$ ($\mathrm{\mu}$m)")
@@ -1027,7 +1027,7 @@ class PulseTimingDialog(QDialog):
               "`width=0.625\\textwidth`. Beide dann unskaliert, Beschriftung "
               "10 pt.", "",
               "**`_map.pdf`**: pulse area `theta(r)/pi` point by point, no "
-              "averaging. The white rings are 1 and 2 sigma of the atomic "
+              "averaging. The white ring is the 3 sigma region of the atomic "
               "position distribution (or the outline of the hard mask). In the "
               "atom weighted case the axes are RELATIVE to the atom, so the "
               "origin is the atom; the global origin would be the position of "

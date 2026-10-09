@@ -1,0 +1,193 @@
+% Pulse area: (1) atomic law, scale, s -> boxed equation; (2) beating term by term -> closed form;
+% (3) scale from the power: the three integrals; (4) C_Rabi.
+% Requires: amsmath, siunitx, braket
+
+\subsection*{Pulse area}
+Start with the atomic law, then the scale of the simulation, and finally $s$ itself:
+\begin{align}
+\theta(\mathbf r,t_0)
+&=\int_{t_0}^{t_0+T_p}\Omega(\mathbf r,t)\,dt
+&&\text{definition}\\
+&=C_\text{Rabi}\int_{t_0}^{t_0+T_p}I(\mathbf r,t)\,dt
+&&\Omega=C_\text{Rabi}\,I\\
+&=C_\text{Rabi}\,s\int_{t_0}^{t_0+T_p}\tilde I(\mathbf r,t)\,dt
+&&I=s\,\tilde I\\
+&=C_\text{Rabi}\,\frac{P}{\tilde P_\text{prof}}\int_{t_0}^{t_0+T_p}\tilde I(\mathbf r,t)\,dt
+&&s=P/\tilde P_\text{prof}.
+\end{align}
+With $\tilde P_\text{prof}=\int\langle\tilde I\rangle_t\,d^2r$ this is
+\begin{equation}
+\boxed{\;\theta(\mathbf r,t_0)=C_\text{Rabi}\,P\;
+\frac{\displaystyle\int_{t_0}^{t_0+T_p}\tilde I(\mathbf r,t)\,dt}
+{\displaystyle\int\langle\tilde I\rangle_t\,d^2r}\;}
+\label{eq:theta_box}
+\end{equation}
+This is the whole physics. Only three things enter: the atomic constant $C_\text{Rabi}$, the optical
+power $P$ in the profile, and the shape of the simulated profile in the fraction. The numerator is the
+light dose at the position of the atom during the pulse and contains the full beating; the
+denominator is the time-averaged power of the simulated profile and only converts its arbitrary
+units into watts.
+
+\subsection*{The beating, term by term}
+The time integral in the numerator can be done term by term. Inserting the Fourier series
+$\tilde I=\sum_d D_d(\mathbf r)\,e^{i2\pi d f_0 t}$, each order contributes
+\begin{equation}
+\int_{t_0}^{t_0+T_p}e^{i2\pi d f_0 t}\,dt
+=\frac{e^{i2\pi d f_0(t_0+T_p)}-e^{i2\pi d f_0 t_0}}{i\,2\pi d f_0}.
+\end{equation}
+Pulling out the phase of the window centre, $e^{i2\pi d f_0(t_0+T_p/2)}$, makes the bracket symmetric,
+\begin{equation}
+=e^{i2\pi d f_0(t_0+T_p/2)}\,\frac{e^{i\pi d f_0T_p}-e^{-i\pi d f_0T_p}}{i\,2\pi d f_0}
+=e^{i2\pi d f_0(t_0+T_p/2)}\,\frac{\sin(\pi d f_0T_p)}{\pi d f_0},
+\end{equation}
+where $e^{ix}-e^{-ix}=2i\sin x$ was used. Writing the last factor as $T_p$ times
+$\operatorname{sinc}(z)=\sin(\pi z)/(\pi z)$ gives
+\begin{equation}
+\int_{t_0}^{t_0+T_p}\tilde I\,dt
+=T_p\sum_d D_d(\mathbf r)\,\operatorname{sinc}(d f_0T_p)\,e^{i2\pi d f_0(t_0+T_p/2)}.
+\label{eq:boxcar}
+\end{equation}
+The three factors read directly: $T_p$ is the length of the window, the exponential says that only
+the centre of the window matters for the phase, and the sinc is the Fourier transform of the window
+itself, evaluated at the beat frequency $d f_0$. Integrating over a window of length $T_p$ is a
+convolution with a boxcar, and in frequency space a convolution is a multiplication with the
+transform of the box. The $d=0$ term is the limit $\operatorname{sinc}(0)=1$: the time average always
+survives, whatever the pulse length. Because $D_{-d}=D_d^*$ the sum is real,
+\begin{equation}
+\int_{t_0}^{t_0+T_p}\tilde I\,dt
+=T_p\Bigl[D_0(\mathbf r)+2\sum_{d>0}|D_d(\mathbf r)|\,\operatorname{sinc}(d f_0T_p)\,
+\cos\!\Bigl(2\pi d f_0\bigl(t_0+\tfrac{T_p}{2}\bigr)+\arg D_d\Bigr)\Bigr].
+\end{equation}
+This is the same expression as for a camera exposure of duration $T_p$; a pulse and an exposure
+differ only in their length. Two limits:
+\begin{itemize}
+\item $T_p\gg T_0$: every $d\neq0$ is damped away and $\theta\to C_\text{Rabi}\,s\,\langle\tilde I\rangle_t\,T_p$.
+The pulse sees the time average.
+\item $T_p\ll T_0$: $\operatorname{sinc}\to1$. The pulse does not average the beating, it samples it, and
+$\theta$ depends on the trigger instant $t_0$.
+\end{itemize}
+\paragraph{The pulse area in closed form.}
+Inserting the boxcar result \eqref{eq:boxcar} into the boxed equation \eqref{eq:theta_box} gives the
+expression the code evaluates,
+\begin{equation}
+\theta(\mathbf r,t_0)=\frac{C_\text{Rabi}\,P\,T_p}{\tilde P_\text{prof}}
+\sum_d D_d(\mathbf r)\,\operatorname{sinc}(d f_0T_p)\,e^{i2\pi d f_0(t_0+T_p/2)}.
+\label{eq:theta_closed}
+\end{equation}
+
+\subsection*{The scale from the power}
+The power carried by the pattern is the area integral of the time average,
+\begin{equation}
+P=\int\langle I(\mathbf r)\rangle_t\,d^2r=s\int\langle\tilde I(\mathbf r)\rangle_t\,d^2r\equiv s\,\tilde P_\text{prof}
+\quad\Longrightarrow\quad
+s=\frac{P}{\tilde P_\text{prof}}.
+\end{equation}
+$\tilde P_\text{prof}$ is known in closed form, and it is worth doing the three integrals explicitly.
+Each spot has the field profile $g_s=A_s\,u(\mathbf r-\mathbf c_s)$ with the field amplitude
+$A_s=\sqrt{a_{x,i}a_{y,j}}$ and the intensity weight $a_s\equiv A_s^2=a_{x,i}a_{y,j}$.
+
+\paragraph{(a) The power of one spot.}
+A single spot carries $\int g_s^2\,d^2r=a_sP_1$ with $P_1=\int|u|^2d^2r$. For the Gaussian,
+with $x=2r^2/w_0^2$,
+\begin{equation}
+P_1^\text{G}=\int_0^\infty e^{-2r^2/w_0^2}\,2\pi r\,dr=\frac{\pi w_0^2}{2}\int_0^\infty e^{-x}\,dx=\frac{\pi w_0^2}{2}.
+\end{equation}
+For the Airy mode, with $x=kr$ and $\int_0^\infty J_\nu^2(x)\,dx/x=1/(2\nu)$,
+\begin{equation}
+P_1^\text{A}=\int_0^\infty\left(\frac{2J_1(kr)}{kr}\right)^2 2\pi r\,dr
+=\frac{8\pi}{k^2}\int_0^\infty\frac{J_1^2(x)}{x}\,dx=\frac{4\pi}{k^2},
+\qquad k=\frac{3.8317}{1.4830\,w_0}.
+\end{equation}
+The Airy spot carries $(4\pi/k^2)/(\pi w_0^2/2)=1.20$ times the power of a Gaussian with the same
+$1/e^2$ radius, because of its rings.
+
+\paragraph{(b) Which cross terms survive the time average.}
+A pair with $k_s\neq k_{s'}$ oscillates at $(k_s-k_{s'})f_0$ and averages to zero over $T_0$, while a
+degenerate pair does not oscillate at all:
+\begin{equation}
+\langle\tilde I(\mathbf r)\rangle_t=\sum_s g_s^2(\mathbf r)
++2\sum_{\substack{s<s'\\k_s=k_{s'}}}g_s(\mathbf r)\,g_{s'}(\mathbf r)\cos(\phi_s-\phi_{s'}).
+\end{equation}
+Integrating term by term over the plane gives
+\begin{equation}
+\tilde P_\text{prof}=P_1\sum_s a_s
++2\sum_{\substack{s<s'\\k_s=k_{s'}}}A_sA_{s'}\cos(\phi_s-\phi_{s'})\,O(d_{ss'}),
+\qquad
+O(d)=\int u(\mathbf r-\mathbf c_s)\,u(\mathbf r-\mathbf c_{s'})\,d^2r,
+\label{eq:pprof}
+\end{equation}
+with $d=|\mathbf c_s-\mathbf c_{s'}|$.
+
+\paragraph{(c) The overlap integral.}
+For the Gaussian the product of the two modes is again a Gaussian, centred between the spots,
+$u(\mathbf r)\,u(\mathbf r-\mathbf d)=e^{-2|\mathbf r-\mathbf d/2|^2/w_0^2}\,e^{-d^2/2w_0^2}$, so that
+\begin{equation}
+O^\text{G}(d)=P_1^\text{G}\,e^{-d^2/2w_0^2}.
+\end{equation}
+For the Airy mode the overlap is a convolution, which in Fourier space becomes a product,
+$O(d)=\frac{1}{(2\pi)^2}\int|\tilde u(\mathbf q)|^2e^{i\mathbf q\cdot\mathbf d}\,d^2q$.
+The Airy mode is the transform of a uniform disc, $\tilde u(\mathbf q)=\frac{4\pi}{k^2}$ for $q<k$ and
+zero otherwise, so $|\tilde u|^2=\frac{4\pi}{k^2}\,\tilde u$ and
+\begin{equation}
+O^\text{A}(d)=\frac{4\pi}{k^2}\,\frac{1}{(2\pi)^2}\int\tilde u(\mathbf q)\,e^{i\mathbf q\cdot\mathbf d}\,d^2q
+=P_1^\text{A}\,u(d).
+\end{equation}
+The overlap of two Airy spots is the Airy mode itself, evaluated at their distance.
+
+\paragraph{Result for the $3\times4$ grid.}
+The only degenerate pair is $(0,3)$, $(2,0)$ at $d=\SI{3.305}{\micro\metre}$ with $u(d)=0.063$; for
+tone phases $0$ it adds $\SI{1.1}{\percent}$ to the power. For the phases used here
+$\phi_{0,3}-\phi_{2,0}=\pi/2$, the term vanishes and
+\begin{equation}
+\tilde P_\text{prof}=P_1\sum_s a_s=12.70\,P_1^\text{A}=\SI{25.9}{\micro\metre\squared},
+\qquad P_1^\text{A}=\SI{2.04}{\micro\metre\squared}\ (w_0=\SI{1.04}{\micro\metre}).
+\end{equation}
+
+\subsection*{The coupling constant $C_\text{Rabi}$}
+A leg $i$ with intensity $I_i=\tfrac12\varepsilon_0c|E_i|^2$ couples a ground state to the excited
+state $e$ with $\Omega_{i,e}=d_eE_i/\hbar$, so that
+\begin{equation}
+\Omega_{i,e}^2=\frac{2\,d_e^2}{\varepsilon_0c\,\hbar^2}\,I_i\equiv d_e^2\,\kappa\,I_i,
+\qquad \kappa=\frac{2}{\varepsilon_0c\,\hbar^2}.
+\end{equation}
+The two legs share the intensity, $I_1=\beta I$ (addressing $F=2$) and $I_2=(1-\beta)I$ (addressing
+$F=3$). For $|\Delta_e|\gg\Omega,\Gamma$ the excited states are eliminated adiabatically. Each of
+them contributes one Raman path, and the paths add coherently:
+\begin{equation}
+\Omega=\sum_e\frac{\Omega_{1,e}\,\Omega_{2,e}}{2\Delta_e}
+=\underbrace{\kappa\sqrt{\beta(1-\beta)}\,\left|\sum_e\frac{d_{2e}\,d_{3e}}{2\Delta_e}\right|}_{C_\text{Rabi}}\,I.
+\end{equation}
+The index $e$ labels a hyperfine level of the $5P$ manifold,
+\begin{equation}
+\ket{e}=\ket{5P_{J'},F',m'},\qquad
+J'=\tfrac12\ (\mathrm{D}_1,\ F'=2,3),\qquad
+J'=\tfrac32\ (\mathrm{D}_2,\ F'=1,2,3,4),
+\end{equation}
+so six terms for $\sigma^+$ light, where $m'=m+1$ is fixed by the polarisation.
+$d_{2e}=\bra{e}\hat d_q\ket{F=2,m}$ and $d_{3e}=\bra{e}\hat d_q\ket{F=3,m}$ are the signed dipole
+matrix elements, and
+\begin{equation}
+\Delta_e=2\pi\left[\Delta+\left(\nu_{\mathrm{D}_1}-\nu_{J'}\right)-\Delta_\text{hfs}(J',F')\right]
+\end{equation}
+is the detuning from level $e$ (Fig.~\ref{fig:levelscheme_detuning}): $\Delta$ is measured from the
+centroid of the D$_1$ line, $\nu_{J'}$ is the centroid of the line of $e$, and $\Delta_\text{hfs}(J',F')$
+the hyperfine shift of $F'$ within that line. Because both legs are two-photon resonant, both have
+the same detuning from a given level $e$. The signs of the matrix elements matter, since the paths
+via different $F'$ interfere.
+
+For the clock transition $m=0$, $\beta=1/2$ and $\Delta/2\pi=+\SI{50}{\giga\hertz}$ the matrix elements
+and level energies from ARC give
+\begin{center}
+\begin{tabular}{lrrrr}
+\hline
+$e$ & $d_{2e}\,(ea_0)$ & $d_{3e}\,(ea_0)$ & $\Delta_e/2\pi$ (GHz) & contribution \\ \hline
+D$_1$, $F'=2$ & $-0.998$ & $0.998$ & $50.21$ & $-3.84$\\
+D$_1$, $F'=3$ & $-1.411$ & $1.411$ & $49.85$ & $-7.74$\\
+D$_2$, $F'=1\dots4$ & & & $\approx-7073$ & $-0.08$\\ \hline
+\end{tabular}
+\end{center}
+with the contributions in $\si{\radian\per\second}/(\si{\watt\per\metre\squared})$, and therefore
+\begin{equation}
+C_\text{Rabi}=\SI{11.66}{\radian\per\second}\Big/\SI{}{\watt\per\metre\squared}.
+\end{equation}
+The D$_2$ line is seven terahertz away and contributes less than $\SI{1}{\percent}$.

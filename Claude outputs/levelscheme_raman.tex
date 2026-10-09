@@ -1,0 +1,67 @@
+% Level scheme of the two-photon Raman transition in Rb-85 (not to scale).
+% Requires: tikz (library arrows.meta), siunitx, amsmath
+% Use in the document with \input{levelscheme_raman.tex}
+\begin{tikzpicture}[
+    >={Stealth[length=2.2mm]},
+    lvl/.style={line width=1.1pt},
+    sub/.style={line width=0.8pt},
+    virt/.style={line width=0.9pt, dashed},
+    guide/.style={line width=0.4pt, densely dotted},
+    leg/.style={->, line width=1.1pt},
+    det/.style={<->, line width=0.6pt},
+    x=1cm, y=1cm]
+
+  % ---------------- ground state 5S_1/2 ----------------
+  \draw[lvl] (1.2,0.0) -- (9.6,0.0) node[right] {$F=2$};
+  \draw[lvl] (1.2,1.0) -- (9.6,1.0) node[right] {$F=3$};
+  \node[left, align=right] at (1.0,0.5) {$5S_{1/2}$};
+  \draw[det] (9.2,0.0) -- (9.2,1.0)
+        node[midway, left, align=right] {$\omega_\text{hfs}/2\pi$\\ $=\SI{3.036}{\giga\hertz}$};
+
+  % ---------------- 5P_1/2 (D1 line) ----------------
+  \draw[guide] (1.2,4.95) -- (3.6,4.95) node[pos=0.72, below] {centroid};
+  \draw[sub] (3.8,4.40) -- (9.6,4.40) node[right] {$F'=2$};
+  \draw[sub] (3.8,5.50) -- (9.6,5.50) node[right] {$F'=3$};
+  \node[left, align=right] at (1.0,4.95) {$5P_{1/2}$\\ (D$_1$)};
+
+  % ---------------- virtual level ----------------
+  \draw[virt] (1.2,7.0) -- (9.6,7.0) node[right] {virtual level};
+
+  % detuning from the D1 centroid
+  \draw[det] (1.4,4.95) -- (1.4,7.0)
+        node[pos=0.6, right] {$\Delta/2\pi=+\SI{50}{\giga\hertz}$};
+
+  % example: detuning from the intermediate state e = |5P_1/2, F'=3>
+  \draw[det, red!75!black, line width=0.9pt] (6.4,5.50) -- (6.4,7.0)
+        node[midway, right, align=left] {$\Delta_{e}/2\pi$\\ $=\SI{49.85}{\giga\hertz}$};
+  % the same for F'=2
+  \draw[det, gray] (9.0,4.40) -- (9.0,7.0)
+        node[pos=0.2, left, gray] {$\SI{50.21}{\giga\hertz}$};
+
+  % ---------------- 5P_3/2 (D2 line), far away ----------------
+  \draw[sub] (3.8,9.2) -- (9.6,9.2) node[right] {$F'=1,\dots,4$};
+  \node[left, align=right] at (1.0,9.2) {$5P_{3/2}$\\ (D$_2$)};
+  \draw[det, gray] (9.0,7.0) -- (9.0,9.2)
+        node[pos=0.72, right, gray] {$\approx-\SI{7.07}{\tera\hertz}$};
+  % axis break on the D2 arrow
+  \fill[white] (8.75,7.85) rectangle (9.25,8.05);
+  \draw[gray, line width=0.6pt] (8.75,7.80) -- (9.25,7.95);
+  \draw[gray, line width=0.6pt] (8.75,7.95) -- (9.25,8.10);
+
+  % ---------------- the two Raman legs ----------------
+  \coordinate (V) at (4.6,7.0);
+  \draw[leg, blue!70!black]   (3.3,0.0) -- (V)
+        node[pos=0.40, left] {$\omega_1,\ \Omega_{2,e}$};
+  \draw[leg, orange!85!black] (5.9,1.0) -- (V)
+        node[pos=0.40, right] {$\omega_2,\ \Omega_{3,e}$};
+  \fill (V) circle (1.6pt);
+
+  % effective two-photon coupling
+  \draw[<->, line width=0.9pt, densely dashed] (2.4,0.08) to[bend left=50]
+        node[left] {$\Omega_\text{R}$} (2.4,0.92);
+
+  % polarisation / resonance condition
+  \node[anchor=north west, align=left] at (6.6,3.3)
+        {$\sigma^+/\sigma^+$: $m_F=0\rightarrow m_F'=1$\\[2pt]
+         $\omega_1-\omega_2=\omega_\text{hfs}$};
+\end{tikzpicture}
