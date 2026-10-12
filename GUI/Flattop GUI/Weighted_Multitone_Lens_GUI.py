@@ -154,6 +154,14 @@ MU_M = "\u00b5m"
 # Export ist (im Dialog einstellbar).
 EXPORT_PITCH_ZOOM_DEFAULT = 1.15
 
+# 2D-Profil fuer BeamShaperPlots (Knopf "Export 2D profile for BeamShaperPlots").
+# Gleiches Pixelraster wie die Laborkamera in der Objektebene (IDS-Kamera,
+# 1,45 um Pixel, 40er Objektiv mit Vergroesserung 43,75), damit Simulation und
+# Messbild in BeamShaperPlots mit denselben Einstellungen ausgewertet werden.
+# Bildfeld 20 um x 20 um um die Atom-Mitte - wie das Messbild.
+PROFILE_EXPORT_UM_PER_PX = 1.45 / 43.75
+PROFILE_EXPORT_FOV_UM = 20.0
+
 # Alle Bilder des GUIs landen neben dem Skript in GUI/Bilder.
 out_dir = FilePath(__file__).resolve().parent / "Bilder"
 try:
@@ -1278,6 +1286,13 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         layout = QVBoxLayout(box)
         self.btn_save = QPushButton("Save high-resolution")
         layout.addWidget(self.btn_save)
+        self.btn_export_profile = QPushButton("Export 2D profile for BeamShaperPlots (.npz)")
+        self.btn_export_profile.setToolTip(
+            "Speichert das statische 2D-Profil der eigenen Site (mit Interferenz, wie im\n"
+            "Hauptplot) als .npz nach GUI/Bilder - im Pixelraster der Laborkamera\n"
+            f"({PROFILE_EXPORT_UM_PER_PX * 1e3:.2f} nm/Pixel, {PROFILE_EXPORT_FOV_UM:g} µm Bildfeld).\n"
+            "In BeamShaperPlots wie ein Messbild oeffnen oder als Vergleichsbild waehlen.")
+        layout.addWidget(self.btn_export_profile)
         self.label_save_status = QLabel("")
         # Nur der Dateiname wird angezeigt (nicht der ggf. sehr lange UNC-Pfad),
         # damit das Label die rechte Spalte nicht mehr in die Breite zieht: ein
@@ -1440,6 +1455,7 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         self.btn_crosstalk_to_pitch.clicked.connect(self.on_set_crosstalk_to_pitch)
         self.btn_reset_crosshair.clicked.connect(self.on_reset_crosshair)
         self.btn_save.clicked.connect(self.on_save)
+        self.btn_export_profile.clicked.connect(self.on_export_profile)
 
     # --------------------------------------------------------
     # Amplituden-Panel dynamisch (neu) aufbauen
@@ -3032,6 +3048,100 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                 QMessageBox.warning(self, "Save failed", str(e))
             finally:
                 plt.close(fig_save)
+
+    def profile_image(self, um_per_px=PROFILE_EXPORT_UM_PER_PX, fov_um=PROFILE_EXPORT_FOV_UM):
+        """Statisches 2D-Profil der eigenen Site auf einem quadratischen Raster.
+
+        Dieselbe Rechnung wie im Hauptplot (own_intensity: kohaerente Summe mit
+        dem Kreuzterm frequenzentarteter Spots, Tonphasen wie eingestellt),
+        nur auf quadratischen Pixeln der Groesse um_per_px, zentriert auf die
+        Atom-Mitte. Normiert auf das Maximum (= 1).
+
+        Rueckgabe: (image, x_um, y_um, centers_x_um, centers_y_um). Zeile 0 von
+        `image` ist die OBERSTE Zeile (groesstes y) - wie bei einem Kamerabild.
+        Angezeigt mit imshow(origin="upper") sieht es also so aus wie im GUI.
+        x_um/y_um: Pixelmitten relativ zur Atom-Mitte (y_um faellt mit dem
+        Zeilenindex, weil Zeile 0 oben liegt).
+        """
+        self._sync_waists()
+        centers_x, centers_y, r_center = compute_centers(
+            self.state["N_x"], self.state["N_y"], self.state["width"],
+            self.state["f1"], self.state["f2"]
+        )
+        cx0 = r_center + self.state["atom_offset_x"]
+        cy0 = r_center + self.state["atom_offset_y"]
+        n = int(round(fov_um / um_per_px))
+        t_um = (np.arange(n) - (n - 1) / 2.0) * um_per_px
+        X, Y = np.meshgrid(cx0 + t_um * 1e-6, cy0 + t_um[::-1] * 1e-6)
+        I = self.own_intensity(X, Y, centers_x, centers_y, self.current_amp_spots())
+        peak = float(np.max(I))
+        if np.isfinite(peak) and peak > 0:
+            I = I / peak
+        return (I.astype(np.float32), t_um, t_um[::-1].copy(),
+                (centers_x - cx0) * 1e6, (centers_y - cy0) * 1e6)
+
+    def on_export_profile(self):
+        """Knopf "Export 2D profile for BeamShaperPlots": .npz + .txt nach GUI/Bilder."""
+        import json
+        try:
+            img, x_um, y_um, cxs, cys = self.profile_image()
+        except Exception as e:
+            self.label_save_status.setText(f"Profil-Export fehlgeschlagen: {e}")
+            QMessageBox.warning(self, "Export failed", str(e))
+            return
+        st = self.state
+        deg = self.cache.get("degenerate", [])
+        phases = self._tone_phases(deg) if st.get("coherent", True) else None
+        params = {
+            "source": "Weighted_Multitone_Lens_GUI.py",
+            "created": datetime.datetime.now().isoformat(timespec="seconds"),
+            "N_x": int(st["N_x"]), "N_y": int(st["N_y"]),
+            "width_MHz": st["width"] * 1e-6,
+            "waist_um": st["win"] * 1e6,
+            "waist_in_mm": (st["win_in"] * 1e3) if st.get("win_in") else None,
+            "f1_mm": st["f1"] * 1e3, "f2_mm": st["f2"] * 1e3,
+            "profile": "Airy" if st["use_airy"] else "Gauss",
+            "airy_scale_factor": float(st.get("airy_scale_factor") or AIRY_SCALE_FACTOR)
+            if st["use_airy"] else None,
+            "lambda_nm": lambda_opt * 1e9, "offset_MHz": offset * 1e-6,
+            "spot_spacing_um": width_to_um(st["width"], st["f1"], st["f2"])
+            / max(1, max(st["N_x"], st["N_y"]) - 1),
+            "coherent": bool(st.get("coherent", True)),
+            "phase_mode": st.get("phase_mode", "zero"),
+            "n_degenerate_pairs": int(self.cache.get("n_degenerate_pairs", 0)),
+            "amp_x": [float(a) for a in (st["amp_x"] if st["custom_amps"] else np.ones(st["N_x"]))],
+            "amp_y": [float(a) for a in (st["amp_y"] if st["custom_amps"] else np.ones(st["N_y"]))],
+            "atom_offset_um": [st["atom_offset_x"] * 1e6, st["atom_offset_y"] * 1e6],
+            "um_per_px": PROFILE_EXPORT_UM_PER_PX,
+            "fov_um": PROFILE_EXPORT_FOV_UM,
+            "normalisation": "Maximum = 1",
+            "orientation": "Zeile 0 = oben (groesstes y), wie Kamerabild",
+        }
+        # Rundungsrauschen (1.8199999999999998) aus der Parameterdatei nehmen
+        params = {k: (float(f"{v:.10g}") if isinstance(v, float) else v)
+                  for k, v in params.items()}
+        if phases is not None:
+            params["spot_phases_rad"] = [float(p) for p in phases]
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        tag = (f"{st['N_x']}x{st['N_y']}_{st['width'] * 1e-6:.2f}MHz_"
+               f"w{st['win'] * 1e6:.2f}um_f{st['f1'] * 1e3:g}-{st['f2'] * 1e3:g}mm")
+        out_file = out_dir / f"FlatMultiTone_profile_{tag}_{timestamp}.npz"
+        txt_file = out_file.with_suffix(".txt")
+        try:
+            np.savez_compressed(out_file, image=img, um_per_px=PROFILE_EXPORT_UM_PER_PX,
+                                x_um=x_um, y_um=y_um, centers_x_um=cxs, centers_y_um=cys,
+                                params=json.dumps(params, ensure_ascii=False))
+            lines = ["2D-Profil fuer BeamShaperPlots (Weighted_Multitone_Lens_GUI.py)",
+                     f"Datei: {out_file.name}", ""]
+            lines += [f"{k}: {v}" for k, v in params.items() if k != "spot_phases_rad"]
+            txt_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except Exception as e:
+            self.label_save_status.setText(f"Profil-Export fehlgeschlagen: {e}")
+            QMessageBox.warning(self, "Export failed", str(e))
+            return
+        self.label_save_status.setText(f"Profil gespeichert: {short_name(out_file)} (+ .txt)")
+        self.label_save_status.setToolTip(f"{out_file}\n{txt_file}")
+        return out_file
 
     def _export_parameter_text(self, uniformity, crosstalk, crosstalk_edge, crosstalk_diag,
                                weighted, sigma_atom, r_center, atom_cx, atom_cy,

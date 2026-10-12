@@ -1,0 +1,27 @@
+2D-Profil fuer BeamShaperPlots (Weighted_Multitone_Lens_GUI.py)
+Datei: FlatMultiTone_profile_6x6_0.50MHz_w1.82um_f45-300mm_20261012_101006.npz
+
+source: Weighted_Multitone_Lens_GUI.py
+created: 2026-10-12T10:10:06
+N_x: 6
+N_y: 6
+width_MHz: 0.5
+waist_um: 1.82
+waist_in_mm: 1.102880793
+f1_mm: 45.0
+f2_mm: 300.0
+profile: Airy
+airy_scale_factor: 1.482951
+lambda_nm: 795.0
+offset_MHz: 100.0
+spot_spacing_um: 0.947433446
+coherent: True
+phase_mode: zero
+n_degenerate_pairs: 55
+amp_x: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+amp_y: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+atom_offset_um: [0.0, 0.0]
+um_per_px: 0.03314285714
+fov_um: 20.0
+normalisation: Maximum = 1
+orientation: Zeile 0 = oben (groesstes y), wie Kamerabild
