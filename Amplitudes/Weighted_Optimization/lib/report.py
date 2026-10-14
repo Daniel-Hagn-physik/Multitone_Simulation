@@ -203,7 +203,13 @@ def SD(stil, **ueberschreiben):
 # Die Figurgroessen. Breite = Textbreite, wo es geht; die zweispaltigen
 # Querschnitte bleiben breiter (sie brauchen den Platz) und werden ueber
 # dokument_stil() ausgeglichen.
-HALF_PAGE_FIGSIZE = (6.3, 6.2)   # 2x2 Karten
+# Die Metrik-Uebersicht steht als ZWEI Zeilen nebeneinander, Spalte fuer
+# Spalte dieselbe Groesse. 2x3 passt auf 16 x 10.5 cm wie im Penalty-Fall.
+PAGE_FIGSIZE = (6.3, 4.53)       # 2x3 = 16.0 x 11.5 cm
+HALF_PAGE_FIGSIZE = (6.3, 5.00)  # 2x2 Karten
+# Kennbuchstaben der Teilbilder - in der Bildunterschrift wird darauf
+# verwiesen, deshalb stehen sie statt beschreibender Titel ueber den Karten.
+PANEL_TAGS = ["(a)", "(b)", "(c)", "(d)", "(e)", "(f)", "(g)", "(h)"]
 ROW_FIGSIZE = (6.3, 3.2)         # 1x2 Karten
 REGION_FIGSIZE = (6.3, 4.4)      # eine Karte
 
@@ -313,7 +319,7 @@ def working_point_label(best, at_edge=False):
     # Waist auf zwei Nachkommastellen: das Gitter ist feiner, die dritte
     # Stelle unterscheidet aber keine Arbeitspunkte mehr, die man von Hand
     # ansteuern wuerde - und der Text steht in jeder Legende.
-    return (r"$\omega$ = %.2f $\mu$m, width = %.3f MHz"
+    return (r"$\omega$ = %.2f µm, width = %.3f MHz"
             % (best['waist_um'], best['width'] * 1e-6))
 
 
@@ -325,7 +331,7 @@ def koordinaten_label(axis, wert):
         return r"width = %.3f MHz" % float(wert)
     if axis == "waist_mm":
         return r"%s = %.3f mm" % (WIN_INPUT_SYMBOL, float(wert))
-    return r"%s = %.2f $\mu$m" % (WAIST_UM_SYMBOL, float(wert))
+    return r"%s = %.2f µm" % (WAIST_UM_SYMBOL, float(wert))
 
 
 def working_point_axis_label(best, axis):
@@ -387,10 +393,10 @@ def draw_working_point_line(ax, best, axis, label=True, text=None):
 # er "Waist at focus omega' (µm, after lenses)"; der Strich sollte "nach der
 # Linse" heissen, sagte das aber nur fuer den, der die Konvention schon kennt.
 # "in the atomic plane" sagt es direkt und macht den Strich ueberfluessig.
-WAIST_UM_LABEL = r"Waist in the atomic plane $\omega$ ($\mu$m)"
+WAIST_UM_LABEL = r"Waist in the atomic plane $\omega$ (µm)"
 # Kurzform fuer zwei Panels nebeneinander: dort bleiben je rund 2.5 Zoll, und
 # der ausgeschriebene Name laeuft ueber den Figurrand hinaus.
-WAIST_UM_LABEL_SHORT = r"Waist $\omega$ ($\mu$m)"
+WAIST_UM_LABEL_SHORT = r"Waist $\omega$ (µm)"
 WAIST_UM_SYMBOL = r"$\omega$"
 WIN_INPUT_LABEL = r"Input waist $\omega_{\mathrm{in}}$ (mm) (before lenses)"
 WIN_INPUT_LABEL_SHORT = r"Input waist $\omega_{\mathrm{in}}$ (mm)"
@@ -1170,14 +1176,23 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
 
     # Keine Ueberschrift ueber der Figur: in einem LaTeX-Dokument steht dort
     # die \caption. Was der Plot zeigt, steht in den Titeln der Karten.
-    n_rows = (len(panels) + 1) // 2
-    figsize = HALF_PAGE_FIGSIZE if n_rows >= 2 else ROW_FIGSIZE
+    # ZWEI Zeilen, spaltenweise gefuellt - wie im Penalty-Fall, damit die
+    # Abbildungen eines Dokuments gleich aussehen.
+    n_rows = 2
+    n_cols = max(1, (len(panels) + 1) // 2)
+    figsize = PAGE_FIGSIZE if n_cols >= 3 else HALF_PAGE_FIGSIZE
     # Alle Karten haben dieselben Achsen - die Beschriftung deshalb nur
     # einmal aussen herum.
     with dokument_stil(figsize[0]):
-        fig, axes = plt.subplots(n_rows, 2, figsize=figsize, sharex="all", sharey="all",
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize,
+                                 sharex="all", sharey="all",
                                  squeeze=False, constrained_layout=True)
-        for ax, panel in zip(axes.flat, panels):
+        for i, ax in enumerate(axes.flat):
+            zeile, spalte = divmod(i, n_cols)
+            # Der Kennbuchstabe folgt der Panel-Liste (paarweise), nicht der
+            # Lesereihenfolge: (a)/(b) ist das Paar links, (c)/(d) rechts.
+            nummer = n_rows * spalte + zeile
+            panel = panels[nummer]
             Z = np.asarray(results[panel['key']], dtype=float) * panel['scale']
             maske = panel.get('mask')
             if maske is not None:
@@ -1205,7 +1220,9 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
                 # geklemmte Bereich in Grau, ungueltige Punkte bleiben weiss.
                 ax.pcolormesh(x_vals, width_vals * 1e-6, M_plot, shading="auto",
                               cmap=ListedColormap([R_CLAMP_COLOR]), vmin=0.0, vmax=1.0)
-            ax.set_title(panel['title'])
+            # Kein beschreibender Titel mehr: was die Karte zeigt, steht an
+            # der Farbskala, der Kennbuchstabe traegt den Verweis.
+            ax.set_title(PANEL_TAGS[nummer] if nummer < len(PANEL_TAGS) else "")
             if fit_line is not None:
                 draw_fit_line_on_map(ax, results, fit_line, win_axis,
                                      dashed_extrapolation=fit_line_dashed_extrapolation)
@@ -1213,9 +1230,25 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
                 # Gezeichnet wird der Stern in jeder Karte, den Legendeneintrag
                 # holt sich aber nur die erste.
                 draw_best_point_marker(ax, results, win_axis, legend=False,
-                                       label=(ax is axes.flat[0]), best=best_point)
-        for ax in axes[-1, :]:
-            ax.set_xlabel(x_label)
+                                       label=True, best=best_point)
+            # Legende IN der Karte, unten rechts. Der Hinweis auf die
+            # Schranke steht nur dort, wo es sie ueberhaupt gibt.
+            legenden_h, legenden_l = ax.get_legend_handles_labels()
+            if panel.get('clamped'):
+                legenden_h.append(Patch(facecolor=R_CLAMP_COLOR, edgecolor="none"))
+                legenden_l.append(R_CLAMP_LABEL)
+            if legenden_h:
+                ax.legend(legenden_h, legenden_l, loc="lower right",
+                          framealpha=0.9)
+        # Jede Karte traegt ihre eigene x-Beschriftung und ihre eigenen
+        # Zahlen, damit ein einzelnes Teilbild fuer sich zitierbar ist -
+        # dafuer die KURZE Form. sharex blendet die Zahlen sonst in der
+        # oberen Zeile aus.
+        x_label_kurz = {WAIST_UM_LABEL: WAIST_UM_LABEL_SHORT,
+                        WIN_INPUT_LABEL: WIN_INPUT_LABEL_SHORT}.get(x_label, x_label)
+        for ax in axes.flat:
+            ax.set_xlabel(x_label_kurz)
+            ax.tick_params(labelbottom=True)
         for ax in axes[:, 0]:
             ax.set_ylabel(WIDTH_LABEL)
             # Zwei Nachkommastellen, wie in den uebrigen Karten. Ohne das
@@ -1224,18 +1257,12 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
             ax.yaxis.set_major_locator(MaxNLocator(nbins=5, steps=[1, 2, 5, 10]))
             ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
 
-        handles, labels = axes.flat[0].get_legend_handles_labels()
-        if any(p.get('clamped') for p in panels):
-            # Das Grau erklaert sich nicht von selbst - ein Eintrag in der
-            # ohnehin vorhandenen gemeinsamen Legende, kein zweiter Kasten.
-            handles.append(Patch(facecolor=R_CLAMP_COLOR, edgecolor="none"))
-            labels.append(R_CLAMP_LABEL)
-        if handles:
-            fig.legend(handles, labels, loc="outside lower center",
-                       ncol=legend_ncol(labels), framealpha=0.9)
         dateiname = (f"{prefix}_metric_comparison_amp.pdf" if with_amplitudes
                      else f"{prefix}_metric_comparison.pdf")
-        return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite)
+        # tight=False: exakt die eingestellten 16 cm Breite, sonst schrumpft
+        # \includegraphics[width=\textwidth] die Figur um rund 2 %.
+        return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite,
+                       tight=False)
 
 
 def plot_region(results, prefix, out_dir=None, win_axis="before_lens",

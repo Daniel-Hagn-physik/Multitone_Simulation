@@ -1,0 +1,31 @@
+# Beating 3x4: Messung vs. Simulation
+# erstellt:    2026-10-13 16:34
+# Signal:      Focal phases 3x4.csv
+# Hintergrund: Focal BG 3x4.csv
+# Messung: fs = 2.50 GSa/s, N = 25000000, df = 100.0 Hz, Fenster flattop, U_bar = 4.8973 mV
+# Simulation: 3x4, width = 0.370 MHz, f0 = 61.6667 kHz, gauss/airy, Durchmesser ['11', '13'] um, Geometrie eine_linse, r_x = 1.0, r_y = 1.0
+#   Spot-Abstand x = 9.944 um, y = 6.629 um
+#   phi_x = [0, 12, 24] deg, phi_y = [0, 98, 16, 114] deg
+# U_meas  = U_hat_d / (sqrt(2) U_bar)
+# R_<w>   = sqrt(< 2|D_d|^2 / D_0^2 >_R)     lokal, RMS ueber Spot-Quadrat R
+# det_<w> = sqrt(2)|int D_d| / int D_0       Detektor ueber ganze Fokalebene
+#
+#  d   f_d/kHz  U_hat_d/mV U_hat_BG/uV  U_meas/%   R_gauss_11um/%   det_gauss_11um/%   R_gauss_13um/%   det_gauss_13um/%    R_airy_11um/%    det_airy_11um/%    R_airy_13um/%    det_airy_13um/%
+   1    61.700      0.2844       0.375      4.11            13.27               2.28            15.94               4.72            19.64               3.69            18.94               3.41
+   2   123.300      1.3736       0.269     19.83            47.36              17.10            45.75              21.02            60.72               6.76            58.95              12.39
+   3   185.000      1.7391       0.049     25.11            39.33              18.39            47.47              29.26            35.91              11.02            32.12               2.67
+   4   246.700      0.9283       0.157     13.40             5.75               3.87            12.72               8.83            16.62               5.14            14.13               9.30
+   5   308.300      0.2171       0.353      3.13            13.17               2.22            15.36               4.35            18.68               2.80            16.64               2.87
+   6   370.000      0.2629       0.391      3.80             0.17               0.09             1.00               0.55             9.78               2.43             9.08               3.28
+   7   431.700      0.1416       0.074      2.04             1.60               0.50             4.27               1.83             6.06               2.40             9.03               1.84
+   8   493.300      0.0130       0.329      0.19             0.04               0.01             0.27               0.06             4.75               0.19             4.31               0.76
+   9   555.000      0.0527       0.130      0.76             0.03               0.01             0.19               0.07             3.22               0.30             3.42               1.39
+  10   616.700      0.0209       0.243      0.30             0.01               0.00             0.07               0.03             2.46               0.87             3.83               0.80
+  11   678.400      0.0022       0.029      0.03             0.00               0.00             0.00               0.00             0.00               0.00             0.00               0.00
+  12   740.000      0.0101       0.431      0.15             0.00               0.00             0.00               0.00             1.78               0.04             1.50               0.42
+#
+# U_t = sqrt(sum U_td^2): Messung 35.35 %
+#   Simulation gauss_11um: R 64.62 %, ganze Fokalebene 25.61 %
+#   Simulation gauss_13um: R 70.83 %, ganze Fokalebene 37.69 %
+#   Simulation airy_11um: R 78.50 %, ganze Fokalebene 15.09 %
+#   Simulation airy_13um: R 74.52 %, ganze Fokalebene 16.87 %

@@ -37,10 +37,24 @@ Die Abschnitte 10-14 pruefen zusaetzlich die Zahlen des Anhangs nach:
 Zentrierungskriterium der Tonphasen, Crestfaktor je Achse, Leistungsbudget am
 P_1dB des Verstaerkers samt Beugungseffizienz, Moden- und Ueberlappintegrale,
 sowie U_t als Feld ueber dem Spot-Rechteck.  Der Arbeitspunkt dieser Arbeit
-(phi_x = [0, 12.5, 25] deg, phi_y = [0, 98, 16, 114] deg) laeuft ueberall als
+(phi_x = [0, 12, 24] deg, phi_y = [0, 98, 16, 114] deg) laeuft ueberall als
 dritter Phasensatz mit.
 
-Start:  python beispiel_3x4_nachrechnen.py
+Zwei Geometrien (Schalter GEOMETRIE weiter unten oder Kommandozeile):
+
+    teleskop    Teleskop f1/f2 + Objektiv fLO, waist 1.04 um, Airy
+                -> die Zahlen der Arbeit (Standard)
+    eine_linse  Laboraufbau mit nur einer Linse F_SINGLE = 45 mm hinter dem AOD,
+                Spot 12.8 um 1/e^2-Durchmesser in der Fokalebene (gemessen),
+                Profil Gauss oder Airy (beschnitten, gleicher 1/e^2-Durchmesser
+                des Hauptmaximums), alle Tonamplituden = 1 wie in der AWG
+
+In der eine_linse-Geometrie sind die Abschnitte zu Atom, Falle und Puls
+(Atom-Gewicht, sigma = 108 nm) nur formal - dort sitzt kein Atom.
+
+Start:  python beispiel_3x4_nachrechnen.py                    (teleskop)
+        python beispiel_3x4_nachrechnen.py eine_linse          (45 mm, Gauss)
+        python beispiel_3x4_nachrechnen.py eine_linse airy     (45 mm, Airy)
 Braucht numpy und scipy. Laeuft ab Python 3.9.
 """
 
@@ -68,6 +82,50 @@ AIRY_FACTOR = 1.4830                   # erste Nullstelle = AIRY_FACTOR * waist
 f1, f2, fLO = 75e-3, 750e-3, 52.88e-3  # m
 theta_max, f_band = 43e-3, 36e6        # rad, Hz
 
+# Geometrie: "teleskop" (f1/f2 + Objektiv fLO, Zahlen der Arbeit) oder
+# "eine_linse" (nur eine Linse F_SINGLE hinter dem AOD, Laboraufbau).
+GEOMETRIE = "teleskop"
+F_SINGLE = 45e-3                       # m, Brennweite der einen Linse
+D_SPOT_EINE_LINSE = 12.8e-6            # m, 1/e^2-DURCHMESSER des Spots in deren Fokalebene
+PROFIL_EINE_LINSE = "gauss"            # "gauss" oder "airy" (Hauptmaximum mit
+                                       # demselben 1/e^2-Durchmesser, Ringe dazu)
+R_EINE_LINSE = (1.0, 1.0)              # r_x, r_y im Laboraufbau: AWG mit allen Amplituden = 1
+
+# Auswertung der Beat-Anteile U_t,d (Abschnitt 4 und 8):
+#   "det"      - Detektor/Photodiode: Schwankung der GESAMTLEISTUNG der Fokalebene,
+#                sqrt(2)|int D_d dA| / int D_0 dA  (analytisch ueber Ueberlappintegrale)
+#                -> Vergleich mit der PD-/Oszilloskop-Messung
+#   "rechteck" - lokal, rms von sqrt(2)|D_d(r)|/D_0(r) ueber das Spot-Rechteck
+#                -> Tabelle der Arbeit (gleiche Flaeche wie die Uniformity U)
+#   "atom"     - lokal, gewichtet mit der Aufenthaltswahrscheinlichkeit des Atoms
+#   "auto"     - teleskop -> "rechteck", eine_linse -> "det"
+AUSWERTUNG = "auto"
+
+# Kommandozeile ueberschreibt, Reihenfolge beliebig, z.B.
+#   python beispiel_3x4_nachrechnen.py eine_linse airy det
+_REGIONEN = ("det", "rechteck", "atom", "auto")
+for _arg in sys.argv[1:]:
+    if _arg in ("teleskop", "eine_linse"):
+        GEOMETRIE = _arg
+    elif _arg in ("gauss", "airy"):
+        PROFIL_EINE_LINSE = _arg
+    elif _arg in _REGIONEN:
+        AUSWERTUNG = _arg
+    else:
+        raise ValueError(f"unbekanntes Argument {_arg!r}: erlaubt sind teleskop/eine_linse, "
+                         f"gauss/airy und {'/'.join(_REGIONEN)}")
+if GEOMETRIE == "eine_linse":
+    waist = D_SPOT_EINE_LINSE / 2      # 1/e^2-Radius; fuer Airy gilt r(1/e^2) = waist
+    use_airy = PROFIL_EINE_LINSE == "airy"
+    BRENNWEITE = F_SINGLE              # r = F_SINGLE tan(theta)
+    r_x, r_y = R_EINE_LINSE            # gleiche Amplituden aller Toene
+elif GEOMETRIE == "teleskop":
+    BRENNWEITE = f1 * fLO / f2         # r = (f1 fLO / f2) tan(theta)
+else:
+    raise ValueError(f"GEOMETRIE muss 'teleskop' oder 'eine_linse' sein, nicht {GEOMETRIE!r}")
+if PROFIL_EINE_LINSE not in ("gauss", "airy"):
+    raise ValueError(f"Profil muss 'gauss' oder 'airy' sein, nicht {PROFIL_EINE_LINSE!r}")
+
 # Rechengitter wie im Beating-GUI
 grid_n = 200
 pad_factor = 2.5                       # Rand in Einheiten von win_eff
@@ -79,12 +137,16 @@ f_rabi = 1.0e6                         # Hz
 
 # Auswertebereich fuer sigma_d und sigma_I.  Der Text der Arbeit benutzt
 # "rechteck" - dieselbe Flaeche, ueber der auch die Uniformity U definiert ist.
-#   "rechteck" - Rechteck zwischen den aeussersten Spotzentren
-#   "plateau"  - <I>_t > 0.5 max   (frueherer Standard, phasenabhaengige Maske)
-#   "kreis"    - Kreis um die Mitte, Radius kreis_radius
+#   "rechteck" - Rechteck zwischen den aeussersten Spotzentren (Spot-Quadrat)
 #   "atom"     - Gauss-Gewicht der Aufenthaltswahrscheinlichkeit, sigma aus nu_r und T
-REGION = "rechteck"
-kreis_radius = 1.0e-6                  # m, nur fuer REGION = "kreis"
+#   "det"      - ganze Fokalebene wie ein Detektor (siehe AUSWERTUNG oben)
+# Gesetzt wird REGION ueber AUSWERTUNG weiter oben.
+if AUSWERTUNG == "auto":
+    REGION = "det" if GEOMETRIE == "eine_linse" else "rechteck"
+else:
+    REGION = AUSWERTUNG
+# fuer Groessen, die eine Flaeche brauchen (untere Schranke), bei "det" das Rechteck
+REGION_LOKAL = "rechteck" if REGION == "det" else REGION
 
 
 sigma_atom = None                      # wird nach sigma_thermal() gesetzt
@@ -159,15 +221,23 @@ step_x = df_x / f_0
 step_y = df_y / f_0
 print(f"Delta f_x = {step_x} f_0,   Delta f_y = {step_y} f_0")
 
-# Geometrie: theta = theta_max (f - f_off)/f_band, r = (f1 fLO/f2) tan(theta)
+# Geometrie: theta = theta_max (f - f_off)/f_band, r = BRENNWEITE tan(theta)
+#   teleskop:   BRENNWEITE = f1 fLO / f2     eine_linse: BRENNWEITE = F_SINGLE
 def position(f):
     theta = theta_max * float(f - f_off) / f_band
-    return (f1 * fLO / f2) * math.tan(theta)
+    return BRENNWEITE * math.tan(theta)
 
-drdf = (f1 * fLO / f2) * theta_max / f_band
+drdf = BRENNWEITE * theta_max / f_band
+if GEOMETRIE == "eine_linse":
+    print(f"Geometrie eine_linse: f = {F_SINGLE * 1e3:g} mm, Spot {D_SPOT_EINE_LINSE * 1e6:g} um "
+          f"(1/e^2-Durchmesser), Profil {PROFIL_EINE_LINSE}, r_x = {r_x}, r_y = {r_y}")
+else:
+    print(f"Geometrie teleskop: f1/f2 = {f1 * 1e3:g}/{f2 * 1e3:g} mm, fLO = {fLO * 1e3:g} mm, "
+          f"waist = {waist * 1e6:g} um, Profil {'airy' if use_airy else 'gauss'}")
 p_x = position(f_x[1]) - position(f_x[0])
 p_y = position(f_y[1]) - position(f_y[0])
 print(f"dr/df = {drdf * 1e12:.3f} nm/kHz")
+print(f"p_x/w = {p_x / waist:.3f},  p_y/w = {p_y / waist:.3f}")
 print(f"p_x = {p_x * 1e6:.4f} um,  p_y = {p_y * 1e6:.4f} um,  "
       f"Ausdehnung x/y = {(position(f_x[-1]) - position(f_x[0])) * 1e6:.4f} / "
       f"{(position(f_y[-1]) - position(f_y[0])) * 1e6:.4f} um")
@@ -256,7 +326,7 @@ def statistik(phi_x, phi_y):
     return phi_s, H, D0, D
 
 
-phi_x_wp = np.radians([0.0, 12.5, 25.0])     # Arbeitspunkt dieser Arbeit
+phi_x_wp = np.radians([0.0, 12.0, 24.0])     # Arbeitspunkt dieser Arbeit
 phi_y_wp = np.radians([0.0, 98.0, 16.0, 114.0])
 
 phasen = {"phi = 0": (np.zeros(N_x), np.zeros(N_y)),
@@ -315,9 +385,8 @@ titel("4. Beat-Ordnungen d = k_s - k_s'")
 
 flaechen_namen = {
     "rechteck": f"Spot-Rechteck {2 * h_x * 1e6:.2f} x {2 * h_y * 1e6:.2f} um",
-    "plateau": "Plateau <I>_t > 0.5 max",
-    "kreis": f"Kreis r = {kreis_radius * 1e6:.2f} um",
     "atom": f"Atom-Gewicht sigma = {sigma_atom * 1e9:.0f} nm (T = {T_atom * 1e6:.0f} uK)",
+    "det": "ganze Fokalebene (Detektor/Photodiode, Gesamtleistung)",
 }
 flaeche = flaechen_namen[REGION]
 print(f"Auswertebereich: {flaeche}\n")
@@ -338,13 +407,9 @@ def gewichte(art, D0):
 
     Maske und Gewicht sind dasselbe Konzept: eine harte Region ist ein Gewicht
     aus Nullen und Einsen. So laesst sich auch das Atom-Gewicht einsetzen."""
-    if art == "plateau":                       # phasenabhaengige Maske!
-        w = (D0 > 0.5 * D0.max()).astype(float)
-    elif art == "rechteck":                    # zwischen den aeussersten Spotzentren
+    if art == "rechteck":                      # zwischen den aeussersten Spotzentren
         w = ((np.abs(X - x_mitte) <= h_x + 1e-15) &
              (np.abs(Y - y_mitte) <= h_y + 1e-15)).astype(float)
-    elif art == "kreis":
-        w = (((X - x_mitte) ** 2 + (Y - y_mitte) ** 2) <= kreis_radius ** 2).astype(float)
     elif art == "atom":
         w = np.exp(-((X - x_mitte) ** 2 + (Y - y_mitte) ** 2) / (2 * sigma_atom ** 2))
     else:
@@ -357,7 +422,30 @@ def sigma_d_rel(D0, Dd, w):
     return math.sqrt(np.sum(w * 2 * np.abs(Dd) ** 2 / D0 ** 2))
 
 
-masken = {name: gewichte(REGION, erg[name][2]) for name in erg}
+def det_beitraege(phi_s):
+    """Detektor ueber die ganze Fokalebene: U_d = sqrt(2)|int D_d dA| / int D_0 dA.
+
+    Das Integral ueber die Ebene macht aus g_s g_s' das Ueberlappintegral
+    O(|c_s - c_s'|) (analytisch, overlap()), deshalb kein Gitter und kein
+    abgeschnittener Rand:
+        int D_d dA = sum_{k_s - k_s' = d} A_s A_s' e^{i(phi_s - phi_s')} O(d_ss')
+        int D_0 dA = sum_s a_s P_1 + entartete Paare (statischer Kreuzterm)
+    Rueckgabe {d: U_d} (relativ, nicht in %)."""
+    def dist(s1, s2):
+        return math.hypot(c_s[s1][0] - c_s[s2][0], c_s[s1][1] - c_s[s2][1])
+    I0 = sum(A_s[s] ** 2 for s in spots) * P_spot
+    for s1, s2 in paare.get(0, []):
+        I0 += 2 * A_s[s1] * A_s[s2] * math.cos(phi_s[s1] - phi_s[s2]) * overlap(dist(s1, s2))
+    out = {}
+    for d in range(1, K + 1):
+        Id = sum(A_s[s1] * A_s[s2] * np.exp(1j * (phi_s[s1] - phi_s[s2])) * overlap(dist(s1, s2))
+                 for s1, s2 in paare.get(d, []))
+        out[d] = math.sqrt(2) * abs(Id) / I0
+    return out
+
+
+det = {name: det_beitraege(erg[name][0]) for name in erg}
+masken = {name: gewichte(REGION_LOKAL, erg[name][2]) for name in erg}
 kopf = (f"{'d':>3} {'f_beat[kHz]':>12} {'Paare':>6}  {'(Di,Dj)':<18} "
         f"{'Abstand[um]':<13}" + "".join(f"{n:>11}" for n in erg))
 print(kopf + "\n" + "-" * len(kopf))
@@ -374,7 +462,12 @@ for d in range(K + 1):
     sig = []
     for name in erg:
         _, _, D0, D = erg[name]
-        sig.append(sigma_d_rel(D0, D[d], masken[name]) * 100 if (d > 0 and ps) else None)
+        if not (d > 0 and ps):
+            sig.append(None)
+        elif REGION == "det":
+            sig.append(det[name][d] * 100)
+        else:
+            sig.append(sigma_d_rel(D0, D[d], masken[name]) * 100)
     stxt = "".join(f"{v:>11.1f}" if v is not None else f"{'--':>11}" for v in sig)
     print(f"{d:>3} {float(d * f_0) / 1e3:>12.1f} {len(ps):>6}  {vtxt:<18} "
           f"{atxt:<13}" + stxt)
@@ -385,7 +478,12 @@ for d in range(K + 1):
 print(f"\nSumme der Paare: {n_paare}  (erwartet S(S-1)/2 = "
       f"{len(spots) * (len(spots) - 1) // 2})")
 
-print(f"\nGesamtschwankung sigma_I/<I>_t (gewichtetes rms, {flaeche}):")
+if REGION == "det":
+    print(f"\nGesamtschwankung der Leistung sigma_P/<P>_t ({flaeche}):")
+    for name in erg:
+        print(f"  {name:<10}: {math.sqrt(sum(v ** 2 for v in det[name].values())) * 100:.1f} %")
+print(f"\nGesamtschwankung sigma_I/<I>_t lokal (gewichtetes rms, "
+      f"{flaechen_namen[REGION_LOKAL]}):")
 for name in erg:
     _, _, D0, D = erg[name]
     m = masken[name]
@@ -399,7 +497,7 @@ for name in erg:
 # alle Bereiche nebeneinander - die Zahl haengt sichtbar davon ab
 print("\nZum Vergleich, dieselbe Groesse ueber andere Bereiche:")
 print(f"  {'Bereich':<42}" + "".join(f"{n:>13}" for n in erg))
-for art in ("plateau", "rechteck", "kreis", "atom"):
+for art in ("rechteck", "atom"):
     zeile = ""
     for name in erg:
         _, _, D0, D = erg[name]
@@ -407,6 +505,8 @@ for art in ("plateau", "rechteck", "kreis", "atom"):
         var = sum(2 * np.abs(D[d]) ** 2 for d in D)
         zeile += f"{math.sqrt(np.sum(w * var / D0 ** 2)) * 100:>13.1f}"
     print(f"  {flaechen_namen[art]:<42}" + zeile)
+print(f"  {'Detektor, ganze Fokalebene':<42}" + "".join(
+    f"{math.sqrt(sum(v ** 2 for v in det[n].values())) * 100:>13.1f}" for n in erg))
 
 # =============================================================================
 # 6. Probe: Parseval gegen eine echte Zeitreihe
@@ -449,7 +549,7 @@ for d, ps in paare.items():
     c = np.stack([np.abs(g[s1] * g[s2]) for s1, s2 in ps])
     lo = np.maximum(0.0, 2 * c.max(axis=0) - c.sum(axis=0))
     tot += 2 * lo ** 2 / D0_0 ** 2
-print(f"untere Schranke (freie Paarphasen, {flaeche}): "
+print(f"untere Schranke (freie Paarphasen, {flaechen_namen[REGION_LOKAL]}): "
       f"{math.sqrt(np.sum(m0 * tot)) * 100:.1f} %")
 
 # =============================================================================
@@ -487,7 +587,8 @@ if kern is not None:
     try:
         import beating_physik as phys
         cx_, cy_, fs_, *_ = phys.compute_centers_and_freqs(
-            N_x, N_y, float(W_x), float(W_y), f1, f2, float(f_off))
+            N_x, N_y, float(W_x), float(W_y), f1, f2, float(f_off),
+            one_lens=(GEOMETRIE == "eine_linse"), f_single=F_SINGLE, fLO_=fLO)
         amp_ = phys.amp_spots_from_ratios(r_x, r_y, N_x, N_y)
         F_ = phys.build_field_stack(X, Y, cx_, cy_, amp_, waist, use_airy, AIRY_FACTOR)
         f0_ = phys.fundamental_beat_frequency(fs_)

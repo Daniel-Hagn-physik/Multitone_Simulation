@@ -2753,8 +2753,8 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         # Ohne Masszahl: die drei Eintraege sollen in EINE Zeile unter die
         # Abbildung passen, und die Kantenlaengen stehen in der .txt neben dem
         # PDF und gehoeren in die Bildunterschrift.
-        LBL_UNI = "Uniformity region"
-        LBL_CROSS = "Crosstalk region"
+        LBL_UNI = "Uniformity-Region"
+        LBL_CROSS = "Crosstalk-Region"
         # Die Aufenthaltswahrscheinlichkeit wird immer normiert geplottet -
         # dann ist |Psi|^2 der kuerzere und ehrlichere Name dafuer.
         LBL_PSI = r"$|\Psi|^2$"
@@ -2795,22 +2795,29 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                 # ausfuellen: bei 16 cm Breite bleiben nach Achsen- und
                 # Farbskalen-Rand rund 4 cm Datenbreite pro Panel uebrig.
                 one_row = True
+                vier_in_zeile = False
                 fig_save = plt.figure(figsize=(EXPORT_FIG_WIDTH_IN,
-                                              0.360 * EXPORT_FIG_WIDTH_IN))
+                                              0.385 * EXPORT_FIG_WIDTH_IN))
                 gs_save = fig_save.add_gridspec(1, 3)
                 ax_cut_h = fig_save.add_subplot(gs_save[0, 0])
                 ax_nb = fig_save.add_subplot(gs_save[0, 1])
                 ax_zoom = fig_save.add_subplot(gs_save[0, 2])
                 ax_cut_v = None
             else:
+                # Auch die Vier-Panel-Fassung steht in EINER Zeile: erst die
+                # beiden Schnitte, dann die Nachbarn und der herangezoomte
+                # Spot, ganz rechts eine gemeinsame Farbskala. Das 2x2-Raster
+                # davor war halb so breit und doppelt so hoch - im Dokument
+                # eine halbe Seite fuer vier kleine Bilder.
                 one_row = False
+                vier_in_zeile = True
                 fig_save = plt.figure(figsize=(EXPORT_FIG_WIDTH_IN,
-                                              0.840 * EXPORT_FIG_WIDTH_IN))
-                gs_save = fig_save.add_gridspec(2, 2, height_ratios=[1.3, 1.0])
-                ax_nb = fig_save.add_subplot(gs_save[0, 0])
-                ax_zoom = fig_save.add_subplot(gs_save[0, 1])
-                ax_cut_h = fig_save.add_subplot(gs_save[1, 0])
-                ax_cut_v = fig_save.add_subplot(gs_save[1, 1])
+                                              0.341 * EXPORT_FIG_WIDTH_IN))
+                gs_save = fig_save.add_gridspec(1, 4)
+                ax_cut_h = fig_save.add_subplot(gs_save[0, 0])
+                ax_cut_v = fig_save.add_subplot(gs_save[0, 1], sharey=ax_cut_h)
+                ax_nb = fig_save.add_subplot(gs_save[0, 2])
+                ax_zoom = fig_save.add_subplot(gs_save[0, 3])
             fig_save.set_constrained_layout(True)
             # Der Parameter-Titel ist optional: fuer eine Abbildung im
             # LaTeX-Dokument steht das alles in der Bildunterschrift. Die
@@ -2897,7 +2904,8 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             # Spot ist auf sein Maximum normiert, und jede der acht
             # Nachbarkopien traegt mit Maximum 1 bei. Ohne Farbskala ist das
             # Bild huebsch, aber man kann nichts daran ablesen.
-            if not one_row:
+            gemeinsame_skala = one_row or vier_in_zeile
+            if not gemeinsame_skala:
                 cb_nb = fig_save.colorbar(im_nb, ax=ax_nb, fraction=0.046, pad=0.03)
                 cb_nb.set_label(LBL_I, fontsize=EXPORT_FONTSIZE_LABEL)
                 cb_nb.ax.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
@@ -2915,7 +2923,7 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             ax_zoom.set_ylabel(LBL_Y, fontsize=EXPORT_FONTSIZE_LABEL)
             ax_zoom.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
             ax_zoom.locator_params(axis="both", nbins=5)
-            if one_row:
+            if gemeinsame_skala:
                 # EINE Farbskala fuer beide 2D-Ansichten: sie zeigen dieselbe
                 # Groesse I/I_max. Das spart eine komplette Skala samt
                 # Beschriftung und macht die Panels entsprechend groesser.
@@ -2927,14 +2935,25 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                 ax_zoom.set_ylabel("")
                 cb_zoom = fig_save.colorbar(im_zoom, ax=[ax_nb, ax_zoom],
                                             fraction=0.046, pad=0.03)
-                # Wenige Marken: 0, 0.25, 0.5, 0.75, 1. Mehr liest ohnehin
-                # niemand aus einer 3 cm hohen Skala ab.
-                cb_zoom.ax.yaxis.set_major_locator(MultipleLocator(0.25))
-                cb_zoom.ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
             else:
                 cb_zoom = fig_save.colorbar(im_zoom, ax=ax_zoom,
                                             fraction=0.046, pad=0.03)
-            cb_zoom.set_label(LBL_I, fontsize=EXPORT_FONTSIZE_LABEL)
+            if vier_in_zeile:
+                # Beschriftung WAAGERECHT ueber die Skala: gedreht daneben
+                # braeuchte sie eine eigene Spalte, die bei vier Panels fehlt.
+                cb_zoom.ax.set_title(LBL_I, fontsize=EXPORT_FONTSIZE_LABEL)
+                # Runde Marken statt des krummen Maximums: die Nachbarkarte
+                # ueberschreitet 1 um ein paar Promille, 1.0248 am oberen
+                # Ende der Skala liest niemand als "das Maximum".
+                cb_zoom.set_ticks([0.0, 0.5, 1.0] if vmax_common >= 1.0
+                                  else [0.0, 0.5 * vmax_common, vmax_common])
+                cb_zoom.ax.yaxis.set_major_formatter(FormatStrFormatter("%g"))
+            else:
+                if gemeinsame_skala:
+                    # Wenige Marken: 0, 0.25, 0.5, 0.75, 1.
+                    cb_zoom.ax.yaxis.set_major_locator(MultipleLocator(0.25))
+                    cb_zoom.ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
+                cb_zoom.set_label(LBL_I, fontsize=EXPORT_FONTSIZE_LABEL)
             cb_zoom.ax.tick_params(labelsize=EXPORT_FONTSIZE_TICK)
 
             # ---- Schnitte ----------------------------------------------
@@ -2971,9 +2990,10 @@ class WeightedFlatMultiToneWindow(QMainWindow):
 
             draw_cut(ax_cut_h, x_line * um - c0_um, I_cut_h, pdf_h, atom_cx_um,
                      LBL_X, "tab:blue",
-                     # Bei nur einem Schnitt ist "Horizontal" ueberfluessig:
-                     # fuer einen einzelnen Spot gibt es keinen zweiten.
-                     titel=None if one_row else "Horizontal")
+                     # Alle Panels tragen Kennbuchstaben, auf die die
+                     # Bildunterschrift verweisen kann - der Schnitt steht in
+                     # beiden Fassungen links, ist also immer (a).
+                     titel="(a)")
             if one_row:
                 # Gleiche grobe Teilung wie auf der Farbskala.
                 ax_cut_h.yaxis.set_major_locator(MultipleLocator(0.25))
@@ -2984,7 +3004,22 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                 ax_cut_h.set_box_aspect(1.0)
             if ax_cut_v is not None:
                 draw_cut(ax_cut_v, y_line * um - c0_um, I_cut_v, pdf_v, atom_cy_um,
-                         LBL_Y, "tab:green", titel="Vertical")
+                         LBL_Y, "tab:green", titel="(b)")
+            if one_row:
+                # Drei Panels: Schnitt (a), Nachbarn (b), Zoom (c).
+                ax_nb.set_title("(b)", fontsize=EXPORT_FONTSIZE_LABEL)
+                ax_zoom.set_title("(c)", fontsize=EXPORT_FONTSIZE_LABEL)
+            if vier_in_zeile:
+                ax_nb.set_title("(c)", fontsize=EXPORT_FONTSIZE_LABEL)
+                ax_zoom.set_title("(d)", fontsize=EXPORT_FONTSIZE_LABEL)
+                # Die beiden Schnitte teilen die y-Achse; Zahlen und
+                # Beschriftung stehen deshalb nur am linken Panel.
+                ax_cut_v.set_ylabel("")
+                ax_cut_v.tick_params(labelleft=False)
+                for ax in (ax_cut_h, ax_cut_v):
+                    ax.yaxis.set_major_locator(MultipleLocator(0.5))
+                    ax.yaxis.set_major_formatter(FormatStrFormatter("%g"))
+                    ax.locator_params(axis="x", nbins=4)
 
             # EINE Legende fuer die ganze Abbildung, unterhalb aller Achsen.
             # In den einzelnen Plots deckte sie bei dieser Schriftgroesse die
@@ -3017,7 +3052,7 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                 # Inhalt zurecht, und die gespeicherte Breite waere nicht mehr
                 # die eingestellte - genau das hat die Schriftgroessen
                 # zwischen den Layouts auseinanderlaufen lassen.
-                if one_row and cb_zoom is not None:
+                if gemeinsame_skala and cb_zoom is not None:
                     # constrained_layout gibt der Farbskala die volle
                     # Zeilenhoehe; die Panels sind durch aspect="equal" aber
                     # niedriger. Layout einmal rechnen lassen, einfrieren und

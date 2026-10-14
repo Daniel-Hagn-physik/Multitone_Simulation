@@ -1,0 +1,31 @@
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{rrrrrrr}
+\hline
+$d$ & $f_{\text{beat}}$ (\SI{}{\kilo\hertz}) & pairs & $\hat U_d$ (\SI{}{\milli\volt}) & ${U_{t}}_d^{\text{meas}}$ (\%) & ${U_{t}}_d^{\text{sim}}$ (\%) & $\Delta$ (pp) \\ \hline
+1  & 61.7  & 10 & 0.284  & 4.1           & 4.4           & $-0.3$ \\
+2  & 123.3 & 11 & 1.374  & 19.8          & 20.7          & $-0.9$ \\
+3  & 185.0 & 10 & 1.739  & \textbf{25.1} & \textbf{28.2} & $-3.1$ \\
+4  & 246.7 & 9  & 0.928  & 13.4          & 8.3           & $+5.1$ \\
+5  & 308.3 & 6  & 0.217  & 3.1           & 4.1           & $-1.0$ \\
+6  & 370.0 & 7  & 0.263  & 3.8           & 0.5           & $+3.3$ \\
+7  & 431.7 & 4  & 0.142  & 2.0           & 1.7           & $+0.4$ \\
+8  & 493.3 & 3  & 0.013  & 0.2           & 0.1           & $+0.1$ \\
+9  & 555.0 & 2  & 0.053  & 0.8           & 0.1           & $+0.7$ \\
+10 & 616.7 & 2  & 0.021  & 0.3           & 0.0           & $+0.3$ \\
+11 & 678.3 & 0  & 0.002  & 0.0           & --            & --     \\
+12 & 740.0 & 1  & 0.010  & 0.2           & 0.0           & $+0.2$ \\ \hline
+\multicolumn{4}{l}{total $U_t=\sqrt{\sum_d {U_t}_d^2}$} & 35.3 & 36.5 & $-1.1$ \\ \hline
+\end{tabular}
+\caption{Beat orders of the $3\times4$ grid ($f_0=\SI{61.67}{\kilo\hertz}$, tone phases
+$\varphi_x=[0^\circ,12^\circ,24^\circ]$, $\varphi_y=[0^\circ,98^\circ,16^\circ,114^\circ]$),
+measured with a photodiode in the focal plane of the $f=\SI{45}{\milli\metre}$ lens
+(mean signal $\bar U=\SI{4.90}{\milli\volt}$). $\hat U_d$ is the peak amplitude of the beat line,
+${U_t}_d^{\text{meas}}=\hat U_d/(\sqrt{2}\,\bar U)$ its relative rms contribution.
+The simulation assumes Gaussian spots with the measured diameter $2w_0=\SI{12.8}{\micro\metre}$
+at a spot spacing of $\SI{9.94}{\micro\metre}\times\SI{6.63}{\micro\metre}$, integrated over the
+whole focal plane, ${U_t}_d^{\text{sim}}=\sqrt{2}\,|\!\int D_d\,\mathrm{d}A|/\!\int D_0\,\mathrm{d}A$.
+$\Delta = {U_t}_d^{\text{meas}}-{U_t}_d^{\text{sim}}$.}
+\label{tab:beat_focal34}
+\end{table}

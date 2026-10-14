@@ -1,0 +1,26 @@
+# Beating 3x4: Messung vs. Simulation
+# erstellt:    2026-10-13 16:01
+# Signal:      Focal phases 3x4.csv
+# Hintergrund: Focal BG 3x4.csv
+# Messung: fs = 2.50 GSa/s, N = 25000000, df = 100.0 Hz, Fenster flattop, U_bar = 4.8973 mV
+# Simulation: 3x4, width = 0.370 MHz, f0 = 61.6667 kHz, Airy, waist = 1.04 um, r_x = 1.0, r_y = 1.0
+#   phi_x = [0, 12, 24] deg, phi_y = [0, 98, 16, 114] deg
+# U_meas   = U_hat_d / (sqrt(2) U_bar)
+# U_sim_R  = sqrt(< 2|D_d|^2 / D_0^2 >_R)       lokal, RMS ueber Spot-Quadrat R
+# U_sim_det = sqrt(2)|int D_d| / int D_0         Detektor ueber ganze Fokalebene
+#
+#  d   f_d/kHz  U_hat_d/mV U_hat_BG/uV  U_meas/%  U_sim_R/%  U_sim_det/%
+   1    61.700      0.2844       0.375      4.11      20.48         6.25
+   2   123.300      1.3736       0.269     19.83      41.11        21.19
+   3   185.000      1.7391       0.049     25.11      51.83        24.34
+   4   246.700      0.9283       0.157     13.40      19.48         1.12
+   5   308.300      0.2171       0.353      3.13      19.24         1.92
+   6   370.000      0.2629       0.391      3.80      15.80         6.30
+   7   431.700      0.1416       0.074      2.04       7.02         5.95
+   8   493.300      0.0130       0.329      0.19       3.21         0.97
+   9   555.000      0.0527       0.130      0.76       5.71         1.14
+  10   616.700      0.0209       0.243      0.30       5.27         0.08
+  11   678.400      0.0022       0.029      0.03       0.00         0.00
+  12   740.000      0.0101       0.431      0.15       1.68         0.74
+#
+# U_t = sqrt(sum U_td^2):  Messung 35.35 %,  Sim. R 76.93 %,  Sim. Detektor 34.11 %

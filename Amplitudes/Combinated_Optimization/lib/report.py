@@ -75,8 +75,11 @@ LATEX_STYLE = {
 # eingestellten Schriftgroessen 1:1 im Dokument an. Vorher war die Figur
 # 12 Zoll breit und wurde auf Textbreite geschrumpft (Faktor 0.52), 10-pt-Text
 # kam als 5 pt heraus.
-PAGE_FIGSIZE = (6.3, 9.0)        # 3x2, ganze Seite
-HALF_PAGE_FIGSIZE = (6.3, 6.2)   # 2x2, gleiche Kartenhoehe wie oben
+# Die Metrik-Uebersicht steht als ZWEI Zeilen nebeneinander: oben die harten
+# Groessen, darunter die atom-gewichteten, Spalte fuer Spalte dieselbe Groesse.
+# Mit den Amplituden sind das 2x3 Karten auf 16 x 10.5 cm, ohne sie 2x2.
+PAGE_FIGSIZE = (6.3, 4.53)       # 2x3 = 16.0 x 11.5 cm
+HALF_PAGE_FIGSIZE = (6.3, 5.00)  # 2x2, etwas hoeher, weil breitere Karten
 # Karte + Querschnitt nebeneinander, plus je eine Legende darunter.
 #
 # Die Hoehe ist nicht geschaetzt, sondern an den uebrigen Plots GEMESSEN: dort
@@ -189,19 +192,19 @@ def working_point_label(best, at_edge=False):
     # Waist auf zwei Nachkommastellen: das Gitter ist feiner, die dritte
     # Stelle unterscheidet aber keine Arbeitspunkte mehr, die man von Hand
     # ansteuern wuerde - und der Text steht in jeder Legende.
-    return (r"$\omega$ = %.2f $\mu$m, width = %.3f MHz"
+    return (r"$\omega$ = %.2f µm, width = %.3f MHz"
             % (best.get('waist_um', float('nan')), best['width'] * 1e-6))
 
 # Der Waist NACH den Linsen, also der in der Atomebene wirksame. Frueher hiess
 # er "Waist at focus omega' (µm, after lenses)"; der Strich sollte "nach der
 # Linse" heissen, sagte das aber nur fuer den, der die Konvention schon kennt.
 # "in the atomic plane" sagt es direkt und macht den Strich ueberfluessig.
-WAIST_UM_LABEL = r"Waist in the atomic plane $\omega$ ($\mu$m)"
+WAIST_UM_LABEL = r"Waist in the atomic plane $\omega$ (µm)"
 # Kurzform fuer zwei Panels nebeneinander: bei Textbreite bleiben dort nur
 # rund 2.5 Zoll je Panel, und der ausgeschriebene Name laeuft ueber den
 # Figurrand hinaus (gemessen: das schliessende "]" fiel weg). Das Symbol
 # traegt die Aussage, der volle Name steht in jeder einzeln stehenden Karte.
-WAIST_UM_LABEL_SHORT = r"Waist $\omega$ ($\mu$m)"
+WAIST_UM_LABEL_SHORT = r"Waist $\omega$ (µm)"
 WAIST_UM_SYMBOL = r"$\omega$"
 WIN_INPUT_LABEL = r"Input waist $\omega_{\mathrm{in}}$ (mm) (before lenses)"
 WIN_INPUT_LABEL_SHORT = r"Input waist $\omega_{\mathrm{in}}$ (mm)"
@@ -666,6 +669,10 @@ def _finish(fig, out_dir, filename, save, show, confirm_overwrite, tight=True):
 # Schnitte steht. Was die Groesse ist, sagt der Titel ueber der Karte; die
 # ausgeschriebene Definition daneben stand in jeder Karte ein zweites Mal und
 # kostete Breite. Gilt gleichlautend in Hard_ und Weighted_Optimization.
+# Kennbuchstaben der Teilbilder - in der Bildunterschrift wird darauf
+# verwiesen, deshalb stehen sie statt beschreibender Titel ueber den Karten.
+PANEL_TAGS = ["(a)", "(b)", "(c)", "(d)", "(e)", "(f)", "(g)", "(h)"]
+
 METRIC_PANELS = [
     dict(key="uniformity_grid", cbar=r"$U_h$ (%)",
          title="Uniformity (hard metric)", cmap="viridis_r", scale=100.0),
@@ -1049,16 +1056,28 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
     #
     # Die 3x2-Fassung fuellt eine Seite, die 2x2-Fassung behaelt dieselbe
     # Kartenhoehe und wird dadurch etwa halb so hoch.
-    n_rows = (len(panels) + 1) // 2
-    figsize = PAGE_FIGSIZE if n_rows >= 3 else HALF_PAGE_FIGSIZE
+    # ZWEI Zeilen: oben die harten Groessen, darunter die gewichteten. Die
+    # Panel-Liste steht paarweise (hart, gewichtet), die Karten werden also
+    # SPALTENWEISE gefuellt - so steht jede gewichtete Groesse direkt unter
+    # ihrer harten Entsprechung und die Spalten sind direkt vergleichbar.
+    n_rows = 2
+    n_cols = max(1, (len(panels) + 1) // 2)
+    figsize = PAGE_FIGSIZE if n_cols >= 3 else HALF_PAGE_FIGSIZE
     # Alle Karten haben dieselben Achsen. Die Beschriftung deshalb nur einmal
     # aussen herum - das spart pro eingesparter Zeile rund einen halben Zoll,
     # der direkt in die Kartenhoehe geht (die Amplitudenkarten unten waren
     # sonst die kleinsten).
-    fig, axes = plt.subplots(n_rows, 2, figsize=figsize,
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize,
                              sharex="all", sharey="all",
                              constrained_layout=True)
-    for ax, panel in zip(axes.flat, panels):
+    axes = np.atleast_2d(axes)
+    for i, ax in enumerate(axes.flat):
+        zeile, spalte = divmod(i, n_cols)
+        # Die Panel-Liste steht paarweise (hart, gewichtet); der Kennbuchstabe
+        # folgt IHR, nicht der Lesereihenfolge: (a)/(b) sind das Paar links,
+        # (c)/(d) das in der Mitte, (e)/(f) das rechts.
+        nummer = n_rows * spalte + zeile
+        panel = panels[nummer]
         Z = np.asarray(results[panel['key']], dtype=float) * panel['scale']
         maske = panel.get('mask')
         if maske is not None:
@@ -1086,7 +1105,10 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
             # der geklemmte Bereich in Grau, ungueltige Punkte bleiben weiss.
             ax.pcolormesh(x_vals, width_vals * 1e-6, M_plot, shading="auto",
                           cmap=ListedColormap([R_CLAMP_COLOR]), vmin=0.0, vmax=1.0)
-        ax.set_title(panel['title'])
+        # Kein beschreibender Titel mehr: was die Karte zeigt, steht an der
+        # Farbskala ($U_h$, $\eta_w$, ...), und der Kennbuchstabe erlaubt den
+        # Verweis aus der Bildunterschrift.
+        ax.set_title(PANEL_TAGS[nummer] if nummer < len(PANEL_TAGS) else "")
         if fit_line is not None:
             draw_valley_marks_on_map(ax, valley, fit_line, win_axis, marks)
             draw_fit_line_on_map(ax, results, fit_line, win_axis, marks)
@@ -1095,26 +1117,37 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
             # holt sich aber nur die erste - sonst steht "Working point"
             # sechsmal in der gemeinsamen Legende.
             draw_best_point_marker(ax, results, win_axis, legend=False,
-                                   label=(ax is axes.flat[0]), best=best_point)
-    # Uebrig bleibt damit hoechstens die Ausgleichsgerade - ein Eintrag,
-    # einmal unter der ganzen Figur statt vier Kaesten mitten in den Karten.
-    for ax in axes[-1, :]:
-        ax.set_xlabel(x_label)
+                                   label=True, best=best_point)
+        # Legende IN der Karte, unten rechts: dort liegt bei allen Datensaetzen
+        # der verbotene Bereich, also ohnehin keine Information. Der Hinweis
+        # auf die Schranke steht nur dort, wo es sie gibt.
+        legenden_h, legenden_l = ax.get_legend_handles_labels()
+        if panel.get('clamped'):
+            legenden_h.append(Patch(facecolor=R_CLAMP_COLOR, edgecolor="none"))
+            legenden_l.append(R_CLAMP_LABEL)
+        if legenden_h:
+            ax.legend(legenden_h, legenden_l, loc="lower right", framealpha=0.9)
+    # Jede Karte traegt ihre eigene x-Beschriftung und ihre eigenen Zahlen -
+    # so laesst sich ein einzelnes Teilbild zitieren, ohne dass der Leser zur
+    # untersten Zeile schauen muss. Dafuer die KURZE Form, sie steht sechsmal
+    # da. sharex blendet die Zahlen sonst in der oberen Zeile aus.
+    x_label_kurz = {WAIST_UM_LABEL: WAIST_UM_LABEL_SHORT,
+                    WIN_INPUT_LABEL: WIN_INPUT_LABEL_SHORT}.get(x_label, x_label)
+    for ax in axes.flat:
+        ax.set_xlabel(x_label_kurz)
+        ax.tick_params(labelbottom=True)
+    # Die y-Beschriftung bleibt an der linken Spalte.
     for ax in axes[:, 0]:
         ax.set_ylabel(WIDTH_LABEL)
 
-    handles, labels = axes.flat[0].get_legend_handles_labels()
-    if any(p.get('clamped') for p in panels):
-        # Das Grau erklaert sich nicht von selbst - ein Eintrag in der
-        # ohnehin vorhandenen gemeinsamen Legende, kein zweiter Kasten.
-        handles.append(Patch(facecolor=R_CLAMP_COLOR, edgecolor="none"))
-        labels.append(R_CLAMP_LABEL)
-    if handles:
-        fig.legend(handles, labels, loc="outside lower center",
-                   ncol=legend_ncol(labels), framealpha=0.9)
     dateiname = (f"{prefix}_metric_comparison_amp.pdf" if with_amplitudes
                  else f"{prefix}_metric_comparison.pdf")
-    return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite)
+    # tight=False: die Datei soll exakt die eingestellten 16 cm breit sein.
+    # Mit bbox_inches="tight" kaemen rund 16.3 cm heraus, und
+    # \includegraphics[width=\textwidth] wuerde die Figur um 2 % schrumpfen -
+    # dann stimmen die Schriftgroessen nicht mehr mit dem Fliesstext ueberein.
+    return _finish(fig, out_dir, dateiname, save, show, confirm_overwrite,
+                   tight=False)
 
 
 @_mit_stil
@@ -4004,7 +4037,7 @@ def koordinaten_label(axis, wert):
         return r"width = %.3f MHz" % float(wert)
     if axis == "waist_mm":
         return r"%s = %.3f mm" % (WIN_INPUT_SYMBOL, float(wert))
-    return r"%s = %.2f $\mu$m" % (WAIST_UM_SYMBOL, float(wert))
+    return r"%s = %.2f µm" % (WAIST_UM_SYMBOL, float(wert))
 
 
 def working_point_axis_label(best, axis):

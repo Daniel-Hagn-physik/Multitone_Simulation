@@ -1,6 +1,6 @@
 # 3x4, waist 1.04 um, width 0.37 MHz, r_x 0.97, r_y 1.16, airy
 # Spannweite Tonarray d = 2.3370 um, sigma_atom = 107.6 nm, Richtung x
-r_um,r_pro_halbe_spannweite,uniformity_weighted_prozent,crosstalk_weighted_prozent
+r_um,r_pro_halbe_spannweite,U_w_prozent,eta_w_prozent
 0,0,0.429236,1.39813
 0.0292125,0.025,0.443581,1.40562
 0.0584251,0.05,0.483427,1.42798

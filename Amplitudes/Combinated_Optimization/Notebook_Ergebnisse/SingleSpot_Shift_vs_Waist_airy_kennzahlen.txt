@@ -1,0 +1,33 @@
+RECHENRASTER
+  Karte          61 x 61 Punkte
+  d_omega        29.2 nm   (0.75 .. 2.5 um)
+  d_r            41.7 nm   (0.0 .. 2.5 um)
+  Schnitt        201 Punkte, d_r = 9.5 nm
+  sigma_atom     107.6 nm
+  Sub-Gitter     241 x 241 ueber +-6 sigma  ->  Zelle 5.4 nm
+
+EXTREMWERTE (ganze Karte)
+  U_w   min       0.6163 %   bei omega = 2.500 um, r = 0.000 um
+  U_w   max        180.3 %   bei omega = 0.750 um, r = 1.083 um
+  eta_w min      0.04526 %   bei omega = 0.838 um, r = 0.000 um
+  eta_w max         1640 %   bei omega = 1.683 um, r = 2.500 um
+
+INNERHALB DER GRENZE  r <= omega
+  U_w   min       0.6163 %   bei omega = 2.500 um, r = 0.000 um
+  U_w   max        65.47 %   bei omega = 0.750 um, r = 0.750 um
+  eta_w min      0.04526 %   bei omega = 0.838 um, r = 0.000 um
+  eta_w max        76.11 %   bei omega = 2.500 um, r = 2.500 um
+
+OHNE VERSATZ  (r = 0)
+  U_w   min       0.6163 %   bei omega = 2.500 um
+  U_w   max        6.579 %   bei omega = 0.750 um
+  eta_w min      0.04526 %   bei omega = 0.838 um
+  eta_w max        7.228 %   bei omega = 2.500 um
+
+SCHNITT BEI  omega = 1.9 um
+  U_w   bei r = 0             1.064 %
+  U_w   bei r = omega         27.76 %
+  U_w   max                   27.76 %   bei r = 1.900 um
+  eta_w bei r = 0            0.1523 %
+  eta_w bei r = omega          19.8 %
+  eta_w max                    19.8 %   bei r = 1.900 um
