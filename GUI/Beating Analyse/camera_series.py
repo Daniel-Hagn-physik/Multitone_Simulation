@@ -52,6 +52,12 @@ best-matching frame, found by maximising the correlation over the frames of
 the series - and over a small pixel shift, so that a slightly off-centre cut
 does not spoil the number.
 
+Below the figure, besides the correlation and U, the PEAK-TO-VALLEY of both
+panels (peak_to_valley()): (I_peak - I_valley)/<I> in the central part of the
+plateau, peak and valley as high/low percentiles so that dust and dead pixels
+do not set them. Same region rule and percentile for simulation and
+measurement; both go into the saved report.
+
 The figure is saved at 16 cm width with 10 pt type (kern/plotstil.py), i.e.
 it goes into LaTeX with \\includegraphics[width=\\textwidth] unscaled.
 """
@@ -256,6 +262,53 @@ def best_alignment(sim, meas, rmax=6):
             if r > best[0]:
                 best = (r, dr, dc)
     return best
+
+
+def peak_to_valley(img, core=0.70, q=0.5):
+    """Peak-to-valley in the plateau of one panel.
+
+    Region: the bounding box of everything above half the maximum, shrunk
+    about its centre to the fraction `core` of its width and height. The
+    shrinking is the point - without it the valley would sit on the edge
+    slope of the flat-top, and the number would measure the edge, not the
+    ripple on the plateau. Same rule for simulation and measurement, so both
+    numbers come from the same part of their profile.
+
+    Peak and valley are the (100-q) and q percentiles of that region, not the
+    bare max and min: a single hot or dead pixel (or a speck of dust on the
+    sensor) must not set the number. q = 0 gives the plain max and min.
+
+        PV        = (I_peak - I_valley) / <I>      main number, in %
+        contrast  = (I_peak - I_valley) / (I_peak + I_valley)
+
+    Both are independent of the absolute scale, like everything in the
+    comparison. Returns a dict, or None for an empty panel.
+    """
+    img = np.asarray(img, float)
+    mx = float(img.max()) if img.size else 0.0
+    if mx <= 0:
+        return None
+    half = img > 0.5 * mx
+    rows = np.where(half.any(1))[0]
+    cols = np.where(half.any(0))[0]
+    if rows.size == 0 or cols.size == 0:
+        return None
+    rc = 0.5 * (rows[0] + rows[-1])
+    cc = 0.5 * (cols[0] + cols[-1])
+    hh = max(0.5, 0.5 * (rows[-1] - rows[0] + 1) * core)
+    hw = max(0.5, 0.5 * (cols[-1] - cols[0] + 1) * core)
+    r0, r1 = int(round(rc - hh + 0.5)), int(round(rc + hh + 0.5))
+    c0, c1 = int(round(cc - hw + 0.5)), int(round(cc + hw + 0.5))
+    v = img[r0:r1, c0:c1].ravel()
+    if v.size == 0:
+        return None
+    pk = float(np.percentile(v, 100.0 - q))
+    va = float(np.percentile(v, q))
+    mean = float(v.mean())
+    return dict(pv=(pk - va) / mean if mean > 0 else float("nan"),
+                contrast=(pk - va) / (pk + va) if pk + va > 0 else float("nan"),
+                peak=pk / mx, valley=va / mx, mean=mean / mx, n=int(v.size),
+                box=(r0, r1, c0, c1))
 
 
 class CameraSeriesDialog(QDialog):
@@ -619,6 +672,32 @@ class CameraSeriesDialog(QDialog):
         for w in (self.cb_align, self.cb_labels, self.cb_cuts):
             w.stateChanged.connect(lambda *_: self._refresh_cmp())
 
+        # peak-to-valley on the plateau, same rule for both panels
+        self.sp_pv_core = QDoubleSpinBox()
+        self.sp_pv_core.setRange(0.10, 1.00); self.sp_pv_core.setDecimals(2)
+        self.sp_pv_core.setSingleStep(0.05); self.sp_pv_core.setValue(0.70)
+        self.sp_pv_core.setPrefix("x ")
+        self.sp_pv_core.setToolTip(
+            "Region for the peak-to-valley: the box around everything above\n"
+            "half maximum, shrunk to this fraction of its width and height.\n"
+            "1.00 takes the whole box - then the valley sits on the edge slope\n"
+            "and the number says more about the edge than about the plateau.")
+        self.sp_pv_q = QDoubleSpinBox()
+        self.sp_pv_q.setRange(0.0, 10.0); self.sp_pv_q.setDecimals(2)
+        self.sp_pv_q.setSingleStep(0.1); self.sp_pv_q.setValue(0.50)
+        self.sp_pv_q.setSuffix(" %")
+        self.sp_pv_q.setToolTip(
+            "Peak and valley are the (100 - q) and q percentiles of the region,\n"
+            "so that a single hot or dead pixel or a speck of dust on the\n"
+            "sensor does not set the number. 0 = plain max and min.")
+        self.cb_pv_mark = QCheckBox("mark P-V region")
+        self.cb_pv_mark.setToolTip(
+            "Draws the region of the peak-to-valley as a dashed box into both\n"
+            "panels (also into the saved PDF).")
+        for w in (self.sp_pv_core, self.sp_pv_q):
+            w.valueChanged.connect(lambda *_: self._refresh_cmp())
+        self.cb_pv_mark.stateChanged.connect(lambda *_: self._refresh_cmp())
+
         btn_cmp = QPushButton("Show comparison")
         btn_cmp.clicked.connect(self._open_compare)
         btn_cmp.setToolTip("Opens the figure; the PDF is saved from there.")
@@ -641,6 +720,12 @@ class CameraSeriesDialog(QDialog):
             if name:
                 lay.addWidget(QLabel(name), 2, 2 * i)
             lay.addWidget(w, 2, 2 * i + 1)
+        r3 = [("peak-to-valley region", self.sp_pv_core),
+              ("percentile", self.sp_pv_q), ("", self.cb_pv_mark)]
+        for i, (name, w) in enumerate(r3):
+            if name:
+                lay.addWidget(QLabel(name), 3, 2 * i)
+            lay.addWidget(w, 3, 2 * i + 1)
         lay.addWidget(btn_cmp, 0, 2, 1, 4)
         return g
 
@@ -765,6 +850,11 @@ class CameraSeriesDialog(QDialog):
         u_sim, n_sim = _u(panel)
         u_meas, n_meas = _u(meas_shown)
 
+        # peak-to-valley, same region rule and same percentile for both
+        core, q = self.sp_pv_core.value(), self.sp_pv_q.value()
+        pv_sim = peak_to_valley(panel, core, q)
+        pv_meas = peak_to_valley(meas_shown, core, q)
+
         mode = self.cmb_panel.currentText()
         sim_name = name if k <= 0 or k > 1 else (
             "%s -> %s (t_0 = %.1f us)" % (mode, name, t0 * 1e6))
@@ -772,6 +862,7 @@ class CameraSeriesDialog(QDialog):
                     sim_name=sim_name, t0=t0, r=r, dr=dr, dc=dc,
                     r_best=best[3], t0_best=best[2], r_avg=scored[0][3],
                     u_sim=u_sim, u_meas=u_meas, n_sim=n_sim, n_meas=n_meas,
+                    pv_sim=pv_sim, pv_meas=pv_meas, pv_core=core, pv_q=q,
                     t_exp=L["t_exp"], T0=L["T0"], f0=L["f0"],
                     margin=margin, sat=self._meas_sat,
                     file=self._meas_path, note=self._meas_note)
@@ -807,6 +898,14 @@ class CameraSeriesDialog(QDialog):
             a.set_xticks([]); a.set_yticks([])
             for sp in a.spines.values():
                 sp.set_linewidth(0.6)
+        if self.cb_pv_mark.isChecked():
+            from matplotlib.patches import Rectangle
+            for a, P in ((ax0, D["pv_sim"]), (ax1, D["pv_meas"])):
+                if P is None:
+                    continue
+                r0, r1, c0, c1 = P["box"]
+                a.add_patch(Rectangle((c0 - 0.5, r0 - 0.5), c1 - c0, r1 - r0,
+                                      fill=False, ec="w", lw=0.8, ls="--"))
         cb = fig.colorbar(im, ax=[ax0, ax1], orientation="horizontal",
                           fraction=0.055, pad=0.03, aspect=45)
         # Each panel is normalised to its own maximum - that belongs in the
@@ -862,10 +961,31 @@ class CameraSeriesDialog(QDialog):
         return ("Correlation with the shown panel r = %.3f (time average "
                 "%.3f, best frame %.3f at t_0 = %.1f us).%s\n"
                 "U = std/mean above half maximum: simulation %.1f %% over "
-                "%d px, measurement %.1f %% over %d px.%s"
+                "%d px, measurement %.1f %% over %d px.%s\n%s"
                 % (D["r"], D["r_avg"], D["r_best"], D["t0_best"] * 1e6, sh,
                    100 * D["u_sim"], D["n_sim"], 100 * D["u_meas"],
-                   D["n_meas"], sat))
+                   D["n_meas"], sat, self.pv_text(D)))
+
+    @staticmethod
+    def pv_text(D):
+        """The peak-to-valley line - simulation and measurement side by side."""
+        S, M = D["pv_sim"], D["pv_meas"]
+        if S is None or M is None:
+            return "Peak-to-valley: not available (empty panel)."
+
+        def one(P):
+            return ("%.1f %% (peak %.3f, valley %.3f, mean %.3f of max; "
+                    "contrast %.1f %%; %d px)"
+                    % (100 * P["pv"], P["peak"], P["valley"], P["mean"],
+                       100 * P["contrast"], P["n"]))
+        ratio = M["pv"] / S["pv"] if S["pv"] > 0 else float("nan")
+        return ("Peak-to-valley (I_p - I_v)/<I>, p%g/p%g in the central "
+                "%.0f %% of the plateau:\n"
+                "  simulation  %s\n"
+                "  measurement %s\n"
+                "  measurement / simulation = %.2f"
+                % (100 - D["pv_q"], D["pv_q"], 100 * D["pv_core"],
+                   one(S), one(M), ratio))
 
     def fig_size(self):
         """Width and height of the comparison figure in inch.
@@ -926,6 +1046,9 @@ class CameraSeriesDialog(QDialog):
                         % D["margin"]) if self.cb_crop.isChecked()
              else "full frames"),
             ("simulated panel", D["sim_name"]),
+            ("peak-to-valley region", "central %.0f %% (width and height) of "
+             "the box above half maximum, peak/valley = p%g/p%g"
+             % (100 * D["pv_core"], 100 - D["pv_q"], D["pv_q"])),
             ("N_x x N_y", "%d x %d" % (s["N_x"], s["N_y"])),
             ("width_x / width_y", "%.6f / %.6f MHz"
              % (s["width_x"] * 1e-6, s["width_y"] * 1e-6)),
