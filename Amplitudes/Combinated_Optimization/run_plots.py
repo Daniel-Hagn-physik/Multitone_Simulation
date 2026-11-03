@@ -70,7 +70,56 @@ from lib import combine, hard_check, report  # noqa: E402
 #   PKL_DATEI = "scan_amp_data_combined_N3x4_21x21pts_Airy.pkl"
 #   PKL_DATEI = r"C:\...\Results\hard_check_N3x4_10x10pts_Airy.pkl"
 #
-PKL_DATEI = ""
+PKL_DATEI = "1.483_w_interference/scan_amp_data_combined_N3x4_41x41pts_Airy_interfereence.pkl"
+# ======================================================================
+
+
+# ======================================================================
+# STANDARD-EINSTELLUNGEN JE DATENSATZ
+# ======================================================================
+# Wird ein Datensatz gewaehlt, dessen Dateiname hier steht, setzt der Dialog
+# diese Einstellungen automatisch. Alles laesst sich danach im Dialog noch
+# aendern. Nicht genannte Felder behalten ihren Wert.
+#
+# Schluessel: win_axis, legend_fontsize, draw_best_point, fit_line_on_maps,
+# amplitude_maps, amp_layout, plot_amplitudes, do_valley, valley_axis,
+# valley_path_mode, valley_follow, valley_select, valley_guide_follow,
+# valley_guide_halfwidth, valley_fit_line, valley_legend_placement, map_marks (dict, Schluessel wie
+# report.MAP_MARK_KEYS), valley_limit (None oder ((waist_von, waist_bis) in µm,
+# (width_von, width_bis) in MHz)), forbidden_draw, forbidden_exclude,
+# forbidden_factor, do_recombine, working_point_width_mhz (Arbeitspunkt im
+# Bericht, Width in MHz, Waist aus der Geraden; None/0 = aus).
+DATASET_PRESETS = {
+    # Stand Bericht 2026-09-18 (Gerade width/MHz = 0.3142 * waist/µm + 0.0420,
+    # Arbeitspunkt 0.37 MHz -> 1.044 µm). Erzeugt
+    #   ..._line_penalty_raw_over_waist_um.pdf  J_c-Karte + Schnitt entlang der Geraden
+    #   ..._metric_cuts_U_eta.pdf               U_h, U_w, Schnitt / eta_h, eta_w, Schnitt
+    #   ..._metric_cuts_r.pdf                   r_x, r_y, Schnitt
+    "scan_amp_data_combined_N3x4_41x41pts_Airy_interfereence.pkl": dict(
+        win_axis="after_lens",
+        legend_fontsize=9,
+        draw_best_point=False,
+        fit_line_on_maps=False,
+        amplitude_maps=True,
+        amp_layout="cuts",
+        plot_amplitudes=False,
+        do_valley=True,
+        valley_axis="waist_um",
+        valley_path_mode="line",
+        valley_follow="penalty_raw",
+        valley_select="guided",
+        valley_guide_follow="uniformity_weighted",
+        valley_guide_halfwidth=0.03,
+        valley_fit_line=True,
+        valley_legend_placement="inside",
+        valley_limit=((0.7871, 1.3), (0.28, 0.45)),
+        forbidden_draw=False,
+        forbidden_exclude=True,
+        forbidden_factor=2.0,
+        do_recombine=False,
+        working_point_width_mhz=0.37,
+    ),
+}
 # ======================================================================
 
 
@@ -207,6 +256,26 @@ class PlotsDialog(QDialog):
             "NICHT zu verwechseln mit dem Haken darunter: der erzeugt die\n"
             "PNG-Uebersicht und die Schnitte des AmplitudeScanPlotter.")
         display_layout.addRow(self.amplitude_maps)
+        self.amp_layout = QComboBox()
+        for _key, _label in report.AMP_LAYOUT_CHOICES:
+            self.amp_layout.addItem(_label)
+        self.amp_layout.setCurrentIndex(
+            [k for k, _l in report.AMP_LAYOUT_CHOICES].index(report.AMP_LAYOUT_DEFAULT))
+        self.amp_layout.setToolTip(
+            "Wie die Uebersicht mit Amplituden aussieht.\n\n"
+            "Neu (Standard): zwei PDFs, je Groesse die Karten und ganz rechts der\n"
+            "Schnitt entlang der Fit-Geraden -\n"
+            "  ..._metric_cuts_U_eta.pdf  Zeile U: U_h, U_w, Schnitt / Zeile eta: eta_h, eta_w, Schnitt\n"
+            "  ..._metric_cuts_r.pdf      r_x, r_y, Schnitt\n"
+            "Width als W in µm, Colorbars ueber den Karten, 16 cm breit.\n"
+            "Die Gerade ist dieselbe wie im Talschnitt (Groesse fuer Talpfad/\n"
+            "Gerade, Auswahl der Talpunkte, Suchbereich).\n\n"
+            "Alt: das bisherige 2x3-Raster ..._metric_comparison_amp.pdf.\n"
+            "Gibt es keine brauchbare Gerade, wird automatisch das alte Raster\n"
+            "gezeichnet (Hinweis auf der Konsole).")
+        self.amplitude_maps.toggled.connect(self.amp_layout.setEnabled)
+        self.amp_layout.setEnabled(self.amplitude_maps.isChecked())
+        display_layout.addRow("Layout mit Amplituden:", self.amp_layout)
         self.plot_amplitudes = QCheckBox("Amplituden-Uebersicht und Schnitte mitzeichnen")
         self.plot_amplitudes.setChecked(True)
         self.plot_amplitudes.setToolTip(
@@ -216,6 +285,14 @@ class PlotsDialog(QDialog):
         display_layout.addRow(self.plot_amplitudes)
         self.show_interactive = QCheckBox("Plots zusaetzlich interaktiv anzeigen")
         display_layout.addRow(self.show_interactive)
+        self.working_point_width = self._make_spin(0.0, 0.0, 10.0, 0.005, decimals=4)
+        self.working_point_width.setToolTip(
+            "Arbeitspunkt fuer den Bericht: Width in MHz, der Waist kommt aus der\n"
+            "Talpfad-Geraden. Der Bericht bekommt dann den Abschnitt\n"
+            "'Arbeitspunkt - Zusammenfassung' mit allen Werten und Unsicherheiten.\n"
+            "0 = aus. Braucht den Talschnitt mit Gerade.")
+        display_layout.addRow("Arbeitspunkt bei Width (MHz, 0 = aus):",
+                              self.working_point_width)
         display_group.setLayout(display_layout)
         main_layout.addWidget(display_group)
 
@@ -893,6 +970,10 @@ class PlotsDialog(QDialog):
             self.file_combo.addItem(pfad.name, userData=str(pfad))
         self.file_combo.blockSignals(False)
 
+        if not dateien and PKL_DATEI:
+            # PKL_DATEI darf auch in einem Unterordner von Results/ liegen.
+            self._select_path(PKL_DATEI)
+            return
         if not dateien:
             self.input_info.setText(
                 f"In {paths.DEFAULT_RESULTS_DIR} liegen keine .pkl-Dateien. "
@@ -914,7 +995,11 @@ class PlotsDialog(QDialog):
         falls er nicht aus Results/ stammt."""
         kandidat = FilePath(pfad)
         if not kandidat.is_absolute() and not kandidat.exists():
-            kandidat = paths.DEFAULT_RESULTS_DIR / kandidat.name
+            # Erst relativ zu Results/ (auch mit Unterordner), dann nur
+            # der Dateiname direkt in Results/.
+            mit_ordner = paths.DEFAULT_RESULTS_DIR / kandidat
+            kandidat = (mit_ordner if mit_ordner.exists()
+                        else paths.DEFAULT_RESULTS_DIR / kandidat.name)
         ziel = str(kandidat)
 
         for index in range(self.file_combo.count()):
@@ -968,6 +1053,84 @@ class PlotsDialog(QDialog):
         self._sync_forbidden_state()
         self._fill_best_point_combo()
         self._fill_valley_limit()
+        self._apply_preset(FilePath(path).name)
+
+    def _apply_preset(self, dateiname):
+        """Standard-Einstellungen aus DATASET_PRESETS setzen, falls es fuer
+        diesen Datensatz welche gibt."""
+        v = DATASET_PRESETS.get(dateiname)
+        if not v:
+            return
+
+        def _combo(combo, choices, key, pos=0):
+            keys = [c[pos] for c in choices]
+            if key in keys:
+                combo.setCurrentIndex(keys.index(key))
+
+        def _check(box, name):
+            if name in v:
+                box.setChecked(bool(v[name]))
+
+        if "win_axis" in v:
+            _combo(self.win_axis, WIN_AXIS_CHOICES, v["win_axis"], pos=1)
+        if "legend_fontsize" in v:
+            self.legend_fontsize.setValue(float(v["legend_fontsize"]))
+        _check(self.draw_best_point, "draw_best_point")
+        _check(self.fit_line_on_maps, "fit_line_on_maps")
+        _check(self.amplitude_maps, "amplitude_maps")
+        if "amp_layout" in v:
+            _combo(self.amp_layout, report.AMP_LAYOUT_CHOICES, v["amp_layout"])
+        _check(self.plot_amplitudes, "plot_amplitudes")
+        _check(self.do_valley, "do_valley")
+        # Achse vor dem Pfadmodus: "Gerade" ist nur bei der µm-Achse waehlbar.
+        if "valley_axis" in v:
+            _combo(self.valley_axis, report.VALLEY_AXIS_CHOICES, v["valley_axis"])
+        if "valley_path_mode" in v:
+            _combo(self.valley_path_mode, report.PATH_MODE_CHOICES, v["valley_path_mode"])
+        if "valley_follow" in v:
+            _combo(self.valley_follow, report.FOLLOW_CHOICES, v["valley_follow"])
+        if "valley_select" in v:
+            _combo(self.valley_select, report.VALLEY_SELECT_CHOICES, v["valley_select"])
+        if "valley_guide_follow" in v:
+            _combo(self.valley_guide_follow, report.FOLLOW_CHOICES, v["valley_guide_follow"])
+        if "valley_guide_halfwidth" in v:
+            self.valley_guide_halfwidth.setValue(float(v["valley_guide_halfwidth"]))
+        if "valley_fit_line" in v:
+            self._fit_line_gemerkt = bool(v["valley_fit_line"])
+            if self.valley_fit_line.isEnabled():
+                self.valley_fit_line.setChecked(bool(v["valley_fit_line"]))
+        if "valley_legend_placement" in v:
+            _combo(self.valley_legend_place, report.VALLEY_LEGEND_CHOICES,
+                   v["valley_legend_placement"])
+        for key, an in (v.get("map_marks") or {}).items():
+            if key in self.mark_boxes:
+                self.mark_boxes[key].setChecked(bool(an))
+        if "valley_limit" in v:
+            grenzen = v["valley_limit"]
+            if grenzen is None:
+                self.valley_limit.setChecked(False)
+                self._fill_valley_limit()
+            else:
+                (w0, w1), (h0, h1) = grenzen
+                self.waist_von.setValue(float(w0))
+                self.waist_bis.setValue(float(w1))
+                self.width_von.setValue(float(h0))
+                self.width_bis.setValue(float(h1))
+                self.valley_limit.setChecked(True)
+        _check(self.forbidden_draw, "forbidden_draw")
+        _check(self.forbidden_exclude, "forbidden_exclude")
+        if "forbidden_factor" in v:
+            self.forbidden_factor.setValue(float(v["forbidden_factor"]))
+        _check(self.do_recombine, "do_recombine")
+        if "working_point_width_mhz" in v:
+            self.working_point_width.setValue(float(v["working_point_width_mhz"] or 0.0))
+        self._sync_valley_fit_state()
+        self._sync_guide_state()
+        self._sync_valley_limit()
+        self._sync_forbidden_state()
+        self._sync_valley_options()
+        self.input_info.setText(self.input_info.text()
+                                + "\nStandard-Einstellungen fuer diesen Datensatz gesetzt.")
 
     def _on_draw_best_point_toggled(self, an):
         self.best_point_follow.setEnabled(bool(an))
@@ -1073,6 +1236,8 @@ class PlotsDialog(QDialog):
             best_point_value=self.best_point_value.value(),
             fit_line_on_maps=self.fit_line_on_maps.isChecked(),
             amplitude_maps=self.amplitude_maps.isChecked(),
+            amp_layout=report.AMP_LAYOUT_CHOICES[
+                self.amp_layout.currentIndex()][0],
             plot_amplitudes=self.plot_amplitudes.isChecked(),
             show=self.show_interactive.isChecked(),
             do_recombine=self.do_recombine.isChecked(),
@@ -1100,6 +1265,7 @@ class PlotsDialog(QDialog):
             valley_guide_halfwidth=self.valley_guide_halfwidth.value(),
             valley_waist_range=self._current_valley_ranges()[0],
             valley_width_range=self._current_valley_ranges()[1],
+            working_point_width_mhz=(self.working_point_width.value() or None),
             forbidden_draw=self.forbidden_draw.isChecked(),
             forbidden_exclude=self.forbidden_exclude.isChecked(),
             forbidden_factor=self.forbidden_factor.value(),
@@ -1164,6 +1330,7 @@ def main():
             best_point_value=params["best_point_value"],
             fit_line_on_maps=params["fit_line_on_maps"],
             amplitude_maps=params["amplitude_maps"],
+            amp_layout=params["amp_layout"],
             forbidden_factor=(params["forbidden_factor"]
                               if (params["forbidden_draw"] or params["forbidden_exclude"])
                               else None),
@@ -1184,6 +1351,7 @@ def main():
             valley_guide_halfwidth=params["valley_guide_halfwidth"],
             valley_waist_range=params["valley_waist_range"],
             valley_width_range=params["valley_width_range"],
+            working_point_width_mhz=params["working_point_width_mhz"],
             valley_legend_placement=params["valley_legend_placement"],
             panel_legend_placement=params["panel_legend_placement"],
         )

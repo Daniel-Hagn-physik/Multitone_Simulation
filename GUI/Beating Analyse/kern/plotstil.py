@@ -43,7 +43,12 @@ def style_figure(fig, pt=FONT_PT):
     Achsenende, freie Texte und Legenden - auch die der Colorbar, denn deren
     Achse steht mit in ``fig.get_axes()``.
     """
-    for ax in fig.get_axes():
+    # Inset axes (z. B. eine Colorbar per ax.inset_axes) stehen nicht in
+    # fig.get_axes(), sondern in ax.child_axes - die gehoeren mit dazu.
+    axes = []
+    for a in fig.get_axes():
+        axes += [a] + list(getattr(a, "child_axes", []))
+    for ax in axes:
         ax.title.set_fontsize(pt)
         ax.xaxis.label.set_fontsize(pt)
         ax.yaxis.label.set_fontsize(pt)
@@ -60,3 +65,76 @@ def style_figure(fig, pt=FONT_PT):
     for txt in fig.texts:
         txt.set_fontsize(pt)
     return fig
+
+
+_LM_FAMILY = "Latin Modern Roman"
+
+
+def latex_rc():
+    """rcParams fuer gespeicherte Abbildungen: dieselbe Schrift wie die
+    Flattop-Exporte (Weighted_Multitone_Lens_GUI.py, _rows_export_rc) -
+    Latin Modern Roman fuer Text und Zahlen, Computer Modern fuer Formeln.
+
+    Gesucht wird lmroman10-*.otf in den ueblichen MiKTeX-/TeX-Live-Ordnern;
+    registriert wird nur die 10-pt-Optikgroesse. Fehlt die Schrift, bleibt
+    es bei serif + Computer-Modern-Mathematik.
+
+    Benutzung: ``with matplotlib.rc_context(latex_rc()):`` um das Anlegen,
+    Zeichnen UND Speichern der Figure - die Schrift wird beim Anlegen der
+    Texte festgelegt, nicht erst beim Speichern.
+    """
+    import glob
+    import os
+    from matplotlib import font_manager as fm
+    rc = {"font.family": "serif", "mathtext.fontset": "cm",
+          "pdf.fonttype": 42, "ps.fonttype": 42, "axes.unicode_minus": False}
+    try:
+        has_10 = any(f.name == _LM_FAMILY
+                     and "lmroman10" in os.path.basename(f.fname).lower()
+                     for f in fm.fontManager.ttflist)
+        if not has_10:
+            local = os.environ.get("LOCALAPPDATA", "")
+            patterns = [
+                r"C:\Program Files\MiKTeX*\fonts\opentype\public\lm\lmroman10-*.otf",
+                os.path.join(local, "Programs", "MiKTeX", "fonts", "opentype",
+                             "public", "lm", "lmroman10-*.otf"),
+                r"C:\texlive\*\texmf-dist\fonts\opentype\public\lm\lmroman10-*.otf",
+                os.path.join(local, "Microsoft", "Windows", "Fonts", "lmroman10-*.otf"),
+                r"C:\Windows\Fonts\lmroman10-*.otf",
+                "/usr/share/texmf/fonts/opentype/public/lm/lmroman10-*.otf",
+                "/usr/share/texlive/texmf-dist/fonts/opentype/public/lm/lmroman10-*.otf",
+                "/usr/local/texlive/*/texmf-dist/fonts/opentype/public/lm/lmroman10-*.otf",
+                "/Library/TeX/Root/texmf-dist/fonts/opentype/public/lm/lmroman10-*.otf",
+            ]
+            for pat in patterns:
+                for path in glob.glob(pat):
+                    fm.fontManager.addfont(path)
+        # andere Optikgroessen derselben Familie aus der Auswahl nehmen
+        fm.fontManager.ttflist = [
+            f for f in fm.fontManager.ttflist
+            if not (f.name == _LM_FAMILY
+                    and "lmroman10" not in os.path.basename(f.fname).lower())]
+        if any(f.name == _LM_FAMILY for f in fm.fontManager.ttflist):
+            rc["font.family"] = _LM_FAMILY
+            rc["axes.unicode_minus"] = True      # echtes Minus, LM hat es
+    except Exception:
+        pass
+    return rc
+
+
+# Fuer Bild-Plots (Karten, Profile): Ticks nach aussen, nur unten/links,
+# keine Nebenstriche - auch auf der Colorbar. Fest eingestellt, damit eine
+# matplotlibrc mit Ticks nach innen/rundum das Bild nicht verdeckt.
+IMAGE_RC = {
+    "xtick.direction": "out", "ytick.direction": "out",
+    "xtick.top": False, "ytick.right": False,
+    "xtick.bottom": True, "ytick.left": True,
+    "xtick.minor.visible": False, "ytick.minor.visible": False,
+}
+
+
+def image_rc():
+    """latex_rc() plus IMAGE_RC - fuer gespeicherte Bild-Plots."""
+    rc = latex_rc()
+    rc.update(IMAGE_RC)
+    return rc

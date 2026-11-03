@@ -152,7 +152,7 @@ from kern.beating_physik import (
     optimise_symmetric_centre, build_field_stack,
     aod_drive, dbm_to_w,
 )
-from kern.plotstil import FIG_WIDTH_IN, style_figure
+from kern.plotstil import FIG_WIDTH_IN, style_figure, latex_rc, image_rc
 
 try:
     import one_lens_design
@@ -2127,7 +2127,7 @@ class BeatingMultitoneWindow(QMainWindow):
         self.ax_st.plot(t_p * 1e6, none * 100, color="#1b1b1b", ls=":", lw=1.6,
                         label=f"untriggered (contrast {ct(none):.0f} %)")
         self.ax_st.axvline(pz["t_p"] * 1e6, color="#888", lw=0.9)
-        self.ax_st.set_xlabel(r"pulse length ($\mathrm{\mu}$s)", fontsize=8)
+        self.ax_st.set_xlabel(r"pulse length (µs)", fontsize=8)
         self.ax_st.set_ylabel("excitation (%)", fontsize=8)
         eta = self.state["eta_ls"]
         cap = ("" if eta <= 0 else
@@ -2327,12 +2327,26 @@ class BeatingMultitoneWindow(QMainWindow):
         # Platz fuer Titel und x-Beschriftung - dann steht der Titel direkt
         # ueber dem Bild und unten bleibt kein leeres Band.
         W_CM, LEFT, RIGHT, WSPACE = FIG_WIDTH_IN * 2.54, 0.108, 0.878, 0.12
-        TOP_CM, BOT_CM = 0.62, 1.25
+        TOP_CM, BOT_CM = 0.25, 1.25   # kein Titel mehr ueber den Panels
         panel_w_cm = W_CM * (RIGHT - LEFT) / (3.0 + 2.0 * WSPACE)
         asp = (y_um[-1] - y_um[0]) / max(x_um[-1] - x_um[0], 1e-12)
         panel_h_cm = panel_w_cm * min(max(asp, 0.4), 1.8)
         h_cm = TOP_CM + panel_h_cm + BOT_CM
 
+        # Schrift hier selbst setzen, nicht nur beim Aufrufer - die Texte
+        # bekommen ihre Schrift beim Anlegen.
+        _font_rc = matplotlib.rc_context(image_rc())
+        _font_rc.__enter__()
+        try:
+            self._period_figure(path, c, idx, labels, gname, mean_I, vmax,
+                                extent, x_um, y_um, h_cm, LEFT, RIGHT,
+                                WSPACE, TOP_CM, BOT_CM)
+        finally:
+            _font_rc.__exit__(None, None, None)
+
+    def _period_figure(self, path, c, idx, labels, gname, mean_I, vmax,
+                       extent, x_um, y_um, h_cm, LEFT, RIGHT, WSPACE,
+                       TOP_CM, BOT_CM):
         fig = Figure(figsize=(FIG_WIDTH_IN, h_cm / 2.54), dpi=100)
         FigureCanvas(fig)
         axes = fig.subplots(1, 3, sharex=True, sharey=True)
@@ -2340,9 +2354,11 @@ class BeatingMultitoneWindow(QMainWindow):
         for ax, k, lab in zip(axes, idx, labels):
             im = ax.imshow(c["cube"][k] / mean_I, extent=extent, origin="lower",
                            cmap="inferno", vmin=0.0, vmax=vmax, aspect="equal")
-            ax.set_title(r"%s   (%.2f $\mathrm{\mu}$s)" % (lab, c["t"][k] * 1e6))
-            ax.set_xlabel(r"$x$ ($\mathrm{\mu}$m)")
-        axes[0].set_ylabel(r"$y$ ($\mathrm{\mu}$m)")
+            # Zeitpunkt weiss oben links IM Bild statt als Titel darueber
+            ax.text(0.04, 0.96, lab, transform=ax.transAxes, ha="left",
+                    va="top", color="w")
+            ax.set_xlabel(r"$x$ (µm)")
+        axes[0].set_ylabel(r"$y$ (µm)")
         # Beide Achsen bekommen dieselben drei Marken: -t, 0, +t. Bei einem
         # Fenster von +-5 um sind das -4, 0, 4.
         t_tick = nice_symmetric_tick(0.85 * min(abs(x_um[0]), abs(x_um[-1]),
@@ -2352,8 +2368,12 @@ class BeatingMultitoneWindow(QMainWindow):
         axes[0].set_yticks([-t_tick, 0.0, t_tick])
         fig.subplots_adjust(left=LEFT, right=RIGHT, bottom=BOT_CM / h_cm,
                             top=1.0 - TOP_CM / h_cm, wspace=WSPACE)
-        cax = fig.add_axes([0.893, BOT_CM / h_cm, 0.016,
-                            1.0 - (TOP_CM + BOT_CM) / h_cm])
+        # Farbskala als Inset des rechten Panels in dessen Achsenkoordinaten:
+        # sie folgt damit exakt dem Bildkasten (aspect="equal"), oben und
+        # unten buendig, unabhaengig von Schrift, dpi und Figurhoehe.
+        # Abstand und Breite wie zuvor (0.24 cm Luecke, 0.26 cm breit).
+        pw_cm = FIG_WIDTH_IN * 2.54 * (RIGHT - LEFT) / (3.0 + 2.0 * WSPACE)
+        cax = axes[-1].inset_axes([1.0 + 0.24 / pw_cm, 0.0, 0.26 / pw_cm, 1.0])
         # Keine Pfeilspitze: die Skala reicht ueber alles, was in den drei
         # Bildern vorkommt, also gibt es nichts, was ueber sie hinausginge.
         cb = fig.colorbar(im, cax=cax)
@@ -2361,12 +2381,6 @@ class BeatingMultitoneWindow(QMainWindow):
         # quantity, same words, so nobody has to check whether they match.
         cb.set_label(r"$%s(t)\,/\,\langle %s\rangle_t$" % (gname, gname))
         style_figure(fig)
-        # Die Panels sind durch aspect="equal" niedriger als ihre Zelle. Erst
-        # zeichnen lassen, dann die Farbskala exakt auf die Kastenhoehe eines
-        # Panels setzen - sonst ragt sie oben und unten darueber hinaus.
-        fig.canvas.draw()
-        box = axes[-1].get_position()
-        cax.set_position([0.893, box.y0, 0.016, box.height])
         fig.savefig(path, format="pdf")
 
     def _crest_now(self):
@@ -2513,8 +2527,8 @@ class BeatingMultitoneWindow(QMainWindow):
                               label="frequency degenerate")
         self.ax_main.axhline(y_um[cut_row], color="cyan", lw=0.8, alpha=0.8)
         self.ax_main.axvline(x_um[cut_col], color="magenta", lw=0.8, alpha=0.8)
-        self.ax_main.set_xlabel(r"$x$ ($\mathrm{\mu}$m)")
-        self.ax_main.set_ylabel(r"$y$ ($\mathrm{\mu}$m)")
+        self.ax_main.set_xlabel(r"$x$ (µm)")
+        self.ax_main.set_ylabel(r"$y$ (µm)")
         T0_us = c["T0"] * 1e6
         per_lbl = (f"   ({t_us[k] / T0_us:.3f} $T_0$)" if np.isfinite(T0_us) and T0_us > 0
                    else "")
@@ -2547,8 +2561,8 @@ class BeatingMultitoneWindow(QMainWindow):
                               cmap="inferno", vmin=0.0, vmax=vmax,
                               extent=[x_um[0], x_um[-1], t_us[0], t_hi])
             self._art["st_cur"] = self.ax_st.axhline(t_us[k], color="w", lw=1.0)
-            self.ax_st.set_xlabel(r"$x$ ($\mathrm{\mu}$m)", fontsize=8)
-            self.ax_st.set_ylabel(r"$t$ ($\mathrm{\mu}$s)", fontsize=8)
+            self.ax_st.set_xlabel(r"$x$ (µm)", fontsize=8)
+            self.ax_st.set_ylabel(r"$t$ (µs)", fontsize=8)
             self.ax_st.set_title(f"Space-time map I(x, t) at y = {y_um[cut_row]:.3f} um",
                                  fontsize=9)
         elif panel == 8:
@@ -2568,7 +2582,7 @@ class BeatingMultitoneWindow(QMainWindow):
                 jt = pz["jitter"]
                 jtxt = ("no first-order sensitivity" if not np.isfinite(jt)
                         else f"{jt * 1e9:.0f} ns per 1 % area error")
-                self.ax_st.set_xlabel(r"pulse start $t_0$ ($\mathrm{\mu}$s)", fontsize=8)
+                self.ax_st.set_xlabel(r"pulse start $t_0$ (µs)", fontsize=8)
                 self.ax_st.set_ylabel("pulse area / mean", fontsize=8)
                 self.ax_st.set_title(
                     f"Pulse area over the start time   |   at the current $t_0$: {jtxt}",
@@ -2596,7 +2610,7 @@ class BeatingMultitoneWindow(QMainWindow):
                                     xytext=(6, 8), textcoords="offset points",
                                     fontsize=7, color="#2f6b45")
                 self.ax_st.axvline(pz["t0"] * 1e6, color="#b3402f", lw=1.4)
-                self.ax_st.set_xlabel(r"pulse start $t_0$ ($\mathrm{\mu}$s)", fontsize=8)
+                self.ax_st.set_xlabel(r"pulse start $t_0$ (µs)", fontsize=8)
                 self.ax_st.set_ylabel("U of the pulse area (%)", fontsize=8)
                 self.ax_st.set_title(
                     f"pi pulse {pz['t_p'] * 1e6:.2f} us   |   at t_0 = "
@@ -2644,7 +2658,7 @@ class BeatingMultitoneWindow(QMainWindow):
                                        min((pz_["t0"] + pz_["t_p"]) * 1e6, t_us[-1]),
                                        color="#3b6ea5", alpha=0.12, lw=0)
                 self._art["u_cur"] = self.ax_st.axvline(t_us[k], color="k", lw=0.9)
-                self.ax_st.set_xlabel(r"$t$ ($\mathrm{\mu}$s)", fontsize=8)
+                self.ax_st.set_xlabel(r"$t$ (µs)", fontsize=8)
                 self.ax_st.set_ylabel("U = std/mean (%)", fontsize=8)
                 self._art["u_title"] = self.ax_st.set_title(
                     self._u_title(c, k), fontsize=8.5)
@@ -2678,8 +2692,8 @@ class BeatingMultitoneWindow(QMainWindow):
             self.ax_st.contour(x_um, y_um, c["I_avg"] / norm,
                                levels=[0.5 * c["I_avg"].max() / norm],
                                colors="w", linewidths=0.9, linestyles="--")
-            self.ax_st.set_xlabel(r"$x$ ($\mathrm{\mu}$m)", fontsize=8)
-            self.ax_st.set_ylabel(r"$y$ ($\mathrm{\mu}$m)", fontsize=8)
+            self.ax_st.set_xlabel(r"$x$ (µm)", fontsize=8)
+            self.ax_st.set_ylabel(r"$y$ (µm)", fontsize=8)
             self.ax_st.set_title(title, fontsize=8.5)
             if self._panel_cbar is not None:
                 try:
@@ -2701,7 +2715,7 @@ class BeatingMultitoneWindow(QMainWindow):
             x_um, c["cube"][k, cut_row, :] / norm, color="tab:orange", lw=1.3,
             label="instantaneous")
         self.ax_cut.axvline(x_um[cut_col], color="magenta", lw=0.8, alpha=0.7)
-        self.ax_cut.set_xlabel(r"$x$ ($\mathrm{\mu}$m)", fontsize=8)
+        self.ax_cut.set_xlabel(r"$x$ (µm)", fontsize=8)
         self.ax_cut.set_ylabel("I / I_max", fontsize=8)
         self.ax_cut.set_title("x cut", fontsize=9)
         self.ax_cut.tick_params(labelsize=7)
@@ -2726,7 +2740,7 @@ class BeatingMultitoneWindow(QMainWindow):
                 self.ax_time.axvline(p * T0_us, color="gray", ls=":", lw=0.6)
         lo, hi = float(tr.min()), float(tr.max())
         depth = (hi - lo) / (hi + lo) if (hi + lo) > 0 else 0.0
-        self.ax_time.set_xlabel(r"$t$ ($\mathrm{\mu}$s)", fontsize=8)
+        self.ax_time.set_xlabel(r"$t$ (µs)", fontsize=8)
         self.ax_time.set_ylabel("I / I_max", fontsize=8)
         extra = (f"\npi pulse {pz['t_p'] * 1e6:.2f} us from {pz['t0'] * 1e6:.2f} us: "
                  f"U(area) {pz['u_now'] * 100:.0f} %" if pz else "")
@@ -2834,11 +2848,15 @@ class BeatingMultitoneWindow(QMainWindow):
         try:
             old_ft = matplotlib.rcParams.get("pdf.fonttype")
             matplotlib.rcParams["pdf.fonttype"] = 42      # editable text
+            # Schrift wie in den Flattop-Exporten (Latin Modern + CM-Mathe)
+            _font_rc = matplotlib.rc_context(latex_rc())
+            _font_rc.__enter__()
             try:
                 self._save_period_pdf(p_per)
                 self._save_spectrum_pdf(p_spec)
                 self._save_diffraction_pdf(p_diff)
             finally:
+                _font_rc.__exit__(None, None, None)
                 if old_ft is not None:
                     matplotlib.rcParams["pdf.fonttype"] = old_ft
             # Parameter daneben als Textdatei - ein Bild ohne die Zahlen,

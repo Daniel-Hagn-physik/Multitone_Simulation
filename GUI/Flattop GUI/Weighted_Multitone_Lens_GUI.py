@@ -502,6 +502,90 @@ def configure_neighbor_view(ax, r_center_um, pitch_um, zoom_factor=1.3):
 
 
 # ============================================================
+# Export "eigenes Profil + Nachbarn" (Standard-Layout beim Speichern)
+# ============================================================
+# Zeile 1: Schnitt(e) durch das eigene Profil + 2D-Ausschnitt des eigenen
+#          Profils, rechts dessen Farbskala.
+# Zeile 2: Schnitt(e) nur durch das Licht der 8 Nachbarn + 2D-Karte der
+#          Nachbarn, rechts deren Farbskala.
+# Mehr als ein Ton: 2 Schnitte (x, y) pro Zeile -> 2x3 Kacheln.
+# 1x1:              1 Schnitt  pro Zeile         -> 2x2 Kacheln.
+# Alle Masse in cm; jede Kachel ist ROWS_PANEL_CM gross, die Figur ist
+# 16 cm breit (= \textwidth), der Block steht mittig darauf.
+ROWS_PANEL_CM = 3.3
+ROWS_NB_AXIS_MAX_DEFAULT = 0.1     # y-Achse der Nachbar-Schnitte (in I/I_max)
+ROWS_COLOR_OWN = "tab:blue"
+ROWS_COLOR_NB = "tab:green"
+
+
+def _rows_export_rc():
+    """rcParams fuer das Zeilen-Layout: Latin Modern (die LaTeX-Schrift), wenn
+    sie sich finden laesst - sonst die serifenlose Vorgabe aus EXPORT_RC.
+
+    Gesucht wird in den ueblichen MiKTeX-/TeX-Live-Verzeichnissen. Registriert
+    wird nur die 10-pt-Optikgroesse (lmroman10-*), damit matplotlib nicht die
+    7- oder 12-pt-Variante derselben Familie erwischt."""
+    import glob
+    import os
+    from matplotlib import font_manager as fm
+    rc = dict(EXPORT_RC)
+    rc.update({
+        "font.size": 10, "axes.labelsize": 10, "xtick.labelsize": 9,
+        "ytick.labelsize": 9, "legend.fontsize": 9,
+        "axes.linewidth": 0.6, "xtick.major.width": 0.6, "ytick.major.width": 0.6,
+        "xtick.major.size": 2.5, "ytick.major.size": 2.5,
+    })
+    try:
+        family = "Latin Modern Roman"
+        has_10 = any(f.name == family and "lmroman10" in os.path.basename(f.fname).lower()
+                     for f in fm.fontManager.ttflist)
+        if not has_10:
+            local = os.environ.get("LOCALAPPDATA", "")
+            patterns = [
+                r"C:\Program Files\MiKTeX*\fonts\opentype\public\lm\lmroman10-*.otf",
+                os.path.join(local, "Programs", "MiKTeX", "fonts", "opentype", "public", "lm",
+                             "lmroman10-*.otf"),
+                r"C:\texlive\*\texmf-dist\fonts\opentype\public\lm\lmroman10-*.otf",
+                os.path.join(local, "Microsoft", "Windows", "Fonts", "lmroman10-*.otf"),
+                r"C:\Windows\Fonts\lmroman10-*.otf",
+                "/usr/share/texmf/fonts/opentype/public/lm/lmroman10-*.otf",
+                "/usr/share/texlive/texmf-dist/fonts/opentype/public/lm/lmroman10-*.otf",
+                "/usr/local/texlive/*/texmf-dist/fonts/opentype/public/lm/lmroman10-*.otf",
+                "/Library/TeX/Root/texmf-dist/fonts/opentype/public/lm/lmroman10-*.otf",
+            ]
+            for pat in patterns:
+                for path in glob.glob(pat):
+                    fm.fontManager.addfont(path)
+        # Andere Optikgroessen derselben Familie aus der Auswahl nehmen.
+        fm.fontManager.ttflist = [
+            f for f in fm.fontManager.ttflist
+            if not (f.name == family and "lmroman10" not in os.path.basename(f.fname).lower())
+        ]
+        if any(f.name == family for f in fm.fontManager.ttflist):
+            rc["font.family"] = family
+            rc["axes.unicode_minus"] = True     # echtes Minus, LM hat das Zeichen
+    except Exception:
+        pass
+    return rc
+
+
+def _tick_fmt():
+    """'%g'-Zahlen mit echtem Minuszeichen (FormatStrFormatter setzt einen
+    Bindestrich) und ohne Rundungsrauschen wie 1e-16."""
+    from matplotlib.ticker import FuncFormatter
+    return FuncFormatter(lambda v, _p: ("%g" % (round(v, 6) + 0.0)).replace("-", "\u2212"))
+
+
+def _nice_tick_step(half_um):
+    """Tick-Abstand fuer ein symmetrisches Fenster +/- half_um: der groesste
+    'runde' Schritt, bei dem noch -s, 0, +s im Bild liegen."""
+    for step in (10.0, 5.0, 4.0, 2.0, 1.0, 0.5, 0.2, 0.1):
+        if step <= 0.95 * half_um:
+            return step
+    return half_um / 2.0
+
+
+# ============================================================
 # NEU: Atom-Gewichtung (thermische Ortsverteilung im harmonischen
 # Fallenpotential) - siehe MultitoneFlatTopOptimizer.sigma_thermal() /
 # atom_weight_2d() / weighted_uniformity() / weighted_crosstalk() für die
@@ -634,6 +718,37 @@ class ExportOptionsDialog(QDialog):
         self._single_site = bool(single_site)
         layout = QVBoxLayout(self)
 
+        box_layout = QGroupBox("Layout")
+        v_layout = QVBoxLayout(box_layout)
+        self.rb_rows = QRadioButton("Own profile + 8 neighbours (two rows)")
+        self.rb_rows.setToolTip(
+            "Standard. Zeile 1: Schnitt(e) und 2D-Bild des eigenen Profils.\n"
+            "Zeile 2: Schnitt(e) und 2D-Karte nur des Nachbarlichts.\n"
+            "Mehr als ein Ton: 2x3 Kacheln, 1x1: 2x2 Kacheln.")
+        self.rb_own = QRadioButton("Own profile only (one row: cuts + 2D)")
+        self.rb_own.setToolTip(
+            "Nur die obere Zeile des Standard-Layouts: Schnitt(e) und 2D-Bild\n"
+            "des eigenen Profils, Legende darunter - ohne die Nachbar-Zeile.\n"
+            "Gleiche Kachelgroesse und Schrift wie im Zwei-Zeilen-Export.")
+        self.rb_classic = QRadioButton("Classic (one row, see 'Cross sections')")
+        self.rb_rows.setChecked(True)
+        v_layout.addWidget(self.rb_rows)
+        v_layout.addWidget(self.rb_own)
+        v_layout.addWidget(self.rb_classic)
+        g_nb = QGridLayout()
+        g_nb.addWidget(QLabel("neighbour cuts: axis max (I/I_max)"), 0, 0)
+        self.sp_nb_max = QDoubleSpinBox()
+        self.sp_nb_max.setRange(0.001, 1.0)
+        self.sp_nb_max.setDecimals(3)
+        self.sp_nb_max.setSingleStep(0.01)
+        self.sp_nb_max.setValue(ROWS_NB_AXIS_MAX_DEFAULT)
+        self.sp_nb_max.setToolTip("Obere Grenze der y-Achse in den Nachbar-Schnitten,\n"
+                                  "normiert auf das Maximum des eigenen Profils.\n"
+                                  "Was darueber liegt, laeuft oben aus dem Bild.")
+        g_nb.addWidget(self.sp_nb_max, 0, 1)
+        v_layout.addLayout(g_nb)
+        layout.addWidget(box_layout)
+
         box_cuts = QGroupBox("Cross sections")
         v_cuts = QVBoxLayout(box_cuts)
         self.rb_one = QRadioButton("1 - horizontal only")
@@ -704,8 +819,14 @@ class ExportOptionsDialog(QDialog):
         layout.addWidget(buttons)
 
     def values(self):
+        rows = self.rb_rows.isChecked() or self.rb_own.isChecked()
         return {
-            "n_cuts": 1 if (self._single_site or self.rb_one.isChecked()) else 2,
+            "layout": ("own" if self.rb_own.isChecked()
+                       else "rows" if self.rb_rows.isChecked() else "classic"),
+            "nb_axis_max": float(self.sp_nb_max.value()),
+            # Im Zeilen-Layout bestimmt die Tonzahl die Schnitte (1x1: einer).
+            "n_cuts": (1 if self._single_site else 2) if rows else
+                      (1 if (self._single_site or self.rb_one.isChecked()) else 2),
             "title": self.cb_title.isChecked(),
             "crosshair": self.cb_crosshair.isChecked(),
             "regions_in_cut": self.cb_regions.isChecked(),
@@ -2606,6 +2727,10 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         """Speichert die Abbildung als PDF. Layout und Inhalt legt vorher ein
         kleiner Dialog fest (ExportOptionsDialog).
 
+        STANDARD ist das Zeilen-Layout (_save_rows_figure): oben eigenes
+        Profil, unten nur das Licht der 8 Nachbarn - 2x3 Kacheln bei mehr als
+        einem Ton, 2x2 bei 1x1. Die folgenden Faelle gelten fuer "Classic".
+
         EIN Schnitt:  eine Zeile mit drei Panels - Nachbarn, der
         herangezoomte Einzelspot und der Schnitt.
         ZWEI Schnitte: obere Zeile beide 2D-Ansichten, untere Zeile der
@@ -2753,8 +2878,8 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         # Ohne Masszahl: die drei Eintraege sollen in EINE Zeile unter die
         # Abbildung passen, und die Kantenlaengen stehen in der .txt neben dem
         # PDF und gehoeren in die Bildunterschrift.
-        LBL_UNI = "Uniformity-Region"
-        LBL_CROSS = "Crosstalk-Region"
+        LBL_UNI = "Uniformity region"
+        LBL_CROSS = "Crosstalk region"
         # Die Aufenthaltswahrscheinlichkeit wird immer normiert geplottet -
         # dann ist |Psi|^2 der kuerzere und ehrlichere Name dafuer.
         LBL_PSI = r"$|\Psi|^2$"
@@ -2784,6 +2909,10 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                 rf"$\eta{sub}$ per neighbour: edge (N/S/E/W) = {crosstalk_edge*100:.4f} %,   "
                 rf"diagonal = {crosstalk_diag*100:.4f} %   (4 each)"
             )
+
+        if opts.get("layout", "rows") in ("rows", "own"):
+            self._save_rows_figure(dict(locals()))
+            return
 
         with plt.rc_context(EXPORT_RC):
             if opts["n_cuts"] == 1:
@@ -3084,6 +3213,290 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             finally:
                 plt.close(fig_save)
 
+    def _neighbor_intensity_raw(self, X, Y, centers_x, centers_y, amp_spots):
+        """Summe der 8 Nachbar-Sites auf beliebigen Punkten (X, Y), UNnormiert.
+
+        Gleiche Rechnung wie own_intensity() fuer die eigene Site, nur mit den
+        um +-pitch verschobenen Zentren - also auch mit dem statischen
+        Kreuzterm frequenzentarteter Spots innerhalb jeder Kopie. Die Kopien
+        untereinander werden wie in create_neighbourhood() inkohaerent
+        addiert. Geteilt durch das Maximum der eigenen Site ergibt das das
+        Nachbarlicht in Einheiten von I/I_max - dieselbe Normierung wie die
+        2D-Nachbarkarte, deren Kopien jeweils auf 1 normiert sind."""
+        deg = self._active_degeneracy()
+        phases = self._active_phases()
+        total = np.zeros(np.shape(X), dtype=float)
+        for ix in (-1, 0, 1):
+            for iy in (-1, 0, 1):
+                if ix == 0 and iy == 0:
+                    continue
+                sx = centers_x + ix * pitch
+                sy = centers_y + iy * pitch
+                if deg:
+                    F = field_stack(X, Y, sx, sy, amp_spots, self.state["win"],
+                                    self.state["use_airy"], self.state.get("airy_scale_factor"))
+                    total += static_intensity(F, deg, phases)
+                else:
+                    total += compute_intensity_profile(X, Y, sx, sy, self.state["win"],
+                                                       amp_spots, self.state["use_airy"])
+        return total
+
+    def _save_rows_figure(self, ctx):
+        """Standard-Export: eigenes Profil (Zeile 1) und Nachbarlicht (Zeile 2).
+
+        Mehr als ein Ton - 2x3 Kacheln:
+            (a) Schnitt x  (b) Schnitt y  (c) 2D eigenes Profil   | Farbskala
+            (d) Schnitt x  (e) Schnitt y  (f) 2D-Karte Nachbarn    | Farbskala
+        1x1 - 2x2 Kacheln:
+            (a) Schnitt x  (b) 2D eigenes Profil                   | Farbskala
+            (c) Schnitt x  (d) 2D-Karte Nachbarn                   | Farbskala
+
+        Die Nachbar-Schnitte zeigen NUR das Licht der 8 Nachbarn, normiert auf
+        das Maximum des eigenen Profils; ihre y-Achse reicht bis
+        opts['nb_axis_max'] und ist mit diesen Werten beschriftet.
+        Feste Geometrie in cm (keine constrained_layout-Automatik), damit
+        alle Abbildungen gleich grosse Kacheln und gleich grosse Schrift haben.
+        """
+        c = ctx
+        opts = c["opts"]
+        um = 1e6
+        c0_um = c["c0_um"]
+        acx, acy = c["atom_cx_um"], c["atom_cy_um"]
+        half_u_um, half_c_um, half_win_um = c["half_u_um"], c["half_c_um"], c["half_win_um"]
+        show_pdf = c["show_pdf"]
+        sigma_atom = c["sigma_atom"]
+        peak = c["peak"]
+        n_cuts = 1 if (self.state["N_x"] == 1 and self.state["N_y"] == 1) else 2
+        nb_max = float(opts.get("nb_axis_max", ROWS_NB_AXIS_MAX_DEFAULT))
+        # "own": nur Zeile 1 (eigenes Profil), keine Nachbar-Zeile.
+        own_only = opts.get("layout") == "own"
+
+        # --- Daten -------------------------------------------------------
+        x_line, y_line = c["x_line"], c["y_line"]
+        n_cut = x_line.size
+        s_h = x_line * um - c0_um
+        s_v = y_line * um - c0_um
+        own_h, own_v = c["I_cut_h"], c["I_cut_v"]
+        Xh, Yh = x_line[None, :], np.full((1, n_cut), c["y_pos_m"])
+        Xv, Yv = np.full((1, n_cut), c["x_pos_m"]), y_line[None, :]
+        cx_s, cy_s, amps = c["centers_x"], c["centers_y"], c["amp_spots"]
+        nb_h = self._neighbor_intensity_raw(Xh, Yh, cx_s, cy_s, amps)[0] / peak
+        nb_v = self._neighbor_intensity_raw(Xv, Yv, cx_s, cy_s, amps)[0] / peak
+        pdf_h, pdf_v = c["pdf_h"], c["pdf_v"]
+
+        LBL_X, LBL_Y, LBL_I = c["LBL_X"], c["LBL_Y"], c["LBL_I"]
+
+        with plt.rc_context(_rows_export_rc()):
+            S = ROWS_PANEL_CM
+            W = EXPORT_FIG_WIDTH_IN * 2.54
+            title_cm = 0.45 * len(c["title_lines"]) + 0.2 if opts["title"] else 0.0
+            y2 = 1.6
+            y1 = y2 if own_only else y2 + S + 1.65
+            H = y1 + S + 0.95 + title_cm
+            if n_cuts == 2:
+                xs_cut = [1.15, 1.35 + S]
+                x_map = 2.2 + 2 * S
+                block = 3.59 + 3 * S
+            else:
+                xs_cut = [1.1]
+                x_map = 2.25 + S
+                block = 3.65 + 2 * S
+            x_cb = x_map + S + 0.12 if n_cuts == 1 else x_map + S + 0.1
+            OX = (W - block) / 2.0
+
+            fig = plt.figure(figsize=(W / 2.54, H / 2.54))
+
+            def ax_at(x, y, w, h):
+                return fig.add_axes([(x + OX) / W, y / H, w / W, h / H])
+
+            rows = []
+            for y in ((y1,) if own_only else (y1, y2)):
+                cuts = [ax_at(x, y, S, S) for x in xs_cut]
+                rows.append((cuts, ax_at(x_map, y, S, S), ax_at(x_cb, y, 0.14, S)))
+            (cuts1, map1, cb1) = rows[0]
+            (cuts2, map2, cb2) = rows[1] if not own_only else ([], None, None)
+
+            # --- Hilfen --------------------------------------------------
+            def regions_2d(ax):
+                if half_u_um > 0:
+                    if self.state.get("uniformity_shape", "square") == "circle":
+                        p = Circle((acx, acy), half_u_um, edgecolor="cyan",
+                                   facecolor="none", linewidth=1.0)
+                    else:
+                        p = Rectangle((acx - half_u_um, acy - half_u_um), 2 * half_u_um,
+                                      2 * half_u_um, edgecolor="cyan", facecolor="none",
+                                      linewidth=1.0)
+                    p.set_zorder(6)
+                    ax.add_patch(p)
+                p = Rectangle((acx - half_c_um, acy - half_c_um), 2 * half_c_um, 2 * half_c_um,
+                              edgecolor="red", facecolor="none", linewidth=1.0)
+                p.set_zorder(6)
+                ax.add_patch(p)
+
+            def atom_density(ax):
+                if not show_pdf:
+                    return
+                span = 4.0 * sigma_atom * um
+                g = np.linspace(-span, span, 241)
+                GX, GY = np.meshgrid(g, g)
+                Wd = np.exp(-(GX ** 2 + GY ** 2) / (2 * (sigma_atom * um) ** 2))
+                rgba = np.zeros(Wd.shape + (4,))
+                rgba[..., 0] = 1.0
+                rgba[..., 2] = 1.0
+                rgba[..., 3] = 0.90 * Wd
+                ax.imshow(rgba, origin="lower",
+                          extent=[acx - span, acx + span, acy - span, acy + span],
+                          aspect="equal", interpolation="bilinear", zorder=7)
+
+            def crosshair(ax):
+                if opts["crosshair"]:
+                    ax.axhline(c["y_pos_um"], color="black", linewidth=0.8, zorder=8)
+                    ax.axvline(c["x_pos_um"], color="black", linewidth=0.8, zorder=8)
+
+            def cut(ax, s_um, I, pdf, center, top, color, xlabel):
+                if opts["regions_in_cut"]:
+                    for v in (center - half_c_um, center + half_c_um):
+                        ax.axvline(v, color="red", linewidth=1.0, zorder=1)
+                    if half_u_um > 0:
+                        for v in (center - half_u_um, center + half_u_um):
+                            ax.axvline(v, color="cyan", linewidth=1.0, zorder=1)
+                if pdf is not None:
+                    ax.fill_between(s_um, 0, top * pdf, color="magenta", alpha=0.3,
+                                    linewidth=0, zorder=2)
+                ax.plot(s_um, I, "-", color=color, linewidth=1.2, zorder=3)
+                ax.set_xlim(s_um[0], s_um[-1])
+                ax.set_xlabel(xlabel, labelpad=1)
+                step = _nice_tick_step(half_win_um)
+                ax.set_xticks([-step, 0.0, step])
+                ax.xaxis.set_major_formatter(_tick_fmt())
+
+            def colorbar(im, cax):
+                cb = fig.colorbar(im, cax=cax)
+                cb.set_ticks([0, 0.25, 0.5, 0.75, 1])
+                cb.set_ticklabels(["0", "0.25", "0.5", "0.75", "1"])
+                cb.ax.tick_params(width=0.6, length=2)
+                cb.outline.set_linewidth(0.6)
+                cb.set_label(LBL_I, labelpad=1)
+
+            def map_ticks(ax, half):
+                # Runde Marken um den Gitter-Nullpunkt, auch wenn das Atom
+                # versetzt ist.
+                step = _nice_tick_step(half)
+                ax.set_xticks([-step, 0.0, step])
+                ax.set_yticks([-step, 0.0, step])
+                ax.xaxis.set_major_formatter(_tick_fmt())
+                ax.yaxis.set_major_formatter(_tick_fmt())
+                ax.set_xlabel(LBL_X, labelpad=1)
+                ax.tick_params(axis="y", pad=1.5)
+
+            # --- Zeile 1: eigenes Profil ---------------------------------
+            own_top = max(1.05, 1.03 * float(max(np.max(own_h), np.max(own_v))))
+            cut(cuts1[0], s_h, own_h, pdf_h, acx, 1.0, ROWS_COLOR_OWN, LBL_X)
+            if n_cuts == 2:
+                cut(cuts1[1], s_v, own_v, pdf_v, acy, 1.0, ROWS_COLOR_OWN, LBL_Y)
+            for ax in cuts1:
+                ax.set_ylim(0, own_top)
+                ax.set_yticks([0, 0.5, 1])
+                ax.set_yticklabels(["0", "0.5", "1"])
+            im1 = map1.imshow(c["I_ort"], origin="lower", extent=c["extent"], aspect="equal",
+                              cmap="viridis", vmin=0.0, vmax=1.0, interpolation="bilinear")
+            regions_2d(map1)
+            atom_density(map1)
+            crosshair(map1)
+            map1.set_xlim(acx - half_win_um, acx + half_win_um)
+            map1.set_ylim(acy - half_win_um, acy + half_win_um)
+            map_ticks(map1, half_win_um)
+            colorbar(im1, cb1)
+
+            # --- Zeile 2: nur das Licht der 8 Nachbarn -------------------
+            if not own_only:
+                cut(cuts2[0], s_h, nb_h, pdf_h, acx, nb_max, ROWS_COLOR_NB, LBL_X)
+                if n_cuts == 2:
+                    cut(cuts2[1], s_v, nb_v, pdf_v, acy, nb_max, ROWS_COLOR_NB, LBL_Y)
+                for ax in cuts2:
+                    ax.set_ylim(0, 1.05 * nb_max)
+                    ax.set_yticks([0, nb_max / 2, nb_max])
+                    ax.yaxis.set_major_formatter(_tick_fmt())
+                im2 = map2.imshow(c["I_neighbor"], origin="lower", extent=c["extent"],
+                                  aspect="equal", cmap="viridis", vmin=0.0, vmax=1.0,
+                                  interpolation="bilinear")
+                regions_2d(map2)
+                atom_density(map2)
+                crosshair(map2)
+                configure_neighbor_view(map2, 0.0, pitch * um)
+                map_ticks(map2, pitch * um * 1.3)
+                colorbar(im2, cb2)
+
+            # y-Beschriftung der Schnitte: nur am linken Schnitt jeder Zeile
+            for cuts in ((cuts1,) if own_only else (cuts1, cuts2)):
+                cuts[0].set_ylabel(LBL_I, labelpad=2)
+                for ax in cuts[1:]:
+                    ax.tick_params(labelleft=False)
+
+            # Kennbuchstaben mittig ueber jeder Kachel
+            order = cuts1 + [map1] + ([] if own_only else cuts2 + [map2])
+            for ax, letter in zip(order, "abcdef"):
+                ax.text(0.5, 1.04, f"({letter})", transform=ax.transAxes,
+                        ha="center", va="bottom", fontsize=10)
+
+            if opts["title"]:
+                fig.suptitle("\n".join(c["title_lines"]), fontsize=EXPORT_FONTSIZE_SUPTITLE,
+                             y=1.0 - 0.1 / H)
+
+            handles = [Patch(facecolor="none", edgecolor="cyan", linewidth=1.0,
+                             label=c["LBL_UNI"]),
+                       Patch(facecolor="none", edgecolor="red", linewidth=1.0,
+                             label=c["LBL_CROSS"])]
+            if half_u_um <= 0:
+                handles = handles[1:]
+            if show_pdf:
+                handles.append(Patch(facecolor=(1, 0, 1, 0.3), edgecolor="none",
+                                     label=c["LBL_PSI"]))
+            fig.legend(handles=handles, loc="lower center", ncol=len(handles), frameon=False,
+                       bbox_to_anchor=(0.5, -0.02 * 10.8 / H), handlelength=1.6,
+                       columnspacing=1.5)
+
+            # y-Beschriftung der 2D-Kacheln direkt an die Tick-Zahlen setzen.
+            # Mit set_ylabel() rueckt matplotlib sie an das breiteste Label
+            # ("-2") und sie stoesst an die Kachel links daneben.
+            fig.canvas.draw()
+            rd = fig.canvas.get_renderer()
+            for ax in ((map1,) if own_only else (map1, map2)):
+                xs = [t.get_window_extent(rd).x0 for t in ax.get_yticklabels()
+                      if t.get_text() and not t.get_text().startswith(("\u2212", "-"))]
+                if not xs:
+                    xs = [t.get_window_extent(rd).x0 for t in ax.get_yticklabels() if t.get_text()]
+                tx0_cm = min(xs) / fig.dpi * 2.54
+                p = ax.get_position()
+                fig.text((tx0_cm - 0.06) / W, p.y0 + p.height / 2, LBL_Y, rotation=90,
+                         ha="right", va="center", fontsize=10)
+
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            mode_tag = "weighted" if c["weighted"] else "hard"
+            out_file = out_dir / (f"FlatMultiTone_GUI_{mode_tag}_"
+                                  f"{self.state['N_x']}x{self.state['N_y']}"
+                                  f"{'_own' if own_only else ''}_{timestamp}.pdf")
+            txt_file = out_file.with_suffix(".txt")
+            try:
+                fig.savefig(out_file)
+                txt_file.write_text(
+                    self._export_parameter_text(
+                        c["uniformity"], c["crosstalk"], c["crosstalk_edge"], c["crosstalk_diag"],
+                        c["weighted"], sigma_atom, c["r_center"], c["atom_cx"], c["atom_cy"],
+                        c["half_u"], c["half_c"], c["half_win"], opts, out_file.name
+                    ),
+                    encoding="utf-8"
+                )
+                self.label_save_status.setText(f"Gespeichert: {short_name(out_file)} (+ .txt)")
+                self.label_save_status.setToolTip(f"{out_file}\n{txt_file}")
+            except Exception as e:
+                self.label_save_status.setText(f"Error while saving: {e}")
+                self.label_save_status.setToolTip(str(out_file))
+                QMessageBox.warning(self, "Save failed", str(e))
+            finally:
+                plt.close(fig)
+            return out_file
+
     def profile_image(self, um_per_px=PROFILE_EXPORT_UM_PER_PX, fov_um=PROFILE_EXPORT_FOV_UM):
         """Statisches 2D-Profil der eigenen Site auf einem quadratischen Raster.
 
@@ -3247,6 +3660,9 @@ class WeightedFlatMultiToneWindow(QMainWindow):
         lines += [
             "",
             "[Export settings]",
+            f"layout             {opts.get('layout', 'classic')}"
+            + (f"  (neighbour cuts up to {opts.get('nb_axis_max', 0):g} I/I_max)"
+               if opts.get('layout') == 'rows' else ""),
             f"cross sections     {opts['n_cuts']}",
             f"2D window          +/- {half_win*1e6:.4f} um  (crosstalk square x {opts['zoom_factor']:.2f})",
             f"crosshair          {'on' if opts['crosshair'] else 'off'}",

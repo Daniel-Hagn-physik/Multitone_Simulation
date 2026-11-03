@@ -92,6 +92,30 @@ ARBEITSPUNKT_QUELLEN = [
     ("min_U_h", "Minimum von U_h"),
 ]
 
+# ======================================================================
+# STANDARD-AUSWAHL IM DIALOG
+# ======================================================================
+# Beim Start ist der Dialog so vorbelegt, dass genau der Lauf vom 18.09.
+# entsteht (Results/single_beam_Airy_121pts_r1um_beide-pitchbox_k1.483.pkl)
+# und die Plots im Arbeits-Stil herauskommen:
+#   Waist 0.7434 .. 2.5 µm in der Atomebene, 121 Stuetzstellen, Airy mit
+#   k = 1.482951, Kreisradius 1 µm, Crosstalk-Region "beide" (Kreis und
+#   Pitch-Quadrat), Penalty mit dem Pitch-Quadrat, harte Metriken und
+#   Penalty an, getrennte Plots (hard / weighted / penalty).
+# Alles laesst sich im Dialog noch aendern.
+STANDARD = dict(
+    hart_an=True,
+    penalty_plot=True,
+    getrennt=True,
+    crosstalk_region="beide",
+    penalty_region="pitch",
+    radius_um=1.0,
+    von_um=0.7434,
+    bis_um=2.5,
+    n_punkte=121,
+)
+
+
 WAIST_MODES = [
     ("after_lens", "Waist in der ATOMEBENE (µm)"),
     ("before_lens", "Waist VOR DER ERSTEN LINSE (mm)"),
@@ -494,6 +518,7 @@ class SingleBeamDialog(QDialog):
 
         self.hart_an.toggled.connect(self._metriken_umschalten)
         self.penalty_plot.toggled.connect(self._metriken_umschalten)
+        self._standard_setzen()
         self._metriken_umschalten()
 
         self.resize(640, 820)
@@ -533,6 +558,22 @@ class SingleBeamDialog(QDialog):
         else:
             self.von.setValue(sb.WAIST_RANGE_DEFAULT_UM[0])
             self.bis.setValue(sb.WAIST_RANGE_DEFAULT_UM[1])
+
+    def _standard_setzen(self, v=STANDARD):
+        """Vorauswahl aus STANDARD (oben im Skript) in den Dialog setzen."""
+        self.modus.setCurrentIndex(0)                 # Waist in der Atomebene (µm)
+        self.von.setValue(float(v["von_um"]))
+        self.bis.setValue(float(v["bis_um"]))
+        self.n_punkte.setValue(int(v["n_punkte"]))
+        self.radius.setValue(float(v["radius_um"]))
+        keys = [k for k, _t in sb.CROSSTALK_REGION_CHOICES]
+        self.crosstalk_region.setCurrentIndex(keys.index(v["crosstalk_region"]))
+        keys = [k for k, _t in sb.PENALTY_REGION_CHOICES]
+        self.penalty_region.setCurrentIndex(keys.index(v["penalty_region"]))
+        self.hart_an.setChecked(bool(v["hart_an"]))
+        self.penalty_plot.setChecked(bool(v["penalty_plot"]))
+        self.getrennt.setChecked(bool(v["getrennt"]))
+        self._region_umschalten()
 
     def _metriken_umschalten(self):
         """Harte Region nur mit harten Metriken oder Penalty, Penalty-Parameter

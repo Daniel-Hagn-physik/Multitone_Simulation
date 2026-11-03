@@ -55,7 +55,7 @@ from PyQt5.QtWidgets import (
 
 # The physics: kern/beating_physik.py (kern is a package next to this file).
 from kern import beating_physik as phys
-from kern.plotstil import FIG_WIDTH_IN, FIG_WIDTH_SMALL_IN, style_figure
+from kern.plotstil import FIG_WIDTH_IN, FIG_WIDTH_SMALL_IN, style_figure, latex_rc, IMAGE_RC
 
 try:
     from power_budget import _load_raman
@@ -66,6 +66,31 @@ except Exception:                                    # sibling module missing
 A4_PORTRAIT = (8.27, 11.69)                          # inch
 TRACE_MAX_PERIODS = 40.0     # beat periods the top plot will ever draw
 C_RABI_FALLBACK = 71.985                             # rad/s per W/m^2 at -8 GHz
+
+
+from matplotlib.ticker import Formatter
+
+
+class _HideNear(Formatter):
+    """Wraps a tick formatter and leaves out labels close to x0 - room for
+    a label of its own there (the red t_0 under the intensity plot)."""
+
+    def __init__(self, base, x0, tol):
+        self.base, self.x0, self.tol = base, x0, tol
+
+    def set_axis(self, axis):
+        super().set_axis(axis)
+        self.base.set_axis(axis)
+
+    def set_locs(self, locs):
+        self.locs = locs
+        self.base.set_locs(locs)
+
+    def get_offset(self):
+        return self.base.get_offset()
+
+    def __call__(self, x, pos=None):
+        return "" if abs(x - self.x0) < self.tol else self.base(x, pos)
 
 
 class PulseTimingDialog(QDialog):
@@ -184,7 +209,7 @@ class PulseTimingDialog(QDialog):
                                "theta = pi at the reference intensity.")
         self.btn_pi.clicked.connect(self._set_pi)
 
-        self.sp_delay = self._dspin(1.0, 0.0001, 1.0e6, 4, 0.1, "us")
+        self.sp_delay = self._dspin(1.5, 0.0001, 1.0e6, 4, 0.1, "us")
         self.sp_delay.setToolTip("Half width of the delay scan: 0 is the perfect\n"
                                  "trigger, +-this value the limit.")
         self.sp_pts = QSpinBox(); self.sp_pts.setRange(21, 4001)
@@ -571,16 +596,17 @@ class PulseTimingDialog(QDialog):
         if span_s >= 1e-3:
             return 1e3, "ms"
         if span_s >= 1e-6:
-            return 1e6, r"$\mathrm{\mu}$s"
+            return 1e6, r"µs"
         return 1e9, "ns"
 
     def _panel_intensity(self, ax, L, title=True):
-        # ONE beat period. Everything after it repeats, and the panel below
-        # scans exactly that period - the two now share an axis.
+        # TWO beat periods - so that a pulse starting late in the first
+        # period is shown in full instead of being cut at T_0. The panel
+        # below covers the same two periods, the two share an axis.
         end = float(L["t_trace"][-1])
         T0 = float(L["T0"])
-        if np.isfinite(T0) and 0.0 < T0 < end:
-            end = T0
+        if np.isfinite(T0) and 0.0 < 2.0 * T0 < end:
+            end = 2.0 * T0
         keep = L["t_trace"] <= end
         t_tr, g_tr = L["t_trace"][keep], L["g_trace"][keep]
         u, ul = self._t_unit(end)
@@ -594,14 +620,23 @@ class PulseTimingDialog(QDialog):
         n_rep = 4 if L["t_p"] < L["T0"] else 1
         for n in range(n_rep):
             t0n = (L["t_opt"] + n * L["T0"]) * u
-            if t0n > end * u:
+            # only pulses that fit completely - a red band cut at the axis
+            # end would look like a shorter pulse
+            if n > 0 and t0n + L["t_p"] * u > end * u:
                 continue
             ax.axvspan(t0n, min(t0n + L["t_p"] * u, end * u),
                        color="#d62728", alpha=0.22, lw=0)
             ax.axvline(t0n, color="#d62728", lw=1.1)
-        ax.annotate(r"$t_0$", xy=(L["t_opt"] * u, ax.get_ylim()[1]),
-                    xytext=(3, -11), textcoords="offset points",
-                    color="#d62728", fontsize=10)
+        # t_0 below the plot, in the row of the tick numbers, under the red
+        # line. A tick number that would collide with it is left out.
+        t0u = L["t_opt"] * u
+        ax.xaxis.set_major_formatter(
+            _HideNear(ax.xaxis.get_major_formatter(), t0u, 0.05 * end * u))
+        ax.annotate(r"$t_0$", xy=(t0u, 0.0),
+                    xycoords=("data", "axes fraction"),
+                    xytext=(0, -ax.xaxis.get_major_ticks()[0].get_pad()),
+                    textcoords="offset points",
+                    ha="center", va="top", color="#d62728", fontsize=10)
         if L["n_beat"] >= 1.0:
             ax.annotate(("pulse spans %.2f beat periods%s"
                          % (L["n_beat"], ", axis truncated"
@@ -617,11 +652,20 @@ class PulseTimingDialog(QDialog):
         ax.grid(alpha=0.25)
 
     def _panel_period(self, ax, L, title=True):
-        u, ul = self._t_unit(L["T0"])
-        ax.plot(L["t_scan"] * u, L["th_scan"] / np.pi, lw=0.9, color="#1f77b4")
-        ax.axvline(L["t_opt"] * u, color="#d62728", lw=1.1)
-        ax.set_xlim(0, L["T0"] * u)
-        ax.set_xlabel(r"pulse start $t_0$ (%s)" % ul)
+        # Two beat periods, like the panel above. The area as a function of
+        # the pulse start is periodic in T_0, so the second period is the
+        # first one repeated - no new calculation.
+        T0 = float(L["T0"])
+        u, ul = self._t_unit(2.0 * T0)
+        t2 = np.concatenate([L["t_scan"], L["t_scan"] + T0])
+        th2 = np.concatenate([L["th_scan"], L["th_scan"]])
+        ax.plot(t2 * u, th2 / np.pi, lw=0.9, color="#1f77b4")
+        for n in (0, 1):
+            t0n = L["t_opt"] + n * T0
+            if n == 0 or t0n + L["t_p"] <= 2.0 * T0:
+                ax.axvline(t0n * u, color="#d62728", lw=1.1)
+        ax.set_xlim(0, 2.0 * T0 * u)
+        ax.set_xlabel(r"Pulse start $t_0$ (%s)" % ul)
         ax.set_ylabel(r"$\langle\theta\rangle\,/\,\pi$")
         if title:
             ax.set_title("Mean pulse area over one beat period")
@@ -636,14 +680,14 @@ class PulseTimingDialog(QDialog):
         u, ul = self._t_unit(2.0 * L["half"])
         d = L["delays"] * u
         ax.plot(d, L["th_delay"] / np.pi, lw=1.6, color="#1f77b4")
-        ax.axvline(0.0, color="#888", lw=0.8)
+        ax.axvline(0.0, color="#d62728", lw=1.1)     # t_0 itself, red as above
         ax.set_xlim(d[0], d[-1])
-        ax.set_xlabel(r"trigger error (%s)" % ul)
+        ax.set_xlabel(r"$t_0 + t_{\mathrm{err}}$ (%s)" % ul)
         ax.set_ylabel(r"$\langle\theta\rangle\,/\,\pi$")
         ax.grid(alpha=0.25)
         axr = ax.twinx()
         axr.set_ylim((np.array(ax.get_ylim()) / (L["th0"] / np.pi) - 1.0) * 100.0)
-        axr.set_ylabel("deviation (%)")
+        axr.set_ylabel("Deviation (%)")
         return axr
 
     def _panel_map(self, fig, ax, L, title=True):
@@ -688,10 +732,10 @@ class PulseTimingDialog(QDialog):
             for n in (3,):                          # only the 3 sigma region
                 ax.plot((cx0 + n * L["sig_atom"] * np.cos(ang)) * sc,
                         (cy0 + n * L["sig_atom"] * np.sin(ang)) * sc,
-                        color="white", lw=1.4, path_effects=stroke)
+                        color="white", lw=1.4, ls="--")   # plain white, dashed
                 ax.text(cx0 * sc, (cy0 + n * L["sig_atom"]) * sc,
                         r"$%d\sigma$" % n, color="white", fontsize=11,
-                        ha="center", va="bottom", path_effects=stroke)
+                        ha="center", va="bottom")          # plain white
         elif L["mask"] is not None:
             ax.contour(x * sc, y * sc, L["mask"].astype(float), levels=[0.5],
                        colors="white", linewidths=1.4)
@@ -699,24 +743,62 @@ class PulseTimingDialog(QDialog):
             ax.set_xlabel(r"$x$ (nm)")
             ax.set_ylabel(r"$y$ (nm)")
         else:
-            ax.set_xlabel(r"$x$ ($\mathrm{\mu}$m)")
-            ax.set_ylabel(r"$y$ ($\mathrm{\mu}$m)")
+            ax.set_xlabel(r"$x$ (µm)")
+            ax.set_ylabel(r"$y$ (µm)")
         if title:
             ax.set_title(ttl)
 
-    def _draw_curves(self, fig, titles=True):
-        """The three time-domain panels - what goes into the curve PDF."""
+    # Geometrie der gespeicherten Kurven-Panels in Zoll. Dieselben Werte fuer
+    # jede Datei, damit die Panels in allen PDFs gleich gross sind, egal ob
+    # eine Datei eins, zwei oder drei davon enthaelt.
+    CURVE_PANEL_H = 1.433      # Hoehe eines Panels
+    CURVE_GAP = 0.788          # Abstand zwischen zwei Panels (inkl. x-Beschriftung)
+    CURVE_TOP = 0.267          # Rand oben
+    CURVE_BOTTOM = 0.534       # Rand unten (x-Beschriftung)
+
+    @classmethod
+    def curve_fig_height(cls, n):
+        """Hoehe einer Kurven-Figur mit n Panels untereinander (Zoll)."""
+        return (cls.CURVE_TOP + n * cls.CURVE_PANEL_H
+                + (n - 1) * cls.CURVE_GAP + cls.CURVE_BOTTOM)
+
+    def _draw_curves(self, fig, titles=True, panels=("I", "P", "Z")):
+        """Time-domain panels for the curve PDFs.
+
+        panels: any of "I" (intensity), "P" (area over the period),
+        "Z" (trigger error), top to bottom. The figure height should be
+        curve_fig_height(len(panels)) - then every panel has the same size
+        in every file.
+        """
         L = self._last
         fig.clear()
-        gs = fig.add_gridspec(3, 1, hspace=0.55, left=0.14, right=0.88,
-                              top=0.96, bottom=0.08)
-        axI = fig.add_subplot(gs[0, 0])
-        axP = fig.add_subplot(gs[1, 0])
-        axZ = fig.add_subplot(gs[2, 0])
-        self._panel_intensity(axI, L, titles)
-        self._panel_period(axP, L, titles)
-        self._panel_zoom(axZ, L)
-        return axI, axP, axZ
+        n = len(panels)
+        H = fig.get_figheight()
+        gs = fig.add_gridspec(n, 1, hspace=self.CURVE_GAP / self.CURVE_PANEL_H,
+                              left=0.14, right=0.88,
+                              top=1.0 - self.CURVE_TOP / H,
+                              bottom=self.CURVE_BOTTOM / H)
+        out, main, twins = {}, [], []
+        for i, key in enumerate(panels):
+            ax = fig.add_subplot(gs[i, 0])
+            main.append(ax)
+            if key == "I":
+                self._panel_intensity(ax, L, titles)
+            elif key == "P":
+                self._panel_period(ax, L, titles)
+            else:
+                axR = self._panel_zoom(ax, L)
+                if axR is not None:
+                    twins.append(axR)
+            out[key] = ax
+        # no axis on top - no ticks there; the frame stays a closed box
+        for a in main + twins:
+            a.tick_params(axis="x", which="both", top=False)
+        # Right-hand ticks only where a second y axis lives there (the twin
+        # axis draws its own); the main axes tick on the left only.
+        for a in main:
+            a.tick_params(axis="y", which="both", right=False)
+        return out
 
     def _draw(self, fig, a4, suptitle):
         L = self._last
@@ -743,13 +825,19 @@ class PulseTimingDialog(QDialog):
             axM = fig.add_subplot(gs[:, 1])
         self._panel_intensity(axI, L)
         self._panel_period(axP, L)
-        self._panel_zoom(axZ, L)
+        axR = self._panel_zoom(axZ, L)
         self._panel_map(fig, axM, L)
+        # same axis style as the curve PDF: no ticks on top, right-hand ticks
+        # only where a second y axis lives
+        for a in (axI, axP, axZ) + ((axR,) if axR is not None else ()):
+            a.tick_params(axis="x", which="both", top=False)
+        for a in (axI, axP, axZ):
+            a.tick_params(axis="y", which="both", right=False)
         if suptitle:
             gname = "I" if L["law"] == "I" else r"\sqrt{I}"
             fig.suptitle(
                 r"%d$\times$%d tones, width %.4f / %.4f MHz  |  "
-                r"$\Omega/2\pi$ = %.3f MHz, $T_p$ = %.3f $\mu$s, "
+                r"$\Omega/2\pi$ = %.3f MHz, $T_p$ = %.3f µs, "
                 r"$\Omega\sim %s$  |  region: %s"
                 % (s["N_x"], s["N_y"], s["width_x"] * 1e-6, s["width_y"] * 1e-6,
                    L["f_rabi"] * 1e-6, L["t_p"] * 1e6, gname, L["region"]),
@@ -848,14 +936,35 @@ class PulseTimingDialog(QDialog):
             import matplotlib
             old_ft = matplotlib.rcParams.get("pdf.fonttype")
             matplotlib.rcParams["pdf.fonttype"] = 42          # editable text
+            # Schrift wie in den Flattop-Exporten (Latin Modern + CM-Mathe)
+            _font_rc = matplotlib.rc_context(latex_rc())
+            _font_rc.__enter__()
 
             # 16 cm wide, like every other saved figure - see kern/plotstil.py.
-            f_cur = Figure(figsize=(FIG_WIDTH_IN, 1.06 * FIG_WIDTH_IN), dpi=100)
-            FigureCanvas(f_cur)
-            self._draw_curves(f_cur, titles=False)
-            p_cur = out / (base + "_curves.pdf")
-            style_figure(f_cur)
-            f_cur.savefig(p_cur, format="pdf")
+            # Ticks nach innen, mit Nebenstrichen - fest eingestellt, damit
+            # die Datei nicht von der matplotlibrc des Rechners abhaengt.
+            with matplotlib.rc_context({"xtick.direction": "in",
+                                        "ytick.direction": "in",
+                                        "xtick.minor.visible": True,
+                                        "ytick.minor.visible": True}):
+                # Zwei Dateien: die Intensitaet allein (_intensity.pdf) und
+                # die beiden Pulsflaechen-Panels (_curves.pdf). Panels gleich
+                # gross wie vorher im Dreier-Bild.
+                f_int = Figure(figsize=(FIG_WIDTH_IN, self.curve_fig_height(1)),
+                               dpi=100)
+                FigureCanvas(f_int)
+                self._draw_curves(f_int, titles=False, panels=("I",))
+                p_int = out / (base + "_intensity.pdf")
+                style_figure(f_int)
+                f_int.savefig(p_int, format="pdf")
+
+                f_cur = Figure(figsize=(FIG_WIDTH_IN, self.curve_fig_height(2)),
+                               dpi=100)
+                FigureCanvas(f_cur)
+                self._draw_curves(f_cur, titles=False, panels=("P", "Z"))
+                p_cur = out / (base + "_curves.pdf")
+                style_figure(f_cur)
+                f_cur.savefig(p_cur, format="pdf")
 
             # Die Karte gehoert nicht ueber die ganze Textbreite: bei 16 cm
             # waere sie 12.8 cm hoch und haette die halbe Seite belegt. Mit
@@ -863,26 +972,29 @@ class PulseTimingDialog(QDialog):
             # und weil sie in DIESER Groesse gespeichert wird, steht sie mit
             # width=0.625\textwidth unskaliert im Dokument und ihre
             # Beschriftung ist dieselben 10 pt wie ueberall sonst.
-            f_map = Figure(figsize=(FIG_WIDTH_SMALL_IN, 0.80 * FIG_WIDTH_SMALL_IN),
-                           dpi=100)
-            FigureCanvas(f_map)
-            ax = f_map.add_subplot(111)
-            self._panel_map(f_map, ax, L, title=False)
-            ax.locator_params(axis="both", nbins=4)   # schmale Achse, weniger Ticks
-            # Raender in ZENTIMETERN gerechnet, nicht als Anteil: bei 10 pt
-            # braucht die y-Beschriftung mit ihren Tick-Zahlen rund 1.7 cm,
-            # egal wie gross die Figur ist. Und nicht ueber die
-            # Automatik-Layouts: die Achse hat aspect="equal", waechst darin
-            # ueber ihre Zelle hinaus und schiebt die y-Beschriftung aus dem
-            # Bild - genau das schnitt sie vorher ab.
-            w_cm, h_cm = 10.0, 8.0
-            f_map.subplots_adjust(left=1.75 / w_cm, right=1.0 - 1.85 / w_cm,
-                                  bottom=1.30 / h_cm, top=1.0 - 0.25 / h_cm)
-            map_sfx = "_excmap.pdf" if self.cmb_map.currentIndex() == 1 \
-                else "_areamap.pdf"
-            p_map = out / (base + map_sfx)
-            style_figure(f_map)
-            f_map.savefig(p_map, format="pdf")
+            # Karte: Ticks nach aussen, nur unten/links, keine Nebenstriche
+            with matplotlib.rc_context(IMAGE_RC):
+                f_map = Figure(figsize=(FIG_WIDTH_SMALL_IN, 0.80 * FIG_WIDTH_SMALL_IN),
+                               dpi=100)
+                FigureCanvas(f_map)
+                ax = f_map.add_subplot(111)
+                self._panel_map(f_map, ax, L, title=False)
+                ax.locator_params(axis="both", nbins=4)   # schmale Achse, weniger Ticks
+                # Raender in ZENTIMETERN gerechnet, nicht als Anteil: bei 10 pt
+                # braucht die y-Beschriftung mit ihren Tick-Zahlen rund 1.7 cm,
+                # egal wie gross die Figur ist. Und nicht ueber die
+                # Automatik-Layouts: die Achse hat aspect="equal", waechst darin
+                # ueber ihre Zelle hinaus und schiebt die y-Beschriftung aus dem
+                # Bild - genau das schnitt sie vorher ab.
+                w_cm, h_cm = 10.0, 8.0
+                f_map.subplots_adjust(left=1.75 / w_cm, right=1.0 - 1.85 / w_cm,
+                                      bottom=1.30 / h_cm, top=1.0 - 0.25 / h_cm)
+                map_sfx = "_excmap.pdf" if self.cmb_map.currentIndex() == 1 \
+                    else "_areamap.pdf"
+                p_map = out / (base + map_sfx)
+                style_figure(f_map)
+                f_map.savefig(p_map, format="pdf")
+            _font_rc.__exit__(None, None, None)
 
             if old_ft is not None:
                 matplotlib.rcParams["pdf.fonttype"] = old_ft
@@ -900,12 +1012,16 @@ class PulseTimingDialog(QDialog):
                        np.column_stack([L["t_trace"] * 1e6, L["g_trace"]]),
                        header="t_us\tI_over_time_mean", delimiter="\t", fmt="%.9g")
             (out / (base + "_report.md")).write_text(
-                self._param_text(stamp, [p_cur.name, p_map.name]),
+                self._param_text(stamp, [p_int.name, p_cur.name, p_map.name]),
                 encoding="utf-8")
             self.lbl_note.setText(
-                "saved to {} :  {}_curves.pdf, {}, _report.md and three data "
+                "saved to {} :  {}_intensity.pdf, _curves.pdf, {}, _report.md and three data "
                 "files".format(out, base, map_sfx[1:]))
         except Exception as exc:
+            try:
+                _font_rc.__exit__(None, None, None)
+            except Exception:
+                pass
             QMessageBox.critical(self, "Saving failed", str(exc))
 
     def _param_text(self, stamp, files=()):
@@ -1013,16 +1129,18 @@ class PulseTimingDialog(QDialog):
         ])
         P += ["", "## Figures", "",
               "Neither PDF carries a title; this is what the panels show.", "",
-              "**`_curves.pdf`**, three panels top to bottom:", "",
-              "1. Profile intensity `I(t)` divided by its own time average, over "
-              "ONE beat period. The red line marks the pulse **start** t_0, "
-              "the shading the pulse duration T_p.",
-              "2. Mean pulse area `<theta>/pi` versus the pulse start t_0, over "
-              "the same beat period.",
-              "3. The same curve zoomed around the chosen t_0. x is the trigger "
-              "error, the right axis the deviation from the area at zero error.",
+              "**`_intensity.pdf`**: profile intensity `I(t)` divided by its "
+              "time average, over TWO beat periods. The red line marks the "
+              "pulse **start** t_0, the shading the pulse duration T_p.", "",
+              "**`_curves.pdf`**, two panels top to bottom:", "",
+              "1. Mean pulse area `<theta>/pi` versus the pulse start t_0, over "
+              "the same two beat periods.",
+              "2. The same curve zoomed around the chosen t_0. x is "
+              "t_0 + t_err, the right axis the deviation from the area at zero "
+              "error.",
               "",
-              "Breiten: `_curves.pdf` ist 16 cm breit gespeichert und gehoert "
+              "Breiten: `_intensity.pdf` und `_curves.pdf` sind 16 cm breit "
+              "gespeichert (Panels in beiden gleich gross) und gehoeren "
               "mit `width=\\textwidth` ins Dokument, die Karte 10 cm und mit "
               "`width=0.625\\textwidth`. Beide dann unskaliert, Beschriftung "
               "10 pt.", "",

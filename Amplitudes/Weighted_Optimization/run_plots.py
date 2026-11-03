@@ -66,7 +66,41 @@ from lib import report, scan_data  # noqa: E402
 # Oder hier fest eintragen, dann ist dieser Datensatz beim Start bereits
 # ausgewaehlt. Es genuegt der Dateiname (wird in Results/ gesucht), ein
 # vollstaendiger Pfad geht auch.
-PKL_DATEI = ""
+PKL_DATEI = "scan_amp_data_weighted_N3x4_41x41pts_Airy_k1.483.pkl"
+# ======================================================================
+
+
+# ======================================================================
+# STANDARD-EINSTELLUNGEN JE DATENSATZ
+# ======================================================================
+# Wird ein Datensatz gewaehlt, dessen Dateiname hier steht, setzt der Dialog
+# diese Einstellungen automatisch. Alles laesst sich danach im Dialog noch
+# aendern. Nicht genannte Felder behalten ihren Wert.
+#
+# Schluessel: win_axis, legend_fontsize, draw_best_point, best_point_report_only,
+# best_point_follow (Schluessel aus report.best_point_choices), best_point_value,
+# do_valley,
+# valley_path_mode, valley_follow, valley_select, valley_guide_follow,
+# valley_guide_halfwidth, valley_axis, valley_fit_line, valley_map_show_path,
+# valley_limit (None oder ((waist_von, waist_bis) in µm, (width_von, width_bis)
+# in MHz)), forbidden_draw, forbidden_exclude, forbidden_factor, do_recompute,
+# fixed_width_mhz (Arbeitspunkt bei fester Width im Bericht, None/0 = aus).
+DATASET_PRESETS = {
+    # Atom-gewichtete Karten J_w + eta_w (..._maps_score_crosstalk_over_waist_um.pdf),
+    # ohne Fit-Gerade, verbotener Bereich (k = 2) ausgeblendet. Datensatz vom
+    # 09.09. (mit statischer Interferenz, Schluessel 'coherent').
+    "scan_amp_data_weighted_N3x4_41x41pts_Airy_k1.483.pkl": dict(
+        win_axis="after_lens",
+        legend_fontsize=9,
+        draw_best_point=False,
+        do_valley=False,
+        forbidden_draw=False,
+        forbidden_exclude=True,
+        forbidden_factor=2.0,
+        do_recompute=False,
+        fixed_width_mhz=0.37,
+    ),
+}
 # ======================================================================
 
 
@@ -278,6 +312,26 @@ class PlotsDialog(QDialog):
             "Gibt es nur beim Amplituden-Scan - ein Fest-Amplituden-Scan hat keine\n"
             "r_x/r_y-Gitter.")
         display_layout.addRow(self.amplitude_maps)
+        self.amp_layout = QComboBox()
+        for _key, _label in report.AMP_LAYOUT_CHOICES:
+            self.amp_layout.addItem(_label)
+        self.amp_layout.setCurrentIndex(
+            [k for k, _l in report.AMP_LAYOUT_CHOICES].index(report.AMP_LAYOUT_DEFAULT))
+        self.amp_layout.setToolTip(
+            "Wie die Uebersicht mit Amplituden aussieht.\n\n"
+            "Neu (Standard): zwei PDFs, je Groesse die Karten und ganz rechts der\n"
+            "Schnitt entlang der Fit-Geraden -\n"
+            "  ..._metric_cuts_U_eta.pdf  Zeile U: U-Karte, Schnitt / Zeile eta: eta-Karte, Schnitt\n"
+            "  ..._metric_cuts_r.pdf      r_x, r_y, Schnitt\n"
+            "Width als W in µm, Colorbars ueber den Karten, 16 cm breit.\n"
+            "Die Gerade ist dieselbe wie im Talschnitt (Groesse fuer Talpfad/\n"
+            "Gerade, Auswahl der Talpunkte, Suchbereich).\n\n"
+            "Alt: das bisherige 2x2-Raster ..._metric_comparison_amp.pdf.\n"
+            "Gibt es keine brauchbare Gerade, wird automatisch das alte Raster\n"
+            "gezeichnet (Hinweis auf der Konsole).")
+        self.amplitude_maps.toggled.connect(self.amp_layout.setEnabled)
+        self.amp_layout.setEnabled(self.amplitude_maps.isChecked())
+        display_layout.addRow("Layout mit Amplituden:", self.amp_layout)
 
         self.plot_overview = QCheckBox("PNG-Uebersicht des Scan-Plotters mitzeichnen")
         self.plot_overview.setToolTip(
@@ -288,6 +342,13 @@ class PlotsDialog(QDialog):
 
         self.show_interactive = QCheckBox("Plots zusaetzlich interaktiv anzeigen")
         display_layout.addRow(self.show_interactive)
+
+        self.fixed_width = self._make_spin(0.0, 0.0, 10.0, 0.005, decimals=4)
+        self.fixed_width.setToolTip(
+            "Arbeitspunkt bei fester Width fuer den Bericht: entlang dieser\n"
+            "Width-Zeile wird der Waist mit dem kleinsten J gesucht, dort werden\n"
+            "alle Groessen mit Unsicherheit angegeben. 0 = aus.")
+        display_layout.addRow("Arbeitspunkt bei Width (MHz, 0 = aus):", self.fixed_width)
         display_group.setLayout(display_layout)
         main_layout.addWidget(display_group)
 
@@ -893,6 +954,10 @@ class PlotsDialog(QDialog):
             self.file_combo.addItem(pfad.name, userData=str(pfad))
         self.file_combo.blockSignals(False)
 
+        if not dateien and PKL_DATEI:
+            # PKL_DATEI darf auch in einem Unterordner von Results/ liegen.
+            self._select_path(PKL_DATEI)
+            return
         if not dateien:
             self.input_info.setText(
                 f"In {paths.DEFAULT_RESULTS_DIR} liegen keine .pkl-Dateien. "
@@ -913,7 +978,11 @@ class PlotsDialog(QDialog):
         er nicht aus Results/ stammt."""
         kandidat = FilePath(pfad)
         if not kandidat.is_absolute() and not kandidat.exists():
-            kandidat = paths.DEFAULT_RESULTS_DIR / kandidat.name
+            # Erst relativ zu Results/ (auch mit Unterordner), dann nur
+            # der Dateiname direkt in Results/.
+            mit_ordner = paths.DEFAULT_RESULTS_DIR / kandidat
+            kandidat = (mit_ordner if mit_ordner.exists()
+                        else paths.DEFAULT_RESULTS_DIR / kandidat.name)
         ziel = str(kandidat)
 
         for index in range(self.file_combo.count()):
@@ -965,6 +1034,91 @@ class PlotsDialog(QDialog):
         self._sync_forbidden_state()
         self._fill_best_point_combo()
         self._fill_valley_limit()
+        self._apply_preset(FilePath(path).name)
+
+    def _apply_preset(self, dateiname):
+        """Standard-Einstellungen aus DATASET_PRESETS setzen, falls es fuer
+        diesen Datensatz welche gibt."""
+        vorgabe = DATASET_PRESETS.get(dateiname)
+        if not vorgabe:
+            return
+
+        def _index(choices, key, pos=0):
+            keys = [c[pos] for c in choices]
+            return keys.index(key) if key in keys else None
+
+        def _combo(combo, choices, key, pos=0):
+            i = _index(choices, key, pos)
+            if i is not None:
+                combo.setCurrentIndex(i)
+
+        v = vorgabe
+        if "win_axis" in v:
+            _combo(self.win_axis, WIN_AXIS_CHOICES, v["win_axis"], pos=1)
+        if "legend_fontsize" in v:
+            self.legend_fontsize.setValue(float(v["legend_fontsize"]))
+        if "draw_best_point" in v:
+            self.draw_best_point.setChecked(bool(v["draw_best_point"]))
+        if "do_valley" in v:
+            self.do_valley.setChecked(bool(v["do_valley"]))
+        # Achse vor dem Pfadmodus: "Gerade" ist nur bei der µm-Achse waehlbar.
+        if "valley_axis" in v:
+            _combo(self.valley_axis, report.VALLEY_AXIS_CHOICES, v["valley_axis"])
+        if "valley_path_mode" in v:
+            _combo(self.valley_path_mode, report.PATH_MODE_CHOICES, v["valley_path_mode"])
+        if "valley_follow" in v:
+            _combo(self.valley_follow, report.FOLLOW_CHOICES, v["valley_follow"])
+        if "valley_select" in v:
+            _combo(self.valley_select, report.VALLEY_SELECT_CHOICES, v["valley_select"])
+        if "valley_guide_follow" in v:
+            _combo(self.valley_guide_follow, report.FOLLOW_CHOICES, v["valley_guide_follow"])
+        if "valley_guide_halfwidth" in v:
+            self.valley_guide_halfwidth.setValue(float(v["valley_guide_halfwidth"]))
+        if "valley_fit_line" in v:
+            self._fit_line_gemerkt = bool(v["valley_fit_line"])
+            if self.valley_fit_line.isEnabled():
+                self.valley_fit_line.setChecked(bool(v["valley_fit_line"]))
+        if "valley_map_show_path" in v:
+            self.valley_map_show_path.setChecked(bool(v["valley_map_show_path"]))
+        if "valley_limit" in v:
+            grenzen = v["valley_limit"]
+            if grenzen is None:
+                self.valley_limit.setChecked(False)
+                self._fill_valley_limit()
+            else:
+                (w0, w1), (h0, h1) = grenzen
+                self.waist_von.setValue(float(w0))
+                self.waist_bis.setValue(float(w1))
+                self.width_von.setValue(float(h0))
+                self.width_bis.setValue(float(h1))
+                self.valley_limit.setChecked(True)
+        if "forbidden_draw" in v:
+            self.forbidden_draw.setChecked(bool(v["forbidden_draw"]))
+        if "forbidden_exclude" in v:
+            self.forbidden_exclude.setChecked(bool(v["forbidden_exclude"]))
+        if "forbidden_factor" in v:
+            self.forbidden_factor.setValue(float(v["forbidden_factor"]))
+        if "do_recompute" in v:
+            self.do_recompute.setChecked(bool(v["do_recompute"]))
+        if "fixed_width_mhz" in v:
+            self.fixed_width.setValue(float(v["fixed_width_mhz"] or 0.0))
+        # Der Punkt zuletzt: ob "nur Width vorgeben" waehlbar ist, haengt an
+        # der Geraden und damit an den Talschnitt-Einstellungen oben.
+        if "best_point_report_only" in v:
+            self.best_point_report_only.setChecked(bool(v["best_point_report_only"]))
+        if "best_point_follow" in v:
+            keys = getattr(self, "best_point_combo_keys", [])
+            if v["best_point_follow"] in keys:
+                self.best_point_follow.setCurrentIndex(keys.index(v["best_point_follow"]))
+        self._sync_manual_point()
+        if "best_point_value" in v:
+            self.best_point_value.setValue(float(v["best_point_value"]))
+        self._sync_valley_fit_state()
+        self._sync_guide_state()
+        self._sync_valley_limit()
+        self._sync_forbidden_state()
+        self.input_info.setText(self.input_info.text()
+                                + "\nStandard-Einstellungen fuer diesen Datensatz gesetzt.")
 
     def _on_draw_best_point_toggled(self, an):
         # Ohne Punkt gibt es auch nichts in den Bericht zu schreiben.
@@ -1152,6 +1306,8 @@ class PlotsDialog(QDialog):
             fit_line_on_maps=self.fit_line_on_maps.isChecked(),
             fit_line_dashed_extrapolation=self.fit_line_dashed.isChecked(),
             amplitude_maps=self.amplitude_maps.isChecked(),
+            amp_layout=report.AMP_LAYOUT_CHOICES[
+                self.amp_layout.currentIndex()][0],
             point_cuts=self.point_cuts.isChecked(),
             plot_overview=self.plot_overview.isChecked(),
             show=self.show_interactive.isChecked(),
@@ -1177,6 +1333,7 @@ class PlotsDialog(QDialog):
             valley_guide_halfwidth=self.valley_guide_halfwidth.value(),
             valley_waist_range=self._current_valley_ranges()[0],
             valley_width_range=self._current_valley_ranges()[1],
+            fixed_width_mhz=(self.fixed_width.value() or None),
             forbidden_draw=self.forbidden_draw.isChecked(),
             forbidden_exclude=self.forbidden_exclude.isChecked(),
             forbidden_factor=self.forbidden_factor.value(),
@@ -1233,6 +1390,7 @@ def main():
             fit_line_on_maps=params["fit_line_on_maps"],
             fit_line_dashed_extrapolation=params["fit_line_dashed_extrapolation"],
             amplitude_maps=params["amplitude_maps"],
+            amp_layout=params["amp_layout"],
             forbidden_factor=(params["forbidden_factor"]
                               if (params["forbidden_draw"] or params["forbidden_exclude"])
                               else None),
@@ -1253,6 +1411,7 @@ def main():
             valley_guide_halfwidth=params["valley_guide_halfwidth"],
             valley_waist_range=params["valley_waist_range"],
             valley_width_range=params["valley_width_range"],
+            fixed_width_mhz=params["fixed_width_mhz"],
         )
     except Exception as exc:
         QMessageBox.critical(None, "Auswertung fehlgeschlagen", f"{exc!r}")

@@ -76,11 +76,12 @@ from PyQt5.QtWidgets import (
     QCheckBox, QPushButton, QComboBox, QGroupBox, QGridLayout, QMessageBox,
     QFileDialog
 )
+from PyQt5.QtCore import Qt
 
 # The physics: kern/beating_physik.py (kern is a package next to this file).
 from kern import beating_physik as phys
 # One width, one font size for every saved PDF - see kern/plotstil.py.
-from kern.plotstil import FIG_WIDTH_IN, style_figure
+from kern.plotstil import FIG_WIDTH_IN, style_figure, latex_rc, image_rc
 
 A4_LANDSCAPE = (11.69, 8.27)          # inch - a frame series is wide by nature
 
@@ -214,11 +215,19 @@ def crop_to_profile(img, frac=0.25, margin=1.5, aspect=None):
     cols = np.where(mask.any(0))[0]
     rc = 0.5 * (rows[0] + rows[-1])
     cc = 0.5 * (cols[0] + cols[-1])
-    hh = 0.5 * (rows[-1] - rows[0] + 1) * margin
-    hw = 0.5 * (cols[-1] - cols[0] + 1) * margin
+    eh = float(rows[-1] - rows[0] + 1)
+    ew = float(cols[-1] - cols[0] + 1)
     if aspect:
-        hh = max(hh, hw / aspect)
+        # Window shape given (that of the other panel): choose its size so
+        # that the profile fills the SAME fraction of it as in a window cut
+        # with its own shape - by area, i.e. the geometric mean of the two
+        # extents, times margin. Taking the larger of the two (as before)
+        # shrank the profile whenever its shape differed slightly.
+        hh = 0.5 * margin * np.sqrt(eh * ew / aspect)
         hw = aspect * hh
+    else:
+        hh = 0.5 * eh * margin
+        hw = 0.5 * ew * margin
     hh = min(hh, H / 2.0)
     hw = min(hw, W / 2.0)
     r0 = int(round(min(max(rc - hh, 0), H - 2 * hh)))
@@ -308,7 +317,10 @@ def peak_to_valley(img, core=0.70, q=0.5):
     return dict(pv=(pk - va) / mean if mean > 0 else float("nan"),
                 contrast=(pk - va) / (pk + va) if pk + va > 0 else float("nan"),
                 peak=pk / mx, valley=va / mx, mean=mean / mx, n=int(v.size),
-                box=(r0, r1, c0, c1))
+                box=(r0, r1, c0, c1),
+                half_box=(int(rows[0]), int(rows[-1]) + 1,
+                          int(cols[0]), int(cols[-1]) + 1),
+                q=q, core=core)
 
 
 class CameraSeriesDialog(QDialog):
@@ -503,7 +515,7 @@ class CameraSeriesDialog(QDialog):
             a = axes[0][i]
             a.imshow(frames[i] / norm, extent=ext, origin="lower", cmap="inferno",
                      vmin=0.0, vmax=(vmax / norm) if vmax else None)
-            a.set_title(r"$t_0$ = %.1f - %.1f $\mu$s"
+            a.set_title(r"$t_0$ = %.1f - %.1f µs"
                         % (L["t0"][i] * 1e6, (L["t0"][i] + L["t_exp"]) * 1e6),
                         fontsize=9)
             a.set_xticks([]); a.set_yticks([])
@@ -536,8 +548,8 @@ class CameraSeriesDialog(QDialog):
                 else ("telescope %.0f/%.0f mm" % (s["f1"] * 1e3, s["f2"] * 1e3))
             fig.suptitle(
                 r"%d$\times$%d tones, width %.4f / %.4f MHz  |  %s, "
-                r"$w_0$ = %.2f $\mu$m  |  $T_0$ = %.2f $\mu$s, exposure "
-                r"%.2f $\mu$s  -  no spatial averaging, this is the image itself"
+                r"$w_0$ = %.2f µm  |  $T_0$ = %.2f µs, exposure "
+                r"%.2f µs  -  no spatial averaging, this is the image itself"
                 % (s["N_x"], s["N_y"], s["width_x"] * 1e-6, s["width_y"] * 1e-6,
                    build, s["win"] * 1e6, L["T0"] * 1e6, L["t_exp"] * 1e6),
                 fontsize=9.5)
@@ -693,7 +705,9 @@ class CameraSeriesDialog(QDialog):
         self.cb_pv_mark = QCheckBox("mark P-V region")
         self.cb_pv_mark.setToolTip(
             "Draws the region of the peak-to-valley as a dashed box into both\n"
-            "panels (also into the saved PDF).")
+            "panels, with the PV value. When saving, a second PDF\n"
+            "'..._peak_to_valley.pdf' is written as well: the evaluation region,\n"
+            "the peak and valley pixels, the histograms and all numbers.")
         for w in (self.sp_pv_core, self.sp_pv_q):
             w.valueChanged.connect(lambda *_: self._refresh_cmp())
         self.cb_pv_mark.stateChanged.connect(lambda *_: self._refresh_cmp())
@@ -727,7 +741,31 @@ class CameraSeriesDialog(QDialog):
                 lay.addWidget(QLabel(name), 3, 2 * i)
             lay.addWidget(w, 3, 2 * i + 1)
         lay.addWidget(btn_cmp, 0, 2, 1, 4)
+        # peak-to-valley of the current comparison, visible without opening
+        # the comparison window
+        self.lbl_pv = QLabel("Peak-to-valley: load a measured image")
+        self.lbl_pv.setTextFormat(Qt.PlainText)
+        self.lbl_pv.setStyleSheet("font-weight: bold;")
+        self.lbl_pv.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lay.addWidget(self.lbl_pv, 4, 0, 1, 14)
         return g
+
+    def _update_pv_label(self, D):
+        """One line with both peak-to-valley values - main window and
+        comparison window show the same text."""
+        S = None if D is None else D["pv_sim"]
+        M = None if D is None else D["pv_meas"]
+        if S is None or M is None:
+            txt = "Peak-to-valley: load a measured image"
+        else:
+            txt = ("Peak-to-valley (I_p - I_v)/mean, central %.0f %%, p%g/p%g:   "
+                   "simulation %.1f %%   |   measurement %.1f %%   |   "
+                   "measurement / simulation = %.2f"
+                   % (100 * D["pv_core"], 100 - D["pv_q"], D["pv_q"],
+                      100 * S["pv"], 100 * M["pv"],
+                      M["pv"] / S["pv"] if S["pv"] > 0 else float("nan")))
+        self.lbl_pv.setText(txt)
+        return txt
 
     def _refresh_panel_combo(self):
         """Keeps the list of panels in step with the series."""
@@ -769,7 +807,12 @@ class CameraSeriesDialog(QDialog):
 
     def _refresh_cmp(self):
         if self._cmp is not None and self._cmp.isVisible():
-            self._cmp.refresh()
+            self._cmp.refresh()          # also updates the P-V line here
+        elif self._meas is not None and self._last is not None:
+            try:
+                self._update_pv_label(self.compare_data())
+            except Exception as exc:     # never let a label break the window
+                self.lbl_pv.setText("Peak-to-valley: not available (%s)" % exc)
 
     # ------------------------------------------------------------
     def _meas_oriented(self):
@@ -802,7 +845,11 @@ class CameraSeriesDialog(QDialog):
         margin = self.sp_margin.value()
 
         if self.cb_crop.isChecked():
-            rs, cs = crop_to_profile(mean, margin=margin)
+            # Size of a profile = its 50 % edges (the edge midpoints). At
+            # 25 % the soft halo of the measurement counted as profile, its
+            # window became larger and the profile looked smaller than the
+            # simulated one. With 50 % on both, both fill the same fraction.
+            rs, cs = crop_to_profile(mean, frac=0.5, margin=margin)
         else:
             rs, cs = slice(None), slice(None)
         sim_mean = mean[rs, cs]
@@ -811,7 +858,7 @@ class CameraSeriesDialog(QDialog):
 
         meas = self._meas_oriented()
         if self.cb_crop.isChecked():
-            mr, mc = crop_to_profile(meas, margin=margin, aspect=aspect)
+            mr, mc = crop_to_profile(meas, frac=0.5, margin=margin, aspect=aspect)
             meas = meas[mr, mc]
 
         # correlation on the simulation grid
@@ -832,11 +879,11 @@ class CameraSeriesDialog(QDialog):
             label = r"simulation, time average"
         elif k == 1:
             chosen = best
-            label = (r"simulation, best match ($t_0$ = %.1f $\mu$s)"
+            label = (r"simulation, best match ($t_0$ = %.1f µs)"
                      % (chosen[2] * 1e6))
         else:
             chosen = scored[min(k - 1, len(scored) - 1)]
-            label = (r"simulation, $t_0$ = %.1f $\mu$s" % (chosen[2] * 1e6))
+            label = (r"simulation, $t_0$ = %.1f µs" % (chosen[2] * 1e6))
 
         name, panel, t0, r, dr, dc = chosen
         meas_shown = np.roll(np.roll(m_on_sim, dr, 0), dc, 1) if (dr or dc) \
@@ -906,8 +953,13 @@ class CameraSeriesDialog(QDialog):
                 r0, r1, c0, c1 = P["box"]
                 a.add_patch(Rectangle((c0 - 0.5, r0 - 0.5), c1 - c0, r1 - r0,
                                       fill=False, ec="w", lw=0.8, ls="--"))
-        cb = fig.colorbar(im, ax=[ax0, ax1], orientation="horizontal",
-                          fraction=0.055, pad=0.03, aspect=45)
+                a.text(0.03, 0.97, "PV = %.1f %%" % (100 * P["pv"]),
+                       transform=a.transAxes, ha="left", va="top", color="w")
+        # Colour bar to the right of the panels, EXACTLY as tall as the image
+        # area: an inset of the right panel in its axes coordinates follows
+        # the aspect-corrected image box, whatever the figure height.
+        cax = ax1.inset_axes([1.04, 0.0, 0.045, 1.0])
+        cb = fig.colorbar(im, cax=cax)
         # Each panel is normalised to its own maximum - that belongs in the
         # caption, not on the colour bar.
         cb.set_label(r"$I/I_{\mathrm{max}}$")
@@ -944,10 +996,104 @@ class CameraSeriesDialog(QDialog):
             # Two lines on purpose: at 16 cm and 10 pt a single line of this
             # would run off both sides of the figure.
             fig.suptitle((r"%d$\times$%d tones, %s" "\n"
-                          r"exposure %.1f $\mu$s, $T_0$ = %.1f $\mu$s, "
+                          r"exposure %.1f µs, $T_0$ = %.1f µs, "
                           r"correlation $r$ = %.3f")
                          % (s["N_x"], s["N_y"], build, D["t_exp"] * 1e6,
                             D["T0"] * 1e6, D["r"]))
+        return fig
+
+    def draw_pv_explanation(self, fig, D):
+        """How the peak-to-valley came about, for both panels.
+
+        Row 1: the panels in grey with the half-maximum contour, the box
+        around it, the evaluation region (dashed) and the pixels above the
+        peak / below the valley percentile. Row 2: histogram of the region
+        with I_v, <I>, I_p. Row 3: every number of the computation, to be
+        copied by hand."""
+        from matplotlib.patches import Rectangle
+        from matplotlib.lines import Line2D
+        C_OUT, C_PK, C_VA = "#4dd2ff", "#ff4d4d", "#3d7bff"
+        fig.clear()
+        gs = fig.add_gridspec(3, 2, height_ratios=[1.0, 0.62, 0.42])
+        panels = ((D["sim"], D["pv_sim"], "simulation"),
+                  (D["meas"], D["pv_meas"], "measurement"))
+        for k, (img, P, ttl) in enumerate(panels):
+            if P is None:
+                continue
+            I = img / max(float(img.max()), 1e-300)
+            r0, r1, c0, c1 = P["box"]
+            h0, h1, g0, g1 = P["half_box"]
+            ax = fig.add_subplot(gs[0, k])
+            ax.imshow(I, origin="lower", cmap="gray", vmin=0, vmax=1,
+                      interpolation="nearest")
+            ax.contour(I, levels=[0.5], colors=[C_OUT], linewidths=0.6,
+                       linestyles=":")
+            ax.add_patch(Rectangle((g0 - 0.5, h0 - 0.5), g1 - g0, h1 - h0,
+                                   fill=False, ec=C_OUT, lw=1.0))
+            ax.add_patch(Rectangle((c0 - 0.5, r0 - 0.5), c1 - c0, r1 - r0,
+                                   fill=False, ec="w", lw=1.2, ls="--"))
+            sub = I[r0:r1, c0:c1]
+            yy, xx = np.where(sub >= P["peak"])
+            ax.plot(xx + c0, yy + r0, "s", ms=2.0, mfc=C_PK, mec="none")
+            yy, xx = np.where(sub <= P["valley"])
+            ax.plot(xx + c0, yy + r0, "s", ms=2.0, mfc=C_VA, mec="none")
+            ax.set_xticks([]); ax.set_yticks([]); ax.set_title(ttl)
+            h = fig.add_subplot(gs[1, k])
+            h.hist(sub.ravel(), bins=60, range=(0, 1), color="0.6",
+                   edgecolor="none")
+            h.axvline(P["valley"], color=C_VA, lw=1.2)
+            h.axvline(P["mean"], color="k", lw=1.2, ls="--")
+            h.axvline(P["peak"], color=C_PK, lw=1.2)
+            h.set_xlim(max(0.0, P["valley"] - 0.2), 1.02)
+            h.set_xlabel(r"$I/I_{\mathrm{max}}$ in the region")
+            if k == 0:
+                h.set_ylabel("pixels")
+            h.set_title("PV = %.1f %%" % (100 * P["pv"]))
+        # the numbers
+        S, M = D["pv_sim"], D["pv_meas"]
+        tax = fig.add_subplot(gs[2, :])
+        tax.axis("off")
+        if S is not None and M is not None:
+            # plain text grid - a matplotlib table squeezes the axes above it
+            head = ["", "region [px]", r"$I_v$", r"$\langle I\rangle$",
+                    r"$I_p$", "PV", "contrast"]
+            xs = [0.0, 0.36, 0.52, 0.63, 0.74, 0.845, 0.965]
+
+            def cells(lab, P):
+                r0, r1, c0, c1 = P["box"]
+                return [lab, "%d x %d = %d" % (c1 - c0, r1 - r0, P["n"]),
+                        "%.3f" % P["valley"], "%.3f" % P["mean"],
+                        "%.3f" % P["peak"], "%.1f %%" % (100 * P["pv"]),
+                        "%.1f %%" % (100 * P["contrast"])]
+            rows = [head, cells("simulation", S), cells("measurement", M)]
+            for j, row in enumerate(rows):
+                y = 0.98 - 0.20 * j
+                for i, (x, t) in enumerate(zip(xs, row)):
+                    tax.text(x, y, t, transform=tax.transAxes, va="top",
+                             ha="left" if i == 0 else "center",
+                             fontweight="bold" if j == 0 else "normal")
+            tax.plot([0, 1], [0.80, 0.80], color="0.5", lw=0.6,
+                     transform=tax.transAxes)
+            ratio = M["pv"] / S["pv"] if S["pv"] > 0 else float("nan")
+            tax.text(0.0, 0.0,
+                     "PV = $(I_p - I_v)/\\langle I\\rangle$;  "
+                     "measurement / simulation = %.2f\n"
+                     "region = central %.0f %% of the box above max/2;  "
+                     "$I_p$ / $I_v$ = p%g / p%g;  $I$ in units of "
+                     "$I_{\\mathrm{max}}$"
+                     % (ratio, 100 * D["pv_core"], 100 - D["pv_q"], D["pv_q"]),
+                     transform=tax.transAxes, ha="left", va="bottom")
+        hand = [Line2D([], [], color=C_OUT, ls=":", lw=0.8,
+                       label=r"$I = I_{\mathrm{max}}/2$"),
+                Line2D([], [], color=C_OUT, lw=1.0, label="box > max/2"),
+                Line2D([], [], color="0.3", ls="--", lw=1.2,
+                       label="region (%.0f %%)" % (100 * D["pv_core"])),
+                Line2D([], [], marker="s", ls="", mfc=C_PK, mec="none",
+                       label=r"$\geq I_p$"),
+                Line2D([], [], marker="s", ls="", mfc=C_VA, mec="none",
+                       label=r"$\leq I_v$")]
+        fig.legend(handles=hand, loc="outside upper center", ncol=5,
+                   frameon=False, handlelength=1.4, columnspacing=1.0)
         return fig
 
     def compare_text(self, D):
@@ -995,7 +1141,9 @@ class CameraSeriesDialog(QDialog):
         shrink the 10 pt type to 8.5 pt with it. See kern/plotstil.py.
         """
         w = FIG_WIDTH_IN * self.sp_fw.value()
-        return w, w * (0.86 if self.cb_cuts.isChecked() else 0.56)
+        # Colour bar sits at the side, so less height is needed than with the
+        # old bar underneath - the panels keep their size.
+        return w, w * (0.78 if self.cb_cuts.isChecked() else 0.47)
 
     # ------------------------------------------------------------
     def _open_compare(self):
@@ -1024,6 +1172,9 @@ class CameraSeriesDialog(QDialog):
         import matplotlib
         old_ft = matplotlib.rcParams.get("pdf.fonttype")
         matplotlib.rcParams["pdf.fonttype"] = 42
+        # Schrift wie in den Flattop-Exporten (Latin Modern + CM-Mathe)
+        _font_rc = matplotlib.rc_context(image_rc())
+        _font_rc.__enter__()
         try:
             w_in, h_in = self.fig_size()
             tmp = Figure(figsize=(w_in, h_in), dpi=100,
@@ -1032,7 +1183,18 @@ class CameraSeriesDialog(QDialog):
             self.draw_compare(tmp, D)
             style_figure(tmp)
             tmp.savefig(out / (name + ".pdf"), format="pdf")
+            pv_pdf = None
+            if self.cb_pv_mark.isChecked() and D["pv_sim"] is not None \
+                    and D["pv_meas"] is not None:
+                pv_pdf = name + "_peak_to_valley.pdf"
+                tmp2 = Figure(figsize=(FIG_WIDTH_IN, 1.12 * FIG_WIDTH_IN),
+                              dpi=100, constrained_layout=True)
+                FigureCanvas(tmp2)
+                self.draw_pv_explanation(tmp2, D)
+                style_figure(tmp2)
+                tmp2.savefig(out / pv_pdf, format="pdf")
         finally:
+            _font_rc.__exit__(None, None, None)
             if old_ft is not None:
                 matplotlib.rcParams["pdf.fonttype"] = old_ft
         rows = [
@@ -1083,7 +1245,29 @@ class CameraSeriesDialog(QDialog):
                "shape.", "", "Left panel: simulation. Right panel: the "
                "measured frame. Without captions in the graphic that order is "
                "what names them - say it in the LaTeX caption.", "",
-               "## Files", "", "- `%s.pdf`" % name, ""]
+               "## Files", "", "- `%s.pdf`" % name]
+        if pv_pdf:
+            md += ["- `%s` (evaluation region, histograms and numbers of the "
+                   "peak-to-valley)" % pv_pdf]
+        md += [""]
+        S, M = D["pv_sim"], D["pv_meas"]
+        if S is not None and M is not None:
+            def line(lab, P):
+                r0, r1, c0, c1 = P["box"]
+                return ("| %s | %d x %d | %d | %.3f | %.3f | %.3f | %.1f %% | %.1f %% |"
+                        % (lab, c1 - c0, r1 - r0, P["n"], P["valley"],
+                           P["mean"], P["peak"], 100 * P["pv"],
+                           100 * P["contrast"]))
+            k = md.index("## What is not in the figure")
+            md[k:k] = ["## Peak-to-valley", "",
+                       "Region: central %.0f %% of the box above half maximum; "
+                       "I_p / I_v = p%g / p%g; intensities in units of the "
+                       "panel maximum." % (100 * D["pv_core"],
+                                           100 - D["pv_q"], D["pv_q"]), "",
+                       "| panel | region [px] | pixels | I_v | <I> | I_p | PV | contrast |",
+                       "|---|---|---|---|---|---|---|---|",
+                       line("simulation", S), line("measurement", M), "",
+                       "measurement / simulation = %.2f" % (M["pv"] / S["pv"]), ""]
         (out / (name + "_report.md")).write_text("\n".join(md), encoding="utf-8")
         return name
 
@@ -1168,13 +1352,21 @@ class _CompareWindow(QDialog):
         self.setWindowTitle("Predicted vs. measured camera frame")
         self.resize(1000, 760)
         root = QVBoxLayout(self)
+        self.lbl_pv = QLabel("-")
+        self.lbl_pv.setTextFormat(Qt.PlainText)
+        self.lbl_pv.setWordWrap(True)
+        self.lbl_pv.setStyleSheet("font-weight: bold; font-size: 13px;")
+        self.lbl_pv.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        root.addWidget(self.lbl_pv)
         self.fig = Figure(figsize=(FIG_WIDTH_IN, 0.86 * FIG_WIDTH_IN), dpi=110,
                           constrained_layout=True)
         self.canvas = FigureCanvas(self.fig)
         root.addWidget(self.canvas, 1)
         self.lbl = QLabel("-")
+        self.lbl.setTextFormat(Qt.PlainText)   # '<I>' in the text is no HTML tag
         self.lbl.setWordWrap(True)
         self.lbl.setStyleSheet("font-size: 11px;")
+        self.lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         root.addWidget(self.lbl)
         row = QHBoxLayout()
         b_re = QPushButton("Redraw")
@@ -1191,6 +1383,7 @@ class _CompareWindow(QDialog):
         D = self.owner.compare_data()
         if D is None:
             self.lbl.setText("no measured image loaded")
+            self.lbl_pv.setText("")
             return
         # Same proportions as the PDF, so that what is judged here is what
         # ends up in the document.
@@ -1198,6 +1391,7 @@ class _CompareWindow(QDialog):
         self.owner.draw_compare(self.fig, D)
         self.canvas.draw_idle()
         self.lbl.setText(self.owner.compare_text(D))
+        self.lbl_pv.setText(self.owner._update_pv_label(D))
 
     def _save(self):
         try:

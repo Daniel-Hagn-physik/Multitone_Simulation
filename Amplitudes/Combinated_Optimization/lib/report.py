@@ -36,10 +36,12 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, LogNorm
 from matplotlib.patches import Patch, Rectangle
-from matplotlib.ticker import FormatStrFormatter, FuncFormatter, MultipleLocator
+from matplotlib.ticker import (FormatStrFormatter, FuncFormatter, FixedLocator,
+                               MaxNLocator, MultipleLocator)
 
 from . import paths
 from .combine import (
+    um_per_MHz,
     FORBIDDEN_FACTOR_DEFAULT, dataset_kind, forbidden_boundary, forbidden_mask,
     penalty_objective, penalty_pair, waist_um_vals,
 )
@@ -192,8 +194,8 @@ def working_point_label(best, at_edge=False):
     # Waist auf zwei Nachkommastellen: das Gitter ist feiner, die dritte
     # Stelle unterscheidet aber keine Arbeitspunkte mehr, die man von Hand
     # ansteuern wuerde - und der Text steht in jeder Legende.
-    return (r"$\omega$ = %.2f µm, width = %.3f MHz"
-            % (best.get('waist_um', float('nan')), best['width'] * 1e-6))
+    return ((r"$\omega$ = %.2f µm, $W$ = %.2f " + width_unit())
+            % (best.get('waist_um', float('nan')), wd(best['width'] * 1e-6)))
 
 # Der Waist NACH den Linsen, also der in der Atomebene wirksame. Frueher hiess
 # er "Waist at focus omega' (µm, after lenses)"; der Strich sollte "nach der
@@ -210,7 +212,95 @@ WIN_INPUT_LABEL = r"Input waist $\omega_{\mathrm{in}}$ (mm) (before lenses)"
 WIN_INPUT_LABEL_SHORT = r"Input waist $\omega_{\mathrm{in}}$ (mm)"
 WIN_INPUT_SYMBOL = r"$\omega_{\mathrm{in}}$"
 
-WIDTH_LABEL = "Width (MHz)"
+WIDTH_LABEL_MHZ = "Width (MHz)"
+WIDTH_LABEL_UM = "Width $W$ (µm)"
+
+# ----------------------------------------------------------------------
+# Width-Anzeige in µm (seit Oktober 2026 Standard)
+# ----------------------------------------------------------------------
+# Intern bleibt width in Hz/MHz - so steht sie im Datensatz, so rechnen
+# Talpfad, Fit, Korridor und Suchfenster. Nur ANGEZEIGT (Achsen, Legenden,
+# Bericht) wird sie als raeumliche Kantenlaenge W in der Atomebene:
+#
+#     W = width_to_um(width, f1, f2, fLO, theta_max, f_band)
+#
+# also mit den AOD-Parametern und der Linsenkombination DES DATENSATZES
+# (um_per_MHz(), z.B. 6.3162 µm/MHz bei f1=75 mm, f2=750 mm). W ist linear
+# in width, eine Gerade width = a*waist + b bleibt also eine Gerade:
+# W/µm = (u*a)*waist/µm + u*b.
+#
+# use_width_scale(results) setzt den Faktor; jede Plot-/Berichtsfunktion,
+# die einen Datensatz bekommt, ruft es zuerst auf. Ohne Datensatz (oder
+# wenn die Optik fehlt) bleibt die Anzeige bei MHz.
+_WIDTH_UM_PER_MHZ = [None]
+
+
+def use_width_scale(results):
+    """Faktor µm/MHz aus Optik und AOD-Parametern des Datensatzes setzen."""
+    try:
+        u = float(um_per_MHz(results))
+    except Exception:
+        u = None
+    _WIDTH_UM_PER_MHZ[0] = u if (u is not None and np.isfinite(u) and u > 0) else None
+    return _WIDTH_UM_PER_MHZ[0]
+
+
+def width_factor():
+    """MHz -> Anzeige-Einheit (µm, sonst 1.0)."""
+    return _WIDTH_UM_PER_MHZ[0] or 1.0
+
+
+def width_unit():
+    return "µm" if _WIDTH_UM_PER_MHZ[0] else "MHz"
+
+
+def width_label():
+    return WIDTH_LABEL_UM if _WIDTH_UM_PER_MHZ[0] else WIDTH_LABEL_MHZ
+
+
+def wd(width_mhz):
+    """width in MHz -> Anzeige (W in µm). Skalar bleibt Skalar."""
+    if np.ndim(width_mhz) == 0:
+        return float(width_mhz) * width_factor()
+    return np.asarray(width_mhz, dtype=float) * width_factor()
+
+
+def w_txt(width_mhz, stellen=4):
+    """'W = 2.2500 µm (width = 0.3562 MHz)' fuer den Bericht."""
+    if _WIDTH_UM_PER_MHZ[0]:
+        return (f"W = {wd(width_mhz):.{stellen}f} µm "
+                f"(width = {float(width_mhz):.{stellen}f} MHz)")
+    return f"width = {float(width_mhz):.{stellen}f} MHz"
+
+
+def fit_in_display_units(fit):
+    """Kopie eines Geraden-Fits mit width in der Anzeige-Einheit (µm).
+
+    Der Fit selbst rechnet in MHz (width = a*waist + b). Fuer Bericht und
+    Plot wird nur umgeschrieben: W = (u*a)*waist + u*b bzw. beim Schnitt
+    ueber width waist = (a/u)*W + b.
+    """
+    if not fit or not _WIDTH_UM_PER_MHZ[0]:
+        return fit
+    u = _WIDTH_UM_PER_MHZ[0]
+    f = dict(fit)
+    if f.get("u_unit") == "MHz":
+        for k in ("a", "b", "sigma_a", "sigma_b"):
+            if f.get(k) is not None:
+                f[k] = float(f[k]) * u
+        f["u_unit"], f["u_plain"], f["u_tex"] = "µm", "W", "$W$"
+    elif f.get("t_unit") == "MHz":
+        for k in ("a", "sigma_a"):
+            if f.get(k) is not None:
+                f[k] = float(f[k]) / u
+        for k in ("t_min", "t_max"):
+            if f.get(k) is not None:
+                f[k] = float(f[k]) * u
+        f["t_unit"], f["t_plain"], f["t_tex"] = "µm", "W", "$W$"
+    return f
+
+# Alter Name, falls noch jemand von aussen darauf zugreift.
+WIDTH_LABEL = WIDTH_LABEL_UM
 
 
 # ======================================================================
@@ -341,6 +431,7 @@ def win_axis_values(results, win_axis):
     """(x_werte, achsenbeschriftung, umgedreht?) fuer die gewuenschte
     Waist-Konvention. 'after_lens' ist monoton fallend in win_input,
     daher wird dort ggf. umgedreht."""
+    use_width_scale(results)   # Width-Anzeige in µm
     win_input_vals = np.asarray(results['win_input_vals'], dtype=float)
     if win_axis == "before_lens":
         return win_input_vals * 1e3, WIN_INPUT_LABEL, False
@@ -356,6 +447,7 @@ def win_axis_values(results, win_axis):
 
 
 def _x_of_index(results, j, win_axis):
+    use_width_scale(results)   # Width-Anzeige in µm
     x_vals, _, reversed_ = win_axis_values(results, win_axis)
     n = len(x_vals)
     return x_vals[n - 1 - j] if reversed_ else x_vals[j]
@@ -402,7 +494,7 @@ def draw_best_point_marker(ax, results, win_axis, legend=True, best=None,
     # Ohne eigene Legende bekommt der Stern auch KEINEN Legendeneintrag:
     # sonst sammelt ihn der Aufrufer ueber get_legend_handles_labels() in
     # seine gemeinsame Legende ein, und genau die soll knapp bleiben.
-    ax.plot([x], [best['width'] * 1e-6],
+    ax.plot([x], [wd(best['width'] * 1e-6)],
             label=(beschriftung if label else "_nolegend_"), **stil)
     handles, _ = ax.get_legend_handles_labels()
     if legend and handles:
@@ -456,6 +548,7 @@ def score_grid(results):
     bilden laesst (z.B. fehlende gewichtete Gitter), faellt die Funktion auf
     den gespeicherten Wert zurueck.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     J = _grid_for(results, "penalty_raw")
     if J is not None:
         return J
@@ -480,6 +573,7 @@ MANUAL_POINT_UNITS = {BEST_POINT_MANUAL_WAIST: "µm", BEST_POINT_MANUAL_WIDTH: "
 def best_point_choices(results):
     """Eintraege fuer das Dialog-Dropdown: der gespeicherte Punkt, jede
     Groesse, die der Datensatz hergibt, und die beiden Eigenvorgaben."""
+    use_width_scale(results)   # Width-Anzeige in µm
     eintraege = [(BEST_POINT_FOLLOW_STORED, "wie im Datensatz gespeichert (Score)")]
     for key, label in FOLLOW_CHOICES:
         if _grid_for(results, key) is not None:
@@ -499,6 +593,7 @@ def win_input_for_waist_um(results, waist_um):
     geglaubt, sondern durch Vorwaertsrechnen mit der Projektfunktion
     gegengeprueft - passt es nicht, gibt es None statt einer falschen Zahl.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     if not np.isfinite(waist_um) or waist_um <= 0:
         return None
     waist_m = float(waist_um) * 1e-6
@@ -527,6 +622,7 @@ def manual_point_on_line(results, follow, value, fit):
     gescannten Fensters liegen - dort gibt es keine Daten, der Stern haengt
     dann in der Luft.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     if fit is None or value is None or not np.isfinite(value):
         return None
     a, b = float(fit["a"]), float(fit["b"])
@@ -574,6 +670,7 @@ def _mit_waist_um(results, best):
     brauchen es aber in jedem Fall - die Karten sind auf der µm-Achse
     beschriftet, nicht auf win_input.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     if best is None or best.get('win_input') is None or 'waist_um' in best:
         return best
     best = dict(best)
@@ -596,6 +693,7 @@ def best_point_by(results, follow=None, value=None, fit=None):
     width = 0.200 MHz, dem unteren Fensterrand. Der Plot zeichnet solche
     Punkte als OFFENEN Stern, der Bericht warnt.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     win_input_vals = np.asarray(results['win_input_vals'], dtype=float)
     width_vals = np.asarray(results['width_vals'], dtype=float)
     if follow in MANUAL_POINT_KEYS:
@@ -627,6 +725,7 @@ def best_point_by(results, follow=None, value=None, fit=None):
 
 
 def output_prefix(results):
+    use_width_scale(results)   # Width-Anzeige in µm
     n_win = len(np.asarray(results['win_input_vals']))
     n_width = len(np.asarray(results['width_vals']))
     tag = paths.profile_tag_of(results.get('profile'))
@@ -958,6 +1057,7 @@ def amplitude_panels(results):
        den Anteil auf der Konsole, und r_bounds steht im Bericht.
        Ungueltige (NaN-)Punkte bleiben weiss.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     if 'r_x_grid' not in results or 'r_y_grid' not in results:
         return None
     grids, masken, freie = {}, {}, []
@@ -997,6 +1097,7 @@ def r_bounds_clamped_fraction(results):
     make_all() meldet den Anteil auf der Konsole, damit er trotzdem
     auffaellt.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     bounds = results.get('r_bounds')
     if bounds is None or len(bounds) != 2:
         return None
@@ -1022,6 +1123,50 @@ def _mit_kartenstil(func):
     return wrapper
 
 
+def vier_ticks(achse, n=4):
+    """Genau `n` runde Marken auf einer Achse (oder so nah daran wie moeglich).
+
+    MaxNLocator taugt hier nicht: es verlangt, dass die Marken den ganzen
+    sichtbaren Bereich UMSCHLIESSEN. Bei Width 0.25 .. 0.45 MHz ragt das
+    pcolormesh-Gitter eine halbe Zelle darueber hinaus, die Schrittweite 0.05
+    muesste also von 0.20 bis 0.50 reichen - das sind sechs Intervalle, und
+    der Locator weicht auf 0.1 aus. Uebrig bleiben zwei Zahlen.
+
+    Deshalb wird hier abgezaehlt: fuer jede runde Schrittweite (1, 2, 2.5, 4,
+    5, 8 mal Zehnerpotenz) die Marken INNERHALB des Bereichs; genommen wird die,
+    die auf `n` kommt, sonst die naechstgroessere Zahl, von der unten gekuerzt
+    wird - dort steht die Marke ohnehin auf der Achsenkante.
+    """
+    lo, hi = sorted(achse.get_view_interval())
+    if not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
+        return
+    spanne = hi - lo
+    dec = 10.0 ** np.floor(np.log10(spanne))
+    kandidaten = []
+    for potenz in (dec * 0.1, dec, dec * 10.0):
+        for f in (1.0, 2.0, 2.5, 4.0, 5.0, 8.0):
+            schritt = f * potenz
+            if not schritt > 0:
+                continue
+            erste = np.ceil(lo / schritt - 1e-9) * schritt
+            marken = np.arange(erste, hi + 0.5 * schritt, schritt)
+            marken = marken[(marken >= lo - 1e-12) & (marken <= hi + 1e-12)]
+            if marken.size:
+                kandidaten.append((marken.size, schritt, marken))
+    if not kandidaten:
+        return
+    # 1. genau n; 2. lieber zu viele als zu wenige (zu viele lassen sich
+    # kuerzen, zu wenige nicht); 3. moeglichst nah an n; 4. die groebere
+    # Schrittweite.
+    anzahl, schritt, marken = min(
+        kandidaten, key=lambda k: (0 if k[0] == n else 1,
+                                   0 if k[0] > n else 1,
+                                   abs(k[0] - n), -k[1]))
+    if marken.size > n:
+        marken = marken[marken.size - n:]
+    achse.set_major_locator(FixedLocator([float(t) for t in marken]))
+
+
 @_mit_kartenstil
 def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens",
                            draw_best_point=DRAW_BEST_POINT_DEFAULT, save=True, show=False,
@@ -1036,6 +1181,7 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
 
     fit_line: Ergebnis von fit_valley_line() - dann wird die Gerade in alle
     Karten eingezeichnet (siehe draw_fit_line_on_map)."""
+    use_width_scale(results)   # Width-Anzeige in µm
     out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
     width_vals = np.asarray(results['width_vals'], dtype=float)
     x_vals, x_label, reversed_ = win_axis_values(results, win_axis)
@@ -1090,7 +1236,7 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
         # pcolormesh nimmt norm ODER vmin/vmax, nie beides.
         grenzen = (dict(norm=norm) if norm is not None
                    else dict(vmin=panel.get('vmin'), vmax=panel.get('vmax')))
-        im = ax.pcolormesh(x_vals, width_vals * 1e-6, Z_plot, shading="auto",
+        im = ax.pcolormesh(x_vals, wd(width_vals * 1e-6), Z_plot, shading="auto",
                            cmap=panel['cmap'], **grenzen)
         ticks = log_ticks(norm.vmin, norm.vmax) if norm is not None else None
         cbar = fig.colorbar(im, ax=ax, label=panel['cbar'],
@@ -1098,12 +1244,16 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
         if ticks is not None:
             cbar.ax.yaxis.set_major_formatter(FormatStrFormatter("%g"))
             cbar.ax.minorticks_off()
+        else:
+            # Vier Marken auch auf der Farbskala - sonst stehen dort je nach
+            # Wertebereich zwei und daneben sechs.
+            vier_ticks(cbar.ax.yaxis)
         if maske is not None and maske.any():
             M = np.where(maske, 1.0, np.nan)
             M_plot = M[:, ::-1] if reversed_ else M
             # NaN zeichnet matplotlib durchsichtig - uebrig bleibt genau
             # der geklemmte Bereich in Grau, ungueltige Punkte bleiben weiss.
-            ax.pcolormesh(x_vals, width_vals * 1e-6, M_plot, shading="auto",
+            ax.pcolormesh(x_vals, wd(width_vals * 1e-6), M_plot, shading="auto",
                           cmap=ListedColormap([R_CLAMP_COLOR]), vmin=0.0, vmax=1.0)
         # Kein beschreibender Titel mehr: was die Karte zeigt, steht an der
         # Farbskala ($U_h$, $\eta_w$, ...), und der Kennbuchstabe erlaubt den
@@ -1138,7 +1288,12 @@ def plot_metric_comparison(results, prefix, out_dir=None, win_axis="before_lens"
         ax.tick_params(labelbottom=True)
     # Die y-Beschriftung bleibt an der linken Spalte.
     for ax in axes[:, 0]:
-        ax.set_ylabel(WIDTH_LABEL)
+        ax.set_ylabel(width_label())
+    # Hoechstens vier Marken je Achse: bei sechs Karten nebeneinander ist
+    # jede nur rund 4 cm breit, mehr Zahlen kleben aneinander.
+    for ax in axes.flat:
+        vier_ticks(ax.xaxis)
+        vier_ticks(ax.yaxis)
 
     dateiname = (f"{prefix}_metric_comparison_amp.pdf" if with_amplitudes
                  else f"{prefix}_metric_comparison.pdf")
@@ -1156,6 +1311,7 @@ def plot_region(results, prefix, out_dir=None, win_axis="before_lens",
                 forbidden_factor=None, best_point=None,
                 fit_line=None, marks=None, valley=None):
     """Score-Heatmap, auf Wunsch mit dem besten Punkt und der Geraden."""
+    use_width_scale(results)   # Width-Anzeige in µm
     out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
     width_vals = np.asarray(results['width_vals'], dtype=float)
     x_vals, x_label, reversed_ = win_axis_values(results, win_axis)
@@ -1172,10 +1328,10 @@ def plot_region(results, prefix, out_dir=None, win_axis="before_lens",
     title = "Consistency region" if kind == "hard_check" else "Penalty region"
 
     fig, ax = plt.subplots(figsize=(8.0, 6.0), constrained_layout=True)
-    im = ax.pcolormesh(x_vals, width_vals * 1e-6, Z_plot, shading="auto", cmap="magma_r")
+    im = ax.pcolormesh(x_vals, wd(width_vals * 1e-6), Z_plot, shading="auto", cmap="magma_r")
     fig.colorbar(im, ax=ax, label=score_label)
     ax.set_xlabel(x_label)
-    ax.set_ylabel(WIDTH_LABEL)
+    ax.set_ylabel(width_label())
 
     region = results.get('region') or {}
     pct = results.get('combo_percentile')
@@ -1233,6 +1389,7 @@ def plot_amplitudes(results, prefix, out_dir=None, save=True, show=False,
     nicht durch das globale Optimum (siehe _plotter_punkt).
     `win_axis`: dieselbe Waist-Konvention wie in allen uebrigen Plots - wer
     alles in µm anzeigen laesst, bekommt sie auch hier."""
+    use_width_scale(results)   # Width-Anzeige in µm
     out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
     plotter = AmplitudeScanPlotter(results, out_dir=out_dir, confirm_overwrite=confirm_overwrite)
     punkt = _plotter_punkt(best_point)
@@ -1255,6 +1412,7 @@ def plot_agreement_map(results, prefix, out_dir=None, win_axis="before_lens",
                        save=True, show=False, confirm_overwrite=None,
                        forbidden_factor=None):
     """Karte der vier Kategorien: wo sind gewichtet und hart einig?"""
+    use_width_scale(results)   # Width-Anzeige in µm
     out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
     c = results.get('consistency') or {}
     agreement = np.asarray(c.get('agreement_map'), dtype=float)
@@ -1267,11 +1425,11 @@ def plot_agreement_map(results, prefix, out_dir=None, win_axis="before_lens",
     norm = matplotlib.colors.BoundaryNorm([-0.5, 0.5, 1.5, 2.5, 3.5], cmap.N)
 
     fig, ax = plt.subplots(figsize=(8.6, 6.0), constrained_layout=True)
-    im = ax.pcolormesh(x_vals, width_vals * 1e-6, Z, shading="auto", cmap=cmap, norm=norm)
+    im = ax.pcolormesh(x_vals, wd(width_vals * 1e-6), Z, shading="auto", cmap=cmap, norm=norm)
     cbar = fig.colorbar(im, ax=ax, ticks=[0, 1, 2, 3])
     cbar.ax.set_yticklabels(AGREEMENT_LABELS)
     ax.set_xlabel(x_label)
-    ax.set_ylabel(WIDTH_LABEL)
+    ax.set_ylabel(width_label())
     pct = c.get('good_percentile')
     frac = c.get('fraction_weighted_good_also_hard_good')
     title = f"Agreement map (best {pct:.0f}% per objective)" if pct is not None else "Agreement map"
@@ -1285,6 +1443,7 @@ def plot_agreement_map(results, prefix, out_dir=None, win_axis="before_lens",
 def plot_score_scatter(results, prefix, out_dir=None, save=True, show=False,
                        confirm_overwrite=None):
     """Streudiagramm: gewichteter Score vs. nachgerechneter harter Score."""
+    use_width_scale(results)   # Width-Anzeige in µm
     out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
     c = results.get('consistency') or {}
     sw = np.asarray(c.get('score_weighted'), dtype=float).ravel()
@@ -1337,16 +1496,19 @@ def plot_score_scatter(results, prefix, out_dir=None, save=True, show=False,
 # Markdown-Berichte
 # ======================================================================
 def _waist_um(results, win_input):
+    use_width_scale(results)   # Width-Anzeige in µm
     return win_input_to_win(win_input, results['f1'], results['f2'],
                             results['lambda_opt'], results['fLO']) * 1e6
 
 
 def _waist_range_um(results, lo, hi):
+    use_width_scale(results)   # Width-Anzeige in µm
     a, b = _waist_um(results, lo), _waist_um(results, hi)
     return min(a, b), max(a, b)
 
 
 def _r_at_best(results):
+    use_width_scale(results)   # Width-Anzeige in µm
     best = results.get('best') or {}
     if best.get('win_input') is None:
         return None
@@ -1400,6 +1562,7 @@ def values_at_point(results, waist_um, width_mhz):
     der Gitterwert daneben ist eine wirklich gerechnete Zahl und dient als
     Anker.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     waist_grid = np.array([win_input_to_win(w, results['f1'], results['f2'],
                                             results['lambda_opt'], results['fLO'])
                            for w in np.asarray(results['win_input_vals'], dtype=float)]) * 1e6
@@ -1437,6 +1600,7 @@ def _point_value_table(results, waist_um, width_mhz, auf_gitter=False):
     auf_gitter=True: der Punkt IST ein Gitterpunkt, dann gibt es nur eine
     Wertespalte - interpolieren waere dort dieselbe Zahl noch einmal.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     werte, (w_nah, h_nah) = values_at_point(results, waist_um, width_mhz)
     if not werte:
         return []
@@ -1467,7 +1631,7 @@ def _point_value_table(results, waist_um, width_mhz, auf_gitter=False):
         f"liegt einer davon ausserhalb des Scans oder ist er ungueltig, steht dort "
         f"n/a. Die rechte Spalte sind die wirklich gerechneten Werte am "
         f"naechstgelegenen Gitterpunkt (Waist = {w_nah:.4f} µm, "
-        f"width = {h_nah:.4f} MHz).",
+        f"{w_txt(h_nah)}).",
         "",
         "Achtung bei r_x/r_y: das sind Optimierungs-ERGEBNISSE des Scans, keine "
         "glatten Funktionen. Wer die Metriken exakt an diesem Punkt braucht, muss "
@@ -1486,17 +1650,19 @@ def _manual_point_lines(punkt, results=None):
         "",
         f"Selbst vorgegeben: {vorgabe} = {punkt['given']:.4f} {einheit}. Die zweite "
         f"Koordinate kommt aus der Talpfad-Geraden "
-        f"(width/MHz = {punkt['fit_a']:.5f} * waist/µm {punkt['fit_b']:+.6f}):",
+        f"(W/{width_unit()} = {punkt['fit_a'] * width_factor():.5f} * waist/µm "
+            f"{punkt['fit_b'] * width_factor():+.5f}, intern width/MHz = "
+            f"{punkt['fit_a']:.5f} * waist/µm {punkt['fit_b']:+.6f}):",
         "",
         f"- Waist = {punkt['waist_um']:.4f} µm  (win_input = "
         f"{punkt['win_input'] * 1e3:.4f} mm)",
-        f"- width = {punkt['width'] * 1e-6:.4f} MHz",
+        f"- {w_txt(punkt['width'] * 1e-6)}",
         "",
         "Der Punkt liegt exakt auf der Geraden und damit in aller Regel ZWISCHEN "
         "den Gitterpunkten - er wird auch dort gezeichnet, nicht auf ein Gitter "
         "gerundet. Der naechstgelegene tatsaechlich gerechnete Gitterpunkt liegt "
-        f"bei Waist = {punkt['nearest_waist_um']:.4f} µm / width = "
-        f"{punkt['nearest_width'] * 1e-6:.4f} MHz.",
+        f"bei Waist = {punkt['nearest_waist_um']:.4f} µm / "
+        f"{w_txt(punkt['nearest_width'] * 1e-6)}.",
     ]
     if punkt.get('outside'):
         zeilen += [
@@ -1525,7 +1691,7 @@ def _best_point_marker_lines(best_point, results=None):
         f"{_follow_label(best_point['follow'])}:",
         "",
         f"- win_input = {best_point['win_input'] * 1e3:.4f} mm",
-        f"- width = {best_point['width'] * 1e-6:.4f} MHz",
+        f"- {w_txt(best_point['width'] * 1e-6)}",
         f"- Wert dort = {best_point.get('value', float('nan')):.6g}",
     ]
     if best_point.get('at_edge'):
@@ -1550,6 +1716,7 @@ def _best_point_marker_lines(best_point, results=None):
 def _forbidden_lines(results, factor, excluded):
     """Berichtsabschnitt zum verbotenen Bereich. Leere Liste, wenn keiner
     verlangt wurde."""
+    use_width_scale(results)   # Width-Anzeige in µm
     if factor is None:
         return []
     grenze = forbidden_boundary(results, factor)
@@ -1580,6 +1747,8 @@ def _forbidden_lines(results, factor, excluded):
         "",
         "```",
         f"width/MHz > {grenze['slope']:.5f} * waist/µm       (erlaubt)",
+        f"W/µm      > {grenze['slope'] * grenze['um_per_MHz']:.5f} * waist/µm       "
+        f"(dasselbe in µm, W = {grenze['um_per_MHz']:.4f} µm/MHz * width)",
         "```",
         "",
         f"- Steigung a = {grenze['slope']:.6f} MHz/µm bei Faktor k = {grenze['factor']:.4g}",
@@ -1608,6 +1777,7 @@ def _forbidden_lines(results, factor, excluded):
 
 
 def _scan_parameter_lines(results):
+    use_width_scale(results)   # Width-Anzeige in µm
     n_win = len(np.asarray(results['win_input_vals']))
     n_width = len(np.asarray(results['width_vals']))
     lines = [
@@ -1638,6 +1808,7 @@ def _scan_parameter_lines(results):
 
 
 def _region_lines(results, heading, intro):
+    use_width_scale(results)   # Width-Anzeige in µm
     region = results.get('region') or {}
     lines = [f"## {heading}", ""]
     if region.get('win_input_min') is None:
@@ -1653,13 +1824,16 @@ def _region_lines(results, heading, intro):
         f"- win_input (vor der Linse): {region['win_input_min'] * 1e3:.4f} .. "
         f"{region['win_input_max'] * 1e3:.4f} mm",
         f"- effektiver Waist (nach der Linse): {um_lo:.4f} .. {um_hi:.4f} µm",
-        f"- width: {region['width_min'] * 1e-6:.4f} .. {region['width_max'] * 1e-6:.4f} MHz",
+        f"- W: {wd(region['width_min'] * 1e-6):.4f} .. {wd(region['width_max'] * 1e-6):.4f} "
+        f"{width_unit()} (width {region['width_min'] * 1e-6:.4f} .. "
+        f"{region['width_max'] * 1e-6:.4f} MHz)",
         "",
     ]
     return lines
 
 
 def _best_point_lines(results, heading):
+    use_width_scale(results)   # Width-Anzeige in µm
     best = results.get('best') or {}
     lines = [f"## {heading}", ""]
     if best.get('win_input') is None:
@@ -1669,7 +1843,7 @@ def _best_point_lines(results, heading):
     lines += [
         f"- win_input = {best['win_input'] * 1e3:.4f} mm "
         f"({_waist_um(results, best['win_input']):.4f} µm effektiver Waist)",
-        f"- width = {best['width'] * 1e-6:.4f} MHz",
+        f"- {w_txt(best['width'] * 1e-6)}",
         f"- Uniformity_hart = {best['uniformity_hart'] * 100:.3f}%, "
         f"Crosstalk_hart = {best['crosstalk_hart'] * 100:.3f}%",
         f"- Uniformity_weighted = {best['uniformity_weighted'] * 100:.3f}%, "
@@ -1701,14 +1875,221 @@ FORMULA_BLOCK = [
 ]
 
 
+# ======================================================================
+# Arbeitspunkt - Zusammenfassung mit Unsicherheiten (Werte fuer den Text)
+# ======================================================================
+# Wie in Hard_Optimization: Gerade in µm mit Fehlern, J entlang der Geraden
+# und des Talpfads, Wertebereiche der Karten und der Punkt bei fester Width
+# auf der Geraden mit numerischer Unsicherheit (Methode wie
+# Amplitudes/arbeitspunkt_unsicherheiten.py).
+
+def _klammer(wert, sigma):
+    """Wert mit Fehler in Klammer-Schreibweise, Fehler auf eine
+    signifikante Stelle: 3.4734 +- 0.042 -> '3.47(4)'."""
+    if sigma is None or not np.isfinite(sigma) or sigma <= 0 or not np.isfinite(wert):
+        return f"{wert:.4g}"
+    stellen = int(-np.floor(np.log10(sigma)))
+    ziffer = int(round(sigma * 10.0 ** stellen))
+    if ziffer >= 10:                       # 0.096 -> 0.1
+        stellen -= 1
+        ziffer = int(round(sigma * 10.0 ** stellen))
+    if stellen <= 0:
+        return f"{round(wert, stellen):.0f}({ziffer * 10 ** (-stellen):.0f})"
+    return f"{wert:.{stellen}f}({ziffer})"
+
+
+def _sigma_num(results, grid, waist_um, width_mhz):
+    """(sigma_num, Interpolationsfehler, Scan-Rauschen) einer Groesse an
+    einem Punkt zwischen den Gitterpunkten. Alles in der Einheit des Gitters."""
+    grid = np.asarray(grid, dtype=float)
+    w_all = np.asarray(waist_um_of(results), dtype=float)
+    h_all = np.asarray(results['width_vals'], dtype=float) * 1e-6
+    ordnung = np.argsort(w_all)
+    w = w_all[ordnung]
+    Z = grid[:, ordnung]
+    nan3 = (float("nan"),) * 3
+    if not (w[0] <= waist_um <= w[-1] and h_all[0] <= width_mhz <= h_all[-1]):
+        return nan3
+    jb = int(np.clip(np.searchsorted(w, waist_um), 1, len(w) - 1))
+    ib = int(np.clip(np.searchsorted(h_all, width_mhz), 1, len(h_all) - 1))
+    th = (width_mhz - h_all[ib - 1]) / (h_all[ib] - h_all[ib - 1])
+    # Liegt der Punkt (fast) auf einer Gitterzeile, nur diese eine Zeile.
+    if th < 1e-6:
+        zeilen, gew = [ib - 1], [1.0]
+    elif th > 1 - 1e-6:
+        zeilen, gew = [ib], [1.0]
+    else:
+        zeilen, gew = [ib - 1, ib], [1.0 - th, th]
+    tw = (waist_um - w[jb - 1]) / (w[jb] - w[jb - 1])
+    lin = cub = 0.0
+    for i, g in zip(zeilen, gew):
+        lin += g * ((1 - tw) * Z[i, jb - 1] + tw * Z[i, jb])
+        lo = max(0, min(jb - 2, len(w) - 4))
+        cols = np.arange(lo, lo + 4)
+        cub += g * float(np.polyval(np.polyfit(w[cols], Z[i, cols], 3), waist_um))
+    d_interp = abs(cub - lin)
+    # lokales Quadrik-Fenster: 5 Zeilen x 6 Spalten
+    i_mid = zeilen[int(np.argmax(gew))]
+    i0 = int(np.clip(i_mid - 2, 0, len(h_all) - 5))
+    j0 = int(np.clip(jb - 3, 0, len(w) - 6))
+    ii, jj = np.arange(i0, i0 + 5), np.arange(j0, j0 + 6)
+    WW, HH = np.meshgrid(w[jj], h_all[ii])
+    x, y = (WW - waist_um).ravel(), ((HH - width_mhz) * 1e3).ravel()
+    A = np.column_stack([np.ones_like(x), x, y, x * x, x * y, y * y])
+    zz = Z[np.ix_(ii, jj)].ravel()
+    m = np.isfinite(zz)
+    if m.sum() <= 7 or not np.isfinite(d_interp):
+        return nan3
+    c, *_ = np.linalg.lstsq(A[m], zz[m], rcond=None)
+    res = zz[m] - A[m] @ c
+    rauschen = float(np.sqrt((res ** 2).sum() / (m.sum() - 6)))
+    return float(np.hypot(d_interp, rauschen)), float(d_interp), rauschen
+
+
+def _waist_sigma_on_line(fit_mhz, width_mhz):
+    """Waist-Unsicherheit eines Punkts auf der Geraden bei fester width:
+    Konfidenz der Regressionsgeraden an dieser Stelle (korrelierte a, b),
+    durch die Steigung geteilt."""
+    t = np.asarray(fit_mhz.get('waist_used', []), dtype=float)
+    u = np.asarray(fit_mhz.get('width_used', []), dtype=float)
+    a, b = float(fit_mhz['a']), float(fit_mhz['b'])
+    n = len(t)
+    if n < 3 or a == 0:
+        return float("nan")
+    S_tt = float(np.sum((t - t.mean()) ** 2))
+    s2 = float(np.sum((u - (a * t + b)) ** 2)) / (n - 2)
+    w0 = (width_mhz - b) / a
+    sy = np.sqrt(s2 * (1.0 / n + (w0 - t.mean()) ** 2 / S_tt))
+    return float(sy / abs(a))
+
+
+def _range_along_line(results, grid, fit_mhz, waist_lo, waist_hi, n=400):
+    """(min, max) einer Groesse entlang der Geraden im Waist-Bereich."""
+    w_all = waist_um_of(results)
+    h_all = np.asarray(results['width_vals'], dtype=float) * 1e-6
+    werte = []
+    for wu in np.linspace(waist_lo, waist_hi, n):
+        v = _bilinear(grid, w_all, h_all, wu, fit_mhz['a'] * wu + fit_mhz['b'])
+        if np.isfinite(v):
+            werte.append(v)
+    if not werte:
+        return float("nan"), float("nan")
+    return float(np.min(werte)), float(np.max(werte))
+
+
+
+SUMMARY_KEYS = ["r_x", "r_y", "uniformity_hard", "crosstalk_hard",
+                "uniformity_weighted", "crosstalk_weighted",
+                "uniformity_kombi", "crosstalk_kombi", "penalty_raw"]
+
+
+def _working_point_summary_lines(results, fit_mhz, width_mhz):
+    """Abschnitt 'Arbeitspunkt - Zusammenfassung' fuer den Penalty-Bericht."""
+    use_width_scale(results)
+    if fit_mhz is None or width_mhz is None or not np.isfinite(width_mhz):
+        return []
+    u = width_factor()
+    w_all = np.asarray(waist_um_of(results), dtype=float)
+    h_all = np.asarray(results['width_vals'], dtype=float) * 1e-6
+
+    def prozent(key):
+        g = _grid_for(results, key)
+        if g is None:
+            return None
+        return np.asarray(g, dtype=float) * (100.0 if TRACE_SPECS[key][3] else 1.0)
+
+    z = ["## Arbeitspunkt - Zusammenfassung (Werte fuer den Text)", "", "### Karten", ""]
+    for key, name in (("crosstalk_hard", "eta_h"), ("crosstalk_weighted", "eta_w"),
+                      ("uniformity_hard", "U_h"), ("uniformity_weighted", "U_w"),
+                      ("penalty_raw", "J_c")):
+        Z = prozent(key)
+        if Z is None or not np.isfinite(Z).any():
+            continue
+        z.append(f"- {name}: {np.nanmin(Z):.2f} % .. {np.nanmax(Z):.2f} %")
+    Uw = prozent("uniformity_weighted")
+    if Uw is not None and np.isfinite(Uw).any():
+        i, j = np.unravel_index(int(np.nanargmin(np.where(np.isfinite(Uw), Uw, np.inf))), Uw.shape)
+        z.append(f"- Minimum von U_w ({Uw[i, j]:.3f} %) bei omega = {w_all[j]:.3f} µm, "
+                 f"W = {h_all[i] * u:.2f} µm ({h_all[i]:.3f} MHz)")
+    for key in ("r_x", "r_y"):
+        R = prozent(key)
+        if R is not None and np.isfinite(R).any():
+            z.append(f"- {key}: {np.nanmin(R):.3f} .. {np.nanmax(R):.3f}")
+    z.append("")
+
+    a, b = float(fit_mhz['a']), float(fit_mhz['b'])
+    sa, sb = float(fit_mhz.get('sigma_a', np.nan)), float(fit_mhz.get('sigma_b', np.nan))
+    lo, hi = float(fit_mhz['t_min']), float(fit_mhz['t_max'])
+    z += ["### Gerade durch das Tal von J_c", "", "```",
+          f"W(omega) = a * omega + b = {_klammer(a * u, sa * u)} * omega "
+          f"+ {_klammer(b * u, sb * u)} µm", "```", "",
+          f"- a = {a * u:.4f} +- {sa * u:.4f}, b = {b * u:.4f} +- {sb * u:.4f} µm "
+          f"(intern a = {a:.5f} +- {sa:.5f} MHz/µm, b = {b:.5f} +- {sb:.5f} MHz)",
+          f"- gefitteter Bereich: omega = {lo:.2f} .. {hi:.2f} µm, "
+          f"W = {(a * lo + b) * u:.2f} .. {(a * hi + b) * u:.2f} µm"]
+    gJ = _grid_for(results, "penalty_raw")
+    if gJ is not None:
+        j1, j2 = _range_along_line(results, gJ, fit_mhz, lo, hi)
+        z.append(f"- J_c entlang der Geraden (gefitteter Bereich): "
+                 f"{j1 * 100:.2f} % .. {j2 * 100:.2f} %")
+        tw = np.asarray(fit_mhz.get('waist_used', []), dtype=float)
+        th = np.asarray(fit_mhz.get('width_used', []), dtype=float)
+        if tw.size:
+            jp = [_bilinear(gJ, w_all, h_all, x, y) for x, y in zip(tw, th)]
+            jp = np.asarray(jp, dtype=float) * 100
+            z.append(f"- J_c entlang des Talpfads (die gefitteten Minima): "
+                     f"{np.nanmin(jp):.2f} % .. {np.nanmax(jp):.2f} %")
+    for key, name in (("uniformity_hard", "U_h"), ("uniformity_weighted", "U_w"),
+                      ("crosstalk_hard", "eta_h"), ("crosstalk_weighted", "eta_w"),
+                      ("r_x", "r_x"), ("r_y", "r_y")):
+        g = _grid_for(results, key)
+        if g is None:
+            continue
+        f = 100.0 if TRACE_SPECS[key][3] else 1.0
+        v1, v2 = _range_along_line(results, g, fit_mhz, lo, hi)
+        e = " %" if f == 100.0 else ""
+        z.append(f"- {name} entlang der Geraden: {v1 * f:.3f}{e} .. {v2 * f:.3f}{e}")
+    z.append("")
+
+    wu = (width_mhz - b) / a
+    s_w = _waist_sigma_on_line(fit_mhz, width_mhz)
+    win = win_input_for_waist_um(results, wu)
+    z += ["### Punkt auf der Geraden", "",
+          f"- W = {width_mhz * u:.2f} µm ({width_mhz:.3f} MHz)",
+          f"- omega = {wu:.4f} +- {s_w:.4f} µm (Lage auf der Geraden, korrelierte "
+          f"Fehler von a und b; untere Schranke)"]
+    if win is not None:
+        z.append(f"- win vor der Linse (vor dem AOD) = {win * 1e3:.4f} mm")
+    z += ["", "| Groesse | Wert +- sigma_num | Text | Interpolation | Scan-Rauschen |",
+          "|---|---|---|---|---|"]
+    for key in SUMMARY_KEYS:
+        g = _grid_for(results, key)
+        if g is None:
+            continue
+        f = 100.0 if TRACE_SPECS[key][3] else 1.0
+        v = _bilinear(g, w_all, h_all, wu, width_mhz) * f
+        sig, d_i, rau = (x * f for x in _sigma_num(results, g, wu, width_mhz))
+        e = " %" if f == 100.0 else ""
+        fmt = "%.4f" if f == 100.0 else "%.5f"
+        z.append(f"| {POINT_VALUE_LABELS.get(key, key)} | {fmt % v}{e} +- {sig:.2g}{e} | "
+                 f"{_klammer(v, sig)}{e} | {d_i:.2g} | {rau:.2g} |")
+    z += ["", "sigma_num = sqrt(Interpolation² + Scan-Rauschen²): Interpolation = "
+          "|kubisch (4 Nachbarn in Waist-Richtung) - linear|, Scan-Rauschen = "
+          "RMS-Residuum eines lokalen quadratischen 2D-Fits (5 width-Zeilen x "
+          "6 Waist-Spalten).", ""]
+    return z
+
+
 def write_penalty_report(results, output_path, valley_line=None, valley_axis_label=None,
                          valley_path_mode="valley", forbidden_factor=None,
-                         forbidden_excluded=False, best_point=None):
+                         forbidden_excluded=False, best_point=None,
+                         working_point_width_mhz=None):
     """Markdown-Bericht fuer einen Penalty-Scan.
 
     valley_line: Ergebnis von fit_valley_line() - ist es gesetzt (auch als
     None bei fehlgeschlagenem Fit, dann als leeres dict uebergeben nicht
     noetig), bekommt der Bericht einen Abschnitt zur Talpfad-Geraden."""
+    use_width_scale(results)   # Width-Anzeige in µm
     n_win = len(np.asarray(results['win_input_vals']))
     n_width = len(np.asarray(results['width_vals']))
     lines = [
@@ -1763,6 +2144,9 @@ def write_penalty_report(results, output_path, valley_line=None, valley_axis_lab
         lines += _valley_line_report_lines(valley_line, valley_axis_label,
                                            path_mode=valley_path_mode)
     lines += _best_point_marker_lines(best_point, results)
+    if working_point_width_mhz:
+        lines += _working_point_summary_lines(results, valley_line,
+                                              float(working_point_width_mhz))
     lines += _forbidden_lines(results, forbidden_factor, forbidden_excluded)
     lines += _scan_parameter_lines(results)
     lines.append("")
@@ -1780,6 +2164,7 @@ def write_hard_check_report(results, output_path, valley_line=None,
     """Markdown-Bericht fuer einen Hard-Check.
 
     valley_line/valley_axis_label wie bei write_penalty_report()."""
+    use_width_scale(results)   # Width-Anzeige in µm
     c = results.get('consistency') or {}
     n_win = len(np.asarray(results['win_input_vals']))
     n_width = len(np.asarray(results['width_vals']))
@@ -1882,16 +2267,18 @@ def make_all(results, win_axis="before_lens", draw_best_point=DRAW_BEST_POINT_DE
              valley_waist_range=None, valley_width_range=None,
              valley_traces=None, valley_fit_line=True, valley_path_mode="valley",
              valley_max_axes=MAX_CUT_AXES_DEFAULT, map_marks=None,
-             fit_line_on_maps=False, amplitude_maps=False,
+             fit_line_on_maps=False, amplitude_maps=False, amp_layout="cuts",
              forbidden_factor=None, forbidden_excluded=False,
              forbidden_draw=True, best_point_follow=None, best_point_value=None,
              valley_legend_placement=VALLEY_LEGEND_PLACEMENT_DEFAULT,
-             panel_legend_placement=VALLEY_LEGEND_PLACEMENT_DEFAULT):
+             panel_legend_placement=VALLEY_LEGEND_PLACEMENT_DEFAULT,
+             working_point_width_mhz=None):
     """Erzeugt alle zum Datensatz passenden Plots und den Bericht.
 
     Gibt ein dict mit den Pfaden zurueck. Wird sowohl von run_plots.py als
     auch am Ende der beiden Scan-Skripte aufgerufen.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     plots_dir = paths.FIT_PLOTS_DIR if plots_dir is None else plots_dir
     results_dir = paths.FIT_RESULTS_DIR if results_dir is None else results_dir
     confirm_overwrite = None if ask_before_save else (lambda existing_path: True)
@@ -1979,12 +2366,36 @@ def make_all(results, win_axis="before_lens", draw_best_point=DRAW_BEST_POINT_DE
                 print("Hinweis: keine 6-Karten-Uebersicht - der Datensatz "
                       "fuehrt keine Amplituden (r_x_grid/r_y_grid) mit.")
             else:
-                out['plots']['metric_comparison_amp'] = plot_metric_comparison(
-                    results, prefix, out_dir=plots_dir, win_axis=win_axis,
-                    draw_best_point=draw_best_point, save=save, show=show,
-                    confirm_overwrite=confirm_overwrite, fit_line=karten_fit,
-                    with_amplitudes=True, forbidden_factor=zeichnen,
-                    best_point=stern, marks=marken, valley=karten_valley)
+                neu = None
+                if amp_layout == "cuts":
+                    # Neues Standard-Layout: Karten + Schnitt entlang der
+                    # Geraden. Die Gerade ist dieselbe wie in den Karten
+                    # bzw. im Talschnitt - auch wenn sie dort nicht
+                    # eingezeichnet werden soll.
+                    schnitt_fit = karten_fit if karten_fit is not None else fit_valley_line(
+                        results, axis=VALLEY_FIT_AXIS, follow=valley_follow,
+                        select=valley_select, guide_follow=valley_guide_follow,
+                        guide_halfwidth=valley_guide_halfwidth,
+                        waist_range=valley_waist_range, width_range=valley_width_range)
+                    if schnitt_fit is None:
+                        print("Hinweis: keine Fit-Gerade - statt Karten + Schnitt "
+                              "wird das alte 2x3-Raster gezeichnet.")
+                    else:
+                        neu = plot_metric_cuts(
+                            results, prefix, schnitt_fit, out_dir=plots_dir,
+                            save=save, show=show, confirm_overwrite=confirm_overwrite,
+                            forbidden_factor=zeichnen, draw_best_point=draw_best_point,
+                            best_point=stern)
+                        out['plots']['metric_cuts_U_eta'] = neu['U_eta']
+                        if neu.get('r') is not None:
+                            out['plots']['metric_cuts_r'] = neu['r']
+                if neu is None:
+                    out['plots']['metric_comparison_amp'] = plot_metric_comparison(
+                        results, prefix, out_dir=plots_dir, win_axis=win_axis,
+                        draw_best_point=draw_best_point, save=save, show=show,
+                        confirm_overwrite=confirm_overwrite, fit_line=karten_fit,
+                        with_amplitudes=True, forbidden_factor=zeichnen,
+                        best_point=stern, marks=marken, valley=karten_valley)
                 geklemmt = r_bounds_clamped_fraction(results)
                 if geklemmt is not None and max(geklemmt) > 0:
                     lo, hi = results['r_bounds']
@@ -2073,7 +2484,8 @@ def make_all(results, win_axis="before_lens", draw_best_point=DRAW_BEST_POINT_DE
                                  valley_path_mode=valley_path_mode,
                                  forbidden_factor=forbidden_factor,
                                  forbidden_excluded=forbidden_excluded,
-                                 best_point=stern)
+                                 best_point=stern,
+                                 working_point_width_mhz=working_point_width_mhz)
         out['report'] = report_path
 
     return out
@@ -2179,7 +2591,7 @@ LINE_CUT_TRACES = ["penalty_raw"]
 VALLEY_AXIS_CHOICES = [
     ("waist_um", "Waist nach der Linse (µm)"),
     ("waist_mm", "win_input vor der Linse (mm)"),
-    ("width", "width (MHz)"),
+    ("width", "Width W (µm)"),
 ]
 
 # Schnittachse -> Waist-Konvention der x-Achse/Heatmap
@@ -2191,12 +2603,13 @@ _WIN_AXIS_TO_VALLEY_AXIS = {"after_lens": "waist_um", "before_lens": "waist_mm"}
 def short_axis_label(axis):
     """Kurze x-Beschriftung fuer Plots mit zwei Panels nebeneinander."""
     return {"waist_um": WAIST_UM_LABEL_SHORT,
-            "waist_mm": WIN_INPUT_LABEL_SHORT}.get(axis, WIDTH_LABEL)
+            "waist_mm": WIN_INPUT_LABEL_SHORT}.get(axis, width_label())
 
 
 def _grid_for(results, key, alpha=None):
     """Das Gitter zu einem Fuehrungs-/Kurven-Schluessel. None, wenn der
     Datensatz die noetigen Groessen nicht enthaelt."""
+    use_width_scale(results)   # Width-Anzeige in µm
     alpha = float(results.get("alpha", 0.7)) if alpha is None else alpha
     U_h = results.get("uniformity_grid")
     C_h = results.get("crosstalk_grid")
@@ -2248,16 +2661,19 @@ def _grid_for(results, key, alpha=None):
 
 def available_follow_keys(results):
     """Welche Fuehrungsgroessen der Datensatz hergibt."""
+    use_width_scale(results)   # Width-Anzeige in µm
     return [key for key, _label in FOLLOW_CHOICES if _grid_for(results, key) is not None]
 
 
 def available_trace_keys(results):
     """Welche Kurven der Datensatz hergibt."""
+    use_width_scale(results)   # Width-Anzeige in µm
     return [key for key in TRACE_ORDER if _grid_for(results, key) is not None]
 
 
 def waist_um_of(results):
     """Effektiver Waist (µm) je win_input-Spalte."""
+    use_width_scale(results)   # Width-Anzeige in µm
     return np.array([win_input_to_win(w, results["f1"], results["f2"],
                                       results["lambda_opt"], results["fLO"])
                      for w in np.asarray(results["win_input_vals"], dtype=float)]) * 1e6
@@ -2284,6 +2700,7 @@ def search_window_mask(results, waist_range=None, width_range=None):
     freie Optima, der andere komplett entlang der r_bounds-Schranke, und
     ohne Einschraenkung mischt der Fit beide.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     waist = waist_um_of(results)
     width = np.asarray(results["width_vals"], dtype=float) * 1e-6
     ok_col = np.ones(len(waist), dtype=bool)
@@ -2371,6 +2788,7 @@ def guide_line(results, guide_follow=GUIDE_FOLLOW_DEFAULT,
     Der Suchbereich gilt AUCH fuer die Leitgerade - sonst waere sie auf
     einem anderen Talzweig bestimmt als der Fit, den sie fuehren soll.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     if _grid_for(results, guide_follow) is None:
         return None
     return fit_valley_line(results, axis=VALLEY_FIT_AXIS, follow=guide_follow,
@@ -2393,6 +2811,7 @@ def extract_valley(results, axis="waist_um", follow="penalty_raw",
     den Gitterindizes (rows/cols) und values[key] fuer jede verfuegbare
     Groesse - jeweils GENAU am Talpunkt abgelesen, ohne Interpolation.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     if axis not in _VALLEY_AXIS_TO_WIN_AXIS:
         raise ValueError(f"axis muss eine von {list(_VALLEY_AXIS_TO_WIN_AXIS)} sein, nicht {axis!r}.")
     target = _grid_for(results, follow)
@@ -2430,7 +2849,7 @@ def extract_valley(results, axis="waist_um", follow="penalty_raw",
         rows = gueltig
         cols = np.argmin(safe[gueltig, :], axis=1)
         x = width_vals[rows] * 1e-6          # width_vals stehen in Hz
-        x_label = WIDTH_LABEL
+        x_label = width_label()
     else:
         gueltig = np.flatnonzero(finite.any(axis=0))       # Spalten mit Daten
         cols = gueltig
@@ -2500,6 +2919,8 @@ def extract_valley(results, axis="waist_um", follow="penalty_raw",
 
     waist_heat = (win_input_vals[cols] * 1e3 if _VALLEY_AXIS_TO_WIN_AXIS[axis] == "before_lens"
                   else waist_um[cols])
+    if axis == "width":
+        x = wd(x)               # Anzeige: W in µm
     return dict(
         path_mode="valley",
         axis=axis, follow=follow, x=x, x_label=x_label,
@@ -2513,7 +2934,7 @@ def extract_valley(results, axis="waist_um", follow="penalty_raw",
         # Koordinaten fuer die Heatmap: x = Waist in der Konvention der Achse,
         # y = width. Beim Talpfad liegen sie auf Gitterpunkten, beim
         # Geradenschnitt dazwischen - beides wird gleich gezeichnet.
-        x_heat=waist_heat, y_heat=width_vals[rows] * 1e-6,
+        x_heat=waist_heat, y_heat=wd(width_vals[rows] * 1e-6),
         n_points=len(x), n_total=(target.shape[1] if axis != "width" else target.shape[0]),
         n_outside=n_ohne_kandidat,
         waist_range=(None if waist_range is None else tuple(float(v) for v in waist_range)),
@@ -3053,6 +3474,7 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
     Beschriftungen sind durchgehend englisch und mathtext-basiert, damit
     die PDFs unveraendert in einen LaTeX-Satz passen.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
     marks = MAP_MARKS_DEFAULT if marks is None else marks
     valley = extract_path(results, axis=axis, follow=follow, path_mode=path_mode,
@@ -3114,7 +3536,7 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
         # Stueck heraus, ohne dass die Gerade es je berueheren wuerde. Dass
         # J dort keine brauchbare Falle beschreibt, steht in den
         # Metrik-Karten und im Bericht.
-        im = ax_map.pcolormesh(x_heat, width_vals * 1e-6, Z, shading="auto", cmap="magma_r")
+        im = ax_map.pcolormesh(x_heat, wd(width_vals * 1e-6), Z, shading="auto", cmap="magma_r")
         # Die Einheit gehoert an die Colorbar, sobald die Karte skaliert ist -
         # sonst stehen dort Prozentzahlen ohne Prozentzeichen.
         karte_label = follow_cbar_label(follow)
@@ -3122,7 +3544,7 @@ def plot_valley_cut(results, prefix, axis="waist_um", follow="penalty_raw", trac
             karte_label += " (%)"
         fig.colorbar(im, ax=ax_map, label=karte_label)
         ax_map.set_xlabel(short_axis_label(_WIN_AXIS_TO_VALLEY_AXIS[win_axis]))
-        ax_map.set_ylabel(WIDTH_LABEL)
+        ax_map.set_ylabel(width_label())
 
         x_pfad = np.asarray(valley["x_heat"], dtype=float)
         y_pfad = np.asarray(valley["y_heat"], dtype=float)
@@ -3297,6 +3719,7 @@ def line_groups(results):
     _achse_mit_bruch(). Gerade hart gegen atom-gewichtet liegt oft um einen
     Faktor auseinander.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     verfuegbar = available_trace_keys(results)
     gruppen = []
     for keys, titel in (
@@ -3339,6 +3762,7 @@ def plot_line_panels(results, prefix, axis="waist_um", follow="penalty_raw",
 
     Gibt None zurueck, wenn der Datensatz keine der Groessen hergibt.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
     if path is None:
         path = extract_line_cut(results, axis=axis, follow=follow, select=select,
@@ -3493,7 +3917,7 @@ VALLEY_JUMP_FACTOR = 6.0
 VALLEY_FIT_AXIS = "waist_um"
 
 
-def width_axis_on_top(ax, fit, label=WIDTH_LABEL):
+def width_axis_on_top(ax, fit, label=None):
     """Oben die Width, die die Fit-Gerade zum Waist darunter vorschreibt.
 
     Der Schnitt laeuft ENTLANG dieser Geraden: zu jedem Waist auf der
@@ -3509,10 +3933,11 @@ def width_axis_on_top(ax, fit, label=WIDTH_LABEL):
     b = float(fit.get("b", float("nan")))
     if not (np.isfinite(a) and np.isfinite(b)) or a == 0.0:
         return None
+    f = width_factor()                         # MHz -> µm
     sek = ax.secondary_xaxis(
-        "top", functions=(lambda t: np.asarray(t, dtype=float) * a + b,
-                          lambda u: (np.asarray(u, dtype=float) - b) / a))
-    sek.set_xlabel(label)
+        "top", functions=(lambda t: (np.asarray(t, dtype=float) * a + b) * f,
+                          lambda u: (np.asarray(u, dtype=float) / f - b) / a))
+    sek.set_xlabel(width_label() if label is None else label)
     return sek
 
 
@@ -3751,6 +4176,7 @@ def valley_fit_diagnosis(results, axis="waist_um", follow="penalty_raw",
     sind und an welcher Grenze sie kleben - das ist beim eingeschraenkten
     Suchbereich fast immer die Antwort.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     if not valley_fit_supported(axis):
         return valley_fit_axis_hint()
     try:
@@ -3799,6 +4225,7 @@ def valley_fit_diagnosis(results, axis="waist_um", follow="penalty_raw",
 
 def _search_window_edges(results, waist_range, width_range, waist, width):
     """Klartext, an welcher Grenze des Suchbereichs die Punkte kleben."""
+    use_width_scale(results)   # Width-Anzeige in µm
     treffer = []
     for bereich, werte, name, einheit in (
             (waist_range, waist, "Waist", "µm"),
@@ -3823,6 +4250,7 @@ def fit_valley_line(results, axis="waist_um", follow="penalty_raw",
 
     None, wenn die Achse keinen Fit erlaubt (nur VALLEY_FIT_AXIS) oder zu
     wenige brauchbare Talpunkte uebrig bleiben."""
+    use_width_scale(results)   # Width-Anzeige in µm
     if not valley_fit_supported(axis):
         return None
     valley = extract_valley(results, axis=axis, follow=follow, select=select,
@@ -3881,7 +4309,10 @@ def _valley_selection_lines(fit):
         if fit.get("waist_range"):
             teile.append("waist %.4f .. %.4f µm" % fit["waist_range"])
         if fit.get("width_range"):
-            teile.append("width %.4f .. %.4f MHz" % fit["width_range"])
+            teile.append("width %.4f .. %.4f MHz (W %.3f .. %.3f %s)"
+                         % (tuple(fit["width_range"])
+                            + tuple(wd(v) for v in fit["width_range"])
+                            + (width_unit(),)))
         bereich = [
             "- **Suchbereich eingeschraenkt auf " + " und ".join(teile) + ".** "
             "Ausserhalb wurde gar nicht erst nach einem Minimum gesucht. Ein "
@@ -3896,7 +4327,8 @@ def _valley_selection_lines(fit):
     fuehrung = fit.get("guide") or {}
     zeilen = [
         f"- Talpunkte: je Spalte das LOKALE Minimum, das der Leitgeraden am "
-        f"naechsten liegt (Korridor +-{fit.get('guide_halfwidth', 0):.3f} MHz).",
+        f"naechsten liegt (Korridor +-{fit.get('guide_halfwidth', 0):.3f} MHz"
+        f" = +-{wd(fit.get('guide_halfwidth', 0)):.3f} {width_unit()}).",
         f"  Lokal heisst: beide Nachbarn vorhanden und groesser - Punkte am Rand "
         f"des Scan-Fensters und Punkte, die an den ausgeschlossenen verbotenen "
         f"Bereich grenzen, kommen damit gar nicht erst in Frage.",
@@ -3904,7 +4336,9 @@ def _valley_selection_lines(fit):
     if fuehrung:
         zeilen.append(
             f"- Leitgerade aus {_follow_label(fit.get('guide_follow'))}: "
-            f"width/MHz = {fuehrung['a']:.5f} * waist/µm {fuehrung['b']:+.6f} "
+            f"W/{width_unit()} = {fuehrung['a'] * width_factor():.5f} * waist/µm "
+            f"{fuehrung['b'] * width_factor():+.5f} "
+            f"(width/MHz = {fuehrung['a']:.5f} * waist/µm {fuehrung['b']:+.6f}) "
             f"(R² = {_r2_text(fuehrung['r2'])}, {fuehrung['n_used']} Punkte).")
     if fit.get("n_no_candidate"):
         zeilen.append(
@@ -3933,6 +4367,10 @@ def _valley_line_report_lines(fit, axis_label, path_mode="valley"):
             "",
         ]
         return lines
+    # Bericht in der Anzeige-Einheit: W (µm) statt width (MHz). Der Fit
+    # selbst bleibt in MHz - die Zeile darunter nennt ihn auch so.
+    fit_mhz = fit
+    fit = fit_in_display_units(fit)
     lines += [
         f"Gerade durch den Talpfad des Minimums von {_follow_label(fit['follow'])}, "
         f"aufgetragen ueber {axis_label}:",
@@ -3941,6 +4379,18 @@ def _valley_line_report_lines(fit, axis_label, path_mode="valley"):
         valley_line_formula_with_error(fit),
         "```",
         "",
+    ]
+    if fit is not fit_mhz:
+        lines += [
+            f"Umrechnung: W = {width_factor():.4f} µm/MHz * width (AOD-Parameter "
+            f"und Linsenkombination des Datensatzes). Intern, in MHz:",
+            "",
+            "```",
+            valley_line_formula_with_error(fit_mhz),
+            "```",
+            "",
+        ]
+    lines += [
         f"- Steigung a = {_mit_fehler(fit['a'], fit.get('sigma_a'))} "
         f"{fit['u_unit']}/{fit['t_unit']}",
         f"- Achsenabschnitt b = {_mit_fehler(fit['b'], fit.get('sigma_b'))} "
@@ -4007,6 +4457,7 @@ def line_points_for_axis(results, fit, win_axis, n=240):
     Gibt (x_innen, y_innen, x_aussen, y_aussen) zurueck: innerhalb und
     ausserhalb des Bereichs, aus dem die Gerade bestimmt wurde.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     win_input_vals = np.asarray(results["win_input_vals"], dtype=float)
     win_input = np.linspace(win_input_vals.min(), win_input_vals.max(), int(n))
     waist_um = np.array([win_input_to_win(w, results["f1"], results["f2"],
@@ -4034,7 +4485,7 @@ def koordinaten_label(axis, wert):
     "omega = 1.05 um", "omega_in = 1.70 mm" oder "width = 0.370 MHz".
     Der Waist auf zwei Nachkommastellen, die width auf drei."""
     if axis == "width":
-        return r"width = %.3f MHz" % float(wert)
+        return r"$W$ = %.2f %s" % (wd(float(wert)), width_unit())
     if axis == "waist_mm":
         return r"%s = %.3f mm" % (WIN_INPUT_SYMBOL, float(wert))
     return r"%s = %.2f µm" % (WAIST_UM_SYMBOL, float(wert))
@@ -4084,7 +4535,7 @@ def draw_working_point_line(ax, best, axis, label=True, text=None):
     if not best or best.get('width') is None:
         return False
     if axis == "width":
-        x = best['width'] * 1e-6
+        x = wd(best['width'] * 1e-6)
     elif axis == "waist_um":
         x = best.get('waist_um')
     else:
@@ -4151,6 +4602,7 @@ def draw_fit_line_on_map(ax, results, fit, win_axis, marks=None):
         return
     marks = MAP_MARKS_DEFAULT if marks is None else marks
     x_in, y_in, x_out, y_out = line_points_for_axis(results, fit, win_axis)
+    y_in, y_out = wd(y_in), wd(y_out)          # width -> W (µm)
     ax.plot(x_in, y_in, color=VALLEY_FIT_STYLE["color"], linewidth=2.0,
             linestyle="-", label=FIT_LINE_LABEL)
     if marks.get("extension") and np.any(np.isfinite(x_out)):
@@ -4168,7 +4620,7 @@ def draw_valley_line(ax, fit, legend_fontsize=None):
     gemeinsame \"not used\"-Markierung."""
     if fit is None:
         return
-    ax.plot(fit["x_line"], fit["y_line"], label=FIT_LINE_LABEL, **VALLEY_FIT_STYLE)
+    ax.plot(fit["x_line"], wd(fit["y_line"]), label=FIT_LINE_LABEL, **VALLEY_FIT_STYLE)
 
 
 # ======================================================================
@@ -4226,6 +4678,7 @@ def extract_line_cut(results, axis="waist_um", follow="penalty_raw", fit=None,
 
     fit: Ergebnis von fit_valley_line(); None = selbst bestimmen.
     """
+    use_width_scale(results)   # Width-Anzeige in µm
     if axis not in _VALLEY_AXIS_TO_WIN_AXIS:
         raise ValueError(f"axis muss eine von {list(_VALLEY_AXIS_TO_WIN_AXIS)} sein, nicht {axis!r}.")
     if not valley_fit_supported(axis):
@@ -4326,7 +4779,7 @@ def extract_line_cut(results, axis="waist_um", follow="penalty_raw", fit=None,
         values[key] = werte * 100.0 if as_percent else werte
 
     if ueber_width:
-        x_label = WIDTH_LABEL
+        x_label = width_label()
         waist_um_out = waist_arr if win_axis == "after_lens" else np.full_like(waist_arr, np.nan)
         waist_mm_out = waist_arr if win_axis == "before_lens" else np.full_like(waist_arr, np.nan)
     else:
@@ -4334,6 +4787,8 @@ def extract_line_cut(results, axis="waist_um", follow="penalty_raw", fit=None,
         waist_um_out = waist_arr if win_axis == "after_lens" else np.full_like(waist_arr, np.nan)
         waist_mm_out = waist_arr if win_axis == "before_lens" else np.full_like(waist_arr, np.nan)
 
+    if axis == "width":
+        x = wd(x)               # Anzeige: W in µm
     return dict(
         path_mode="line", fit=fit,
         axis=axis, follow=follow, x=x, x_label=x_label,
@@ -4342,7 +4797,7 @@ def extract_line_cut(results, axis="waist_um", follow="penalty_raw", fit=None,
         win_input=win_input_out,
         extrapolated=extrap, n_extrapolated=int(extrap.sum()),
         waist_um=waist_um_out, waist_mm=waist_mm_out, width_MHz=width_arr,
-        x_heat=waist_arr, y_heat=width_arr,
+        x_heat=waist_arr, y_heat=wd(width_arr),
         n_points=len(x),
         n_total=(len(width_mhz) if ueber_width else len(waist_heat)),
         n_outside=n_aussen,
@@ -4355,6 +4810,7 @@ def extract_path(results, axis="waist_um", follow="penalty_raw", path_mode="vall
                  guide_halfwidth=GUIDE_HALFWIDTH_DEFAULT,
                  waist_range=None, width_range=None):
     """Talpfad ODER Geradenschnitt - je nach `path_mode`."""
+    use_width_scale(results)   # Width-Anzeige in µm
     if path_mode == "valley":
         return extract_valley(results, axis=axis, follow=follow, select=select,
                               guide_follow=guide_follow, guide_halfwidth=guide_halfwidth,
@@ -4371,3 +4827,114 @@ def path_mode_label(path_mode):
         if key == path_mode:
             return label
     return path_mode
+
+
+# ======================================================================
+# Neues Standard-Layout: Karten + Schnitt entlang der Fit-Geraden
+# ======================================================================
+# Seit Oktober 2026 ersetzt es das Raster mit Amplituden (alt: ..._metric_comparison_amp.pdf, 2x3).
+# Statt aller Karten in einem Raster stehen jetzt je Groesse die Karten
+# und ganz rechts der Schnitt entlang der Fit-Geraden in EINER Zeile:
+#
+#   ..._metric_cuts_U_eta.pdf   Zeile U: U_h, U_w, Schnitt / Zeile eta: eta_h, eta_w, Schnitt (2x3)
+#   ..._metric_cuts_r.pdf       r_x-Karte, r_y-Karte, Schnitt (1x3)
+#
+# Gezeichnet wird mit cut_layout.render_rows() - dieselbe Datei in allen
+# drei Ordnern. Das alte Raster bleibt im GUI waehlbar (amp_layout="grid").
+AMP_LAYOUT_CHOICES = [
+    ("cuts", "Neu: Karten + Schnitt entlang der Geraden (Standard)"),
+    ("grid", "Alt: 2x3-Raster (..._metric_comparison_amp.pdf)"),
+]
+AMP_LAYOUT_DEFAULT = "cuts"
+
+
+def _cut_map_spec(results, panel, forbidden_factor):
+    """Eine Karte fuer cut_layout: x = Waist (µm), y = W (µm)."""
+    use_width_scale(results)   # Width-Anzeige in µm
+    x_vals, _label, reversed_ = win_axis_values(results, "after_lens")
+    Z = np.asarray(results[panel['key']], dtype=float) * panel['scale']
+    Z = verboten_ausblenden(Z, results, forbidden_factor)
+    if reversed_:
+        Z = Z[:, ::-1]
+    spec = dict(x=x_vals, y=wd(np.asarray(results['width_vals'], dtype=float) * 1e-6),
+                Z=Z, cmap=panel['cmap'], cbar=panel['cbar'])
+    norm = panel.get('norm')
+    if norm is not None:
+        ticks = log_ticks(norm.vmin, norm.vmax)
+        # Eine Nachkommastelle (1.0, 1.5, 2.5, 4.0), wenn alle Marken so
+        # darstellbar sind - sonst %g, damit aus 1.25 kein "1.2" wird.
+        eine_stelle = all(abs(t * 10 - round(t * 10)) < 1e-9 for t in ticks)
+        spec.update(norm=norm, cbar_ticks=ticks,
+                    cbar_fmt="%.1f" if eine_stelle else "%g")
+    else:
+        spec.update(vmin=panel.get('vmin'), vmax=panel.get('vmax'))
+    return spec
+
+
+def _cut_trace_spec(path, keys):
+    """Der Schnitt entlang der Geraden fuer cut_layout."""
+    keys = [k for k in keys if k in path['values']]
+    if not keys:
+        return None
+    fit = path['fit']
+    f = width_factor()
+    return dict(
+        x=np.asarray(path['x'], dtype=float),
+        traces=[dict(y=np.asarray(path['values'][k], dtype=float),
+                     color=TRACE_SPECS[k][2], label=TRACE_SPECS[k][0]) for k in keys],
+        unit=TRACE_SPECS[keys[0]][1],
+        # W/µm = (f*a)*waist/µm + f*b - die obere Achse des Schnitts
+        width_line=(float(fit['a']) * f, float(fit['b']) * f),
+        xlabel=WAIST_UM_LABEL_SHORT, top_label=width_label())
+
+
+def plot_metric_cuts(results, prefix, fit, out_dir=None, save=True, show=False,
+                     confirm_overwrite=None, forbidden_factor=None,
+                     draw_best_point=False, best_point=None):
+    """Neues Standard-Layout (siehe oben). Gibt dict(U_eta=..., r=...) mit den
+    Pfaden zurueck; r ist None, wenn der Datensatz keine Amplituden hat.
+
+    fit: Ergebnis von fit_valley_line() ueber der µm-Achse - ohne Gerade
+    gibt es keinen Schnitt, dann ValueError (make_all faellt dann auf das
+    alte Raster zurueck)."""
+    use_width_scale(results)   # Width-Anzeige in µm
+    if fit is None:
+        raise ValueError("Keine Fit-Gerade - ohne sie gibt es keinen Schnitt.")
+    from .cut_layout import render_rows
+    out_dir = paths.FIT_PLOTS_DIR if out_dir is None else out_dir
+    path = extract_line_cut(results, axis="waist_um", fit=fit)
+
+    x_in, y_in, x_out, y_out = line_points_for_axis(results, fit, "after_lens")
+    fitline = (x_in, wd(y_in), x_out, wd(y_out))
+    stern = None
+    wp_x = None
+    if draw_best_point and best_point and best_point.get('width') is not None:
+        waist = best_point.get('waist_um')
+        if waist is None and best_point.get('win_input') is not None:
+            waist = _waist_um(results, best_point['win_input'])
+        if waist is not None:
+            stern = (float(waist), wd(best_point['width'] * 1e-6))
+            wp_x = float(waist)
+
+    def zeile(panels, keys):
+        cut = _cut_trace_spec(path, keys)
+        if cut is not None:
+            cut['working_point_x'] = wp_x
+        return dict(maps=[_cut_map_spec(results, p, forbidden_factor) for p in panels],
+                    cut=cut, fitline=fitline, best_point=stern)
+
+    def speichern(name):
+        return lambda fig: _finish(fig, out_dir, name, save, show,
+                                   confirm_overwrite, tight=False)
+
+    out = {}
+    panels = list(METRIC_PANELS)
+    out['U_eta'] = render_rows(
+        [zeile(panels[0:2], ("uniformity_hard", "uniformity_weighted")),
+         zeile(panels[2:4], ("crosstalk_hard", "crosstalk_weighted"))],
+        finish=speichern(f"{prefix}_metric_cuts_U_eta.pdf"))
+    amp = amplitude_panels(results)
+    out['r'] = (render_rows([zeile(amp, ("r_x", "r_y"))],
+                            finish=speichern(f"{prefix}_metric_cuts_r.pdf"))
+                if amp is not None else None)
+    return out

@@ -799,6 +799,209 @@ def plot_curves(results, keys, filename, titel=None, out_dir=None, achsen="auto"
         return _finish(fig, out_dir, filename, save, show, confirm_overwrite)
 
 
+# ======================================================================
+# Arbeits-Stil: zwei y-Achsen, LaTeX-Satz (Daniels Referenz-PDFs, Okt. 2026)
+# ======================================================================
+# SingleBeam_..._hard.pdf / _weighted.pdf so, wie sie in der Arbeit stehen:
+#   - 11 x 7.5 cm, LaTeX-Satz (Computer Modern, aufrechtes \upmu aus upgreek),
+#     Achsenbeschriftung und Zahlen 10 pt, Legende 9 pt, Kurven 1.5 pt
+#   - links die Uniformity, rechts der Crosstalk, beide Achsen schwarz,
+#     gleiche Zahl von Kaestchen, damit das Gitter fuer beide passt
+#   - keine obere x-Achse, x-Achse "Waist $w$ (\upmu m)", Marken alle 0.25
+#   - Auftragung ab 1.7 mm Eingangswaist (nicht ab 1.8 mm)
+#   - Legende oben links; Benennung U_h, eta_h (Pitch-Quadrat), eta_h,circ
+TWIN_FIGSIZE_CM = (11.0, 7.5)
+TWIN_START_WIN_MM = 1.7
+TWIN_LINEWIDTH = 1.5
+TWIN_MAX_KAESTCHEN = 5
+TWIN_SCHRITTE_LINKS = (1.0, 2.0, 5.0)
+TWIN_SCHRITTE_RECHTS = (1.0, 2.0, 2.5, 3.0, 4.0, 5.0)
+TWIN_LEGENDE = {
+    "uniformity_hart": r"$U_h$",
+    "crosstalk_hart_pitch": r"$\eta_h$",
+    "crosstalk_hart": r"$\eta_h$",
+    "crosstalk_hart_kreis": r"$\eta_{h,\mathrm{circ}}$",
+    "uniformity_weighted": r"$U_w$",
+    "crosstalk_weighted": r"$\eta_w$",
+}
+# Reihenfolge in der Legende und - von unten gelesen - in der rechten
+# y-Beschriftung ("eta_h,circ, eta_h (%)").
+TWIN_RECHTS_HART = ("crosstalk_hart_pitch", "crosstalk_hart_kreis")
+
+
+def _twin_rc(latex=True):
+    """rcParams des Arbeits-Stils. LaTeX-Satz, wenn LaTeX installiert ist -
+    sonst derselbe Aufbau mit mathtext (CM) als Rueckfall."""
+    import shutil
+    rc = {
+        "font.family": "serif", "font.size": 10, "axes.labelsize": 10,
+        "xtick.labelsize": 10, "ytick.labelsize": 10, "legend.fontsize": 9,
+        "axes.linewidth": 0.8, "xtick.major.width": 0.8, "ytick.major.width": 0.8,
+        "grid.linewidth": 0.8, "pdf.fonttype": 42, "ps.fonttype": 42,
+        "figure.facecolor": "white", "axes.facecolor": "white",
+        "savefig.facecolor": "white",
+    }
+    if latex and shutil.which("latex"):
+        rc.update({"text.usetex": True,
+                   "font.serif": ["Computer Modern Roman"],
+                   "text.latex.preamble": r"\usepackage{upgreek}"})
+        um = r"$\upmu$m"
+    else:
+        rc.update({"mathtext.fontset": "cm", "text.usetex": False})
+        um = r"$\mathrm{\mu}$m"
+    return rc, um
+
+
+def _twin_grenze(maximum, schritte, n_fest=None):
+    """(Schritt, Anzahl Kaestchen) fuer eine Achse ab 0.
+
+    Ohne n_fest: kleinste runde Schrittweite mit hoechstens
+    TWIN_MAX_KAESTCHEN Kaestchen. Mit n_fest (rechte Achse): kleinste runde
+    Schrittweite, mit der genau n_fest Kaestchen das Maximum fassen."""
+    m = float(maximum) if np.isfinite(maximum) and maximum > 0 else 1.0
+    for k in range(-4, 5):
+        for f in schritte:
+            st = f * 10.0 ** k
+            n = int(np.ceil(m / st - 1e-9))
+            if n_fest is None and n <= TWIN_MAX_KAESTCHEN:
+                return st, max(n, 1)
+            if n_fest is not None and n <= n_fest:
+                return st, n_fest
+    return m, 1
+
+
+def _twin_fmt(st):
+    return "%d" if abs(st - round(st)) < 1e-9 else "%g"
+
+
+def _twin_layout(fig, ax, ax2, pad_pt=3.0, oben_pt=8.5):
+    """Feste Raender wie in den Referenz-PDFs: 3 pt Rand um die
+    Beschriftung, die Achse oben immer 8.5 pt unter dem Rand, und an beiden
+    y-Achsen Platz fuer
+    mindestens zweistellige Zahlen - so stehen Plots mit "8" und mit "15"
+    an der Achse gleich weit eingerueckt."""
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    W, H = fig.get_size_inches() * 72.0
+    zwei = None
+    for lab in ax.get_yticklabels():
+        if lab.get_text():
+            alt = lab.get_text()
+            lab.set_text("10")
+            zwei = lab.get_window_extent(r).width * 72.0 / fig.dpi
+            lab.set_text(alt)
+            break
+    zwei = zwei or 0.0
+
+    def breite(achse):
+        b = [t.get_window_extent(r).width * 72.0 / fig.dpi
+             for t in achse.get_yticklabels() if t.get_text()]
+        return max(b) if b else 0.0
+
+    fig.tight_layout(pad=pad_pt / 10.0)
+    fig.canvas.draw()
+    links = max(0.0, zwei - breite(ax))
+    rechts = max(0.0, zwei - breite(ax2))
+    p = ax.get_position()
+    x0 = p.x0 + links / W
+    x1 = p.x1 - rechts / W
+    y1 = 1.0 - oben_pt / H
+    fig.subplots_adjust(left=x0, right=x1, top=y1, bottom=p.y0)
+
+
+def plot_twinaxis(results, links, rechts, filename, out_dir=None, save=True,
+                  show=False, confirm_overwrite=None, **art):
+    """Uniformity links, Crosstalk rechts - im Arbeits-Stil (siehe oben).
+
+    Gesetzt wird mit LaTeX. Scheitert das (LaTeX oder cm-super fehlt), wird
+    derselbe Plot mit mathtext gezeichnet und ein Hinweis ausgegeben."""
+    try:
+        return _plot_twinaxis(results, links, rechts, filename, out_dir, save,
+                              show, confirm_overwrite, latex=True, **art)
+    except RuntimeError as exc:
+        plt.close("all")
+        print("Hinweis: LaTeX-Satz nicht moeglich (%s) - Plot mit mathtext."
+              % str(exc).splitlines()[0])
+        return _plot_twinaxis(results, links, rechts, filename, out_dir, save,
+                              show, confirm_overwrite, latex=False, **art)
+
+
+def _plot_twinaxis(results, links, rechts, filename, out_dir, save, show,
+                   confirm_overwrite, latex=True, x_key="waist_um", x_text=None,
+                   gleiche_skala=False):
+    """x_key/x_text: x-Achse (Vorgabe Waist; der Positions-Sweep nimmt den
+    Versatz). gleiche_skala=True: beide y-Achsen mit DERSELBEN Skala
+    0 .. Maximum aller Kurven, Marken alle 5 (bzw. passend) - so im
+    Referenz-PDF des Positions-Sweeps."""
+    from matplotlib.ticker import FixedLocator, FormatStrFormatter, MultipleLocator
+    out_dir = paths.fit_plots_dir() if out_dir is None else out_dir
+    links = [k for k in links if k in results]
+    rechts = [k for k in rechts if k in results]
+    if not links and not rechts:
+        return None
+    x = np.asarray(results[x_key], dtype=float)
+    win_mm = np.asarray(results.get("win_input_mm", np.full(x.shape, np.nan)), dtype=float)
+    if x_key != "waist_um":
+        win_mm = np.full(x.shape, np.nan)
+    maske = ~(win_mm > TWIN_START_WIN_MM + 1e-6)
+    x = x[maske]
+    werte = {k: np.asarray(results[k], dtype=float)[maske] * 100.0 for k in links + rechts}
+
+    rc, um = _twin_rc(latex)
+    with plt.rc_context(rc):
+        fig, ax = plt.subplots(figsize=(TWIN_FIGSIZE_CM[0] / 2.54, TWIN_FIGSIZE_CM[1] / 2.54))
+        ax2 = ax.twinx()
+        linien = []
+        for a, keys in ((ax, links), (ax2, rechts)):
+            for k in keys:
+                linie, = a.plot(x, werte[k], color=TRACES[k][2], lw=TWIN_LINEWIDTH,
+                                label=TWIN_LEGENDE.get(k, TRACES[k][0]))
+                linien.append(linie)
+
+        def maximum(keys):
+            v = np.concatenate([werte[k][np.isfinite(werte[k])] for k in keys]) if keys else []
+            return float(np.max(v)) if len(v) else 1.0
+
+        # Beide Achsen bekommen dieselbe Zahl von Kaestchen (das Gitter passt
+        # dann fuer beide): die groessere der beiden eigenen Teilungen.
+        if gleiche_skala:
+            # beide Achsen 0 .. Maximum aller Kurven, gleiche Marken
+            oben = max(maximum(links), maximum(rechts))
+            st = next(f * 10.0 ** k for k in range(-4, 5) for f in (1.0, 2.0, 2.5, 5.0)
+                      if np.floor(oben / (f * 10.0 ** k) + 1e-9) <= 5)
+            marken = [i * st for i in range(int(np.floor(oben / st + 1e-9)) + 1)]
+            for a in (ax, ax2):
+                a.set_ylim(0.0, oben)
+                a.yaxis.set_major_locator(FixedLocator(marken))
+                a.yaxis.set_major_formatter(FormatStrFormatter(_twin_fmt(st)))
+        else:
+            _st, n_l = _twin_grenze(maximum(links), TWIN_SCHRITTE_LINKS)
+            _st, n_r = _twin_grenze(maximum(rechts), TWIN_SCHRITTE_LINKS)
+            n = max(n_l, n_r)
+            st_l, _ = _twin_grenze(maximum(links), TWIN_SCHRITTE_RECHTS, n_fest=n)
+            st_r, _ = _twin_grenze(maximum(rechts), TWIN_SCHRITTE_RECHTS, n_fest=n)
+            for a, st in ((ax, st_l), (ax2, st_r)):
+                a.set_ylim(0.0, n * st)
+                a.yaxis.set_major_locator(FixedLocator([i * st for i in range(n + 1)]))
+                a.yaxis.set_major_formatter(FormatStrFormatter(_twin_fmt(st)))
+        ax.set_xlim(float(np.nanmin(x)), float(np.nanmax(x)))
+        ax.xaxis.set_major_locator(MultipleLocator(0.25))
+        ax.xaxis.set_major_formatter(FormatStrFormatter("%.2f"))
+        ax.grid(True, alpha=0.4)
+        prozent = r"(\%)" if rc.get("text.usetex") else "(%)"
+
+        def ylabel(keys):
+            # von unten gelesen: rechte Achse "eta_h,circ, eta_h (%)"
+            namen = [TWIN_LEGENDE.get(k, TRACES[k][0]) for k in keys]
+            return ", ".join(reversed(namen) if len(namen) > 1 else namen) + " " + prozent
+        ax.set_ylabel(ylabel(links))
+        ax2.set_ylabel(ylabel(rechts))
+        ax.set_xlabel((r"Waist $w$" if x_text is None else x_text) + " (" + um + ")")
+        ax.legend(linien, [l.get_label() for l in linien], loc="upper left")
+        _twin_layout(fig, ax, ax2)
+        return _finish(fig, out_dir, filename, save, show, confirm_overwrite, tight=False)
+
+
 def make_plots(results, out_dir=None, getrennt=True, achsen="auto",
                penalty_plot=True, save=True, show=False, confirm_overwrite=None,
                marker=False, prefix=None, titel=False, arbeitspunkt=None,
@@ -829,14 +1032,18 @@ def make_plots(results, out_dir=None, getrennt=True, achsen="auto",
     # sie im Datensatz stehen (siehe single_beam.DEFAULTS hart/kombiniert).
     harte = hard_keys(results)
     if getrennt or not harte:
-        pfade.append(plot_curves(
-            results, WEIGHTED_KEYS, f"{prefix}_weighted.pdf",
-            (r"Single beam, atom-weighted ($\sigma_\mathrm{atom} = %.0f\,\mathrm{nm}$)"
-             % (results["sigma_atom"] * 1e9)) if titel else None, **gemeinsam))
+        # Arbeits-Stil: zwei y-Achsen, LaTeX-Satz (siehe plot_twinaxis).
+        pfade.append(plot_twinaxis(
+            results, ("uniformity_weighted",), ("crosstalk_weighted",),
+            f"{prefix}_weighted.pdf", out_dir=out_dir, save=save, show=show,
+            confirm_overwrite=confirm_overwrite))
         if harte:
-            pfade.append(plot_curves(
-                results, harte, f"{prefix}_hard.pdf",
-                hard_title(results) if titel else None, **gemeinsam))
+            rechts = (TWIN_RECHTS_HART if "crosstalk_hart_kreis" in results
+                      else ("crosstalk_hart",))
+            pfade.append(plot_twinaxis(
+                results, ("uniformity_hart",), rechts,
+                f"{prefix}_hard.pdf", out_dir=out_dir, save=save, show=show,
+                confirm_overwrite=confirm_overwrite))
     else:
         pfade.append(plot_curves(
             results, tuple(harte) + tuple(WEIGHTED_KEYS), f"{prefix}_metrics.pdf",
@@ -969,6 +1176,17 @@ def make_offset_plots(results, out_dir=None, getrennt=True, achsen="auto",
             x_key="offset_um", x_label=OFFSET_LABEL,
             zweite_achse=_zweite_x_achse_offset)
 
+    # Arbeits-Stil wie hard/weighted (Referenz-PDF ..._weighted_twinaxis):
+    # U_w links, eta_w rechts, beide Achsen mit derselben Skala.
+    lokal, keys = _richtungsfreie_uniformity(results, WEIGHTED_KEYS)
+    links = [k for k in keys if k.startswith("uniformity")]
+    rechts = [k for k in keys if k.startswith("crosstalk")]
+    if keys:
+        return [q for q in [plot_twinaxis(
+            lokal, links, rechts, f"{prefix}_weighted.pdf", out_dir=out_dir,
+            save=save, show=show, confirm_overwrite=confirm_overwrite,
+            x_key="offset_um", x_text=r"Atom offset from site centre $r$",
+            gleiche_skala=True)] if q is not None]
     pfade = [figur(WEIGHTED_KEYS, f"{prefix}_weighted.pdf",
                    "Atom position sweep, atom-weighted")]
     return [q for q in pfade if q is not None]
@@ -1080,6 +1298,7 @@ Bei r = 0 stimmen alle Werte mit dem Waist-Sweep an diesem Waist ueberein.
 
 "Rand" heisst: das Minimum liegt am Ende des abgefahrenen Bereichs.
 
+{_offset_textwerte_block(results)}
 ## Werte
 
 {_offset_werte_tabelle(results)}
@@ -1105,6 +1324,76 @@ Bei r = 0 stimmen alle Werte mit dem Waist-Sweep an diesem Waist ueberein.
     out_path.write_text(text, encoding="utf-8")
     print(f"Bericht gespeichert: {out_path}")
     return out_path
+
+
+# Versatz-Werte, die im Text der Arbeit stehen (r in µm). Weitere hier
+# eintragen - sie erscheinen dann im Abschnitt "Werte fuer den Text".
+OFFSET_TEXT_R_UM = (0.5, 1.0)
+# Schwellen fuer die Aussagen "eta_w bleibt unter ... / U_w ueberschreitet ..."
+OFFSET_SCHWELLEN = (("crosstalk_weighted", 1.0), ("uniformity_weighted", 5.0))
+
+
+def _offset_textwerte_block(results):
+    """Abschnitt "Werte fuer den Text" des Positions-Sweeps: Maxima, Werte
+    bei OFFSET_TEXT_R_UM (interpoliert) und die Schwellen aus
+    OFFSET_SCHWELLEN - jeweils senkrechter Versatz."""
+    r = np.asarray(results["offset_um"], dtype=float)
+    wahl = {}
+    for basis in ("uniformity_weighted", "crosstalk_weighted",
+                  "uniformity_hart", "crosstalk_hart_kreis", "crosstalk_hart_pitch"):
+        for k in (f"{basis}__vertikal", basis):
+            if k in results:
+                wahl[basis] = np.asarray(results[k], dtype=float) * 100.0
+                break
+    if not wahl:
+        return ""
+    name = {"uniformity_weighted": "U_w", "crosstalk_weighted": "eta_w",
+            "uniformity_hart": "U_h", "crosstalk_hart_kreis": "eta_h,circ",
+            "crosstalk_hart_pitch": "eta_h (Pitch-Quadrat)"}
+    z = ["## Werte fuer den Text", "",
+         f"Waist omega = {float(results['waist_um']):.3f} µm, senkrechter Versatz "
+         f"r = {r[0]:.2f} .. {r[-1]:.2f} µm ({r.size} Stuetzstellen).", "",
+         "| Groesse | r = 0 | Maximum (bei r) | "
+         + " | ".join(f"r = {x:g} µm" for x in OFFSET_TEXT_R_UM) + " |",
+         "|---|---|---|" + "---|" * len(OFFSET_TEXT_R_UM)]
+    for k, y in wahl.items():
+        werte = []
+        for x in OFFSET_TEXT_R_UM:
+            if r[0] <= x <= r[-1]:
+                lin = float(np.interp(x, r, y))
+                j = int(np.clip(np.searchsorted(r, x), 2, len(r) - 2))
+                idx = np.arange(j - 2, j + 2)
+                kub = float(np.polyval(np.polyfit(r[idx], y[idx], 3), x))
+                werte.append(f"{lin:.3f} % (num. {abs(kub - lin):.1g})")
+            else:
+                werte.append("ausserhalb")
+        z.append(f"| {name[k]} | {y[0]:.3f} % | {y.max():.3f} % ({r[y.argmax()]:.3f} µm) | "
+                 + " | ".join(werte) + " |")
+    z.append("")
+    for k, grenze in OFFSET_SCHWELLEN:
+        if k not in wahl:
+            continue
+        y = wahl[k]
+        ueber = np.nonzero(y > grenze)[0]
+        if ueber.size == 0:
+            z.append(f"- {name[k]} bleibt im ganzen Bereich unter {grenze:g} %.")
+            continue
+        i = int(ueber[0])
+        if i == 0:
+            z.append(f"- {name[k]} liegt schon bei r = 0 ueber {grenze:g} %.")
+            continue
+        # Schnittpunkt linear zwischen den Stuetzstellen
+        r_x = r[i - 1] + (grenze - y[i - 1]) * (r[i] - r[i - 1]) / (y[i] - y[i - 1])
+        z.append(f"- {name[k]} ueberschreitet {grenze:g} % bei r = {r_x:.3f} µm "
+                 f"(darunter fuer r < {r_x:.3f} µm).")
+    z += ["",
+          "Werte linear zwischen den Stuetzstellen interpoliert; 'num.' ist der "
+          "Unterschied zur kubischen Interpolation. Die Unsicherheiten aus den "
+          "Parametern (Waist, T, nu_r, pitch) stehen in "
+          "`Fit_Results/SingleSpot_w1.9um_Unsicherheiten_*_Report.md` "
+          "(`single_spot_unsicherheiten.py`); Stand 2026-10-14 bei omega = 1.9 µm und r = 1 µm etwa +-1.2 pp fuer U_w "
+          "und +-0.4 pp fuer eta_w (aus den Zeilen 0.95 und 1.14 µm).", ""]
+    return "\n".join(z)
 
 
 def _offset_werte_tabelle(results, n_zeilen=11):
@@ -1137,6 +1426,92 @@ def _zeile(results, key, name):
             f"| {sb.monotone_kind(results[key])} "
             f"| {best['value'] * 100:.4g} % "
             f"| {best['waist_um']:.4f} µm{rand} |")
+
+
+def _textwerte_block(results):
+    """Abschnitt "Werte fuer den Text": alles, was im Fliesstext zu den
+    Figuren hard/weighted steht - ausgewertet ueber genau den Bereich, der
+    im Plot zu sehen ist (ab TWIN_START_WIN_MM Eingangswaist)."""
+    keys = [k for k in ("uniformity_hart", "crosstalk_hart_pitch", "crosstalk_hart_kreis",
+                        "crosstalk_hart", "uniformity_weighted", "crosstalk_weighted")
+            if k in results]
+    if "crosstalk_hart_pitch" in keys and "crosstalk_hart" in keys:
+        keys.remove("crosstalk_hart")          # dieselbe Kurve unter zwei Namen
+    if not keys:
+        return ""
+    w_all = np.asarray(results["waist_um"], dtype=float)
+    win = np.asarray(results.get("win_input_mm", np.full(w_all.shape, np.nan)), dtype=float)
+    m = ~(win > TWIN_START_WIN_MM + 1e-6)
+    w = w_all[m]
+    v = {k: np.asarray(results[k], dtype=float)[m] * 100.0 for k in keys}
+    name = {"uniformity_hart": "U_h", "crosstalk_hart_pitch": "eta_h (Pitch-Quadrat)",
+            "crosstalk_hart_kreis": "eta_h,circ (Kreis)", "crosstalk_hart": "eta_h",
+            "uniformity_weighted": "U_w", "crosstalk_weighted": "eta_w"}
+
+    def lokale_minima(y):
+        return [i for i in range(1, len(y) - 1) if y[i] < y[i - 1] and y[i] < y[i + 1]]
+
+    z = ["## Werte fuer den Text (Bereich wie im Plot)", "",
+         f"Ausgewertet ab {TWIN_START_WIN_MM:g} mm Eingangswaist, also omega = "
+         f"{w[0]:.3f} .. {w[-1]:.3f} µm ({len(w)} Stuetzstellen).", "",
+         "| Groesse | Anfang | Ende | Minimum (bei omega) | Maximum (bei omega) |",
+         "|---|---|---|---|---|"]
+    for k in keys:
+        y = v[k]
+        z.append(f"| {name[k]} | {y[0]:.3f} % | {y[-1]:.3f} % | {y.min():.3f} % ({w[y.argmin()]:.3f} µm) "
+                 f"| {y.max():.3f} % ({w[y.argmax()]:.3f} µm) |")
+    z.append("")
+    if "crosstalk_hart_pitch" in v and "crosstalk_hart_kreis" in v:
+        r = v["crosstalk_hart_pitch"] / v["crosstalk_hart_kreis"]
+        unter3 = w[r < 3]
+        z.append(f"- eta_h / eta_h,circ: {r.min():.2f} .. {r.max():.2f}"
+                 + (f"; unter 3 fuer omega >= {unter3.min():.3f} µm" if unter3.size else "; immer > 3"))
+        fenster = (w >= 1.75) & (w <= 2.0)
+        if fenster.any():
+            for k in ("crosstalk_hart_pitch", "crosstalk_hart_kreis"):
+                y = v[k][fenster]
+                z.append(f"- {name[k]} zwischen 1.75 und 2.00 µm: {y.min():.3f} .. {y.max():.3f} %")
+        mins = lokale_minima(v["crosstalk_hart_kreis"])
+        if mins:
+            z.append("- lokale Minima von eta_h,circ: " + ", ".join(
+                f"{w[i]:.3f} µm ({v['crosstalk_hart_kreis'][i]:.3f} %)" for i in mins))
+    if "uniformity_hart" in v:
+        u = v["uniformity_hart"]
+        if np.any(u < 20):
+            z.append(f"- U_h < 20 % ab omega = {w[np.argmax(u < 20)]:.3f} µm")
+    if "uniformity_weighted" in v:
+        u = v["uniformity_weighted"]
+        z.append(f"- U_w am Anfang {u[0]:.2f} %, unter 5 % ab omega = "
+                 f"{w[np.argmax(u < 5)]:.3f} µm ({100 * np.mean(u < 5):.0f} % des Bereichs)")
+    if "crosstalk_weighted" in v:
+        e = v["crosstalk_weighted"]
+        if np.any(e > 2.5):
+            z.append(f"- eta_w > 2.5 % erst ab omega = {w[np.argmax(e > 2.5)]:.3f} µm; "
+                     f"Maximum {e.max():.2f} %")
+        mins = lokale_minima(e)
+        if mins:
+            z.append("- lokale Minima von eta_w (U_w dort): " + ", ".join(
+                f"{w[i]:.3f} µm ({e[i]:.3f} %, U_w {v['uniformity_weighted'][i]:.2f} %)"
+                if "uniformity_weighted" in v else f"{w[i]:.3f} µm ({e[i]:.3f} %)" for i in mins))
+    z.append("")
+
+    wp = results.get("arbeitspunkt_um")
+    wp = float(sb.ARBEITSPUNKT_DEFAULT_UM if wp is None else wp)
+    z += [f"### Arbeitspunkt omega = {wp:.3f} µm", "",
+          "| Groesse | Wert (linear) | numerische Unsicherheit |", "|---|---|---|"]
+    for k in keys:
+        y = np.asarray(results[k], dtype=float) * 100.0
+        lin = float(np.interp(wp, w_all, y))
+        j = int(np.clip(np.searchsorted(w_all, wp), 2, len(w_all) - 2))
+        idx = np.arange(j - 2, j + 2)
+        kub = float(np.polyval(np.polyfit(w_all[idx], y[idx], 3), wp))
+        z.append(f"| {name[k]} | {lin:.4f} % | {abs(kub - lin):.1g} % |")
+    z += ["",
+          "Numerische Unsicherheit = |kubisch - linear| zwischen den Stuetzstellen; sie ist "
+          "vernachlaessigbar. Massgeblich sind die Parameter-Unsicherheiten (Waist, T, nu_r, "
+          "pitch) - die stehen in `Fit_Results/SingleSpot_w1.9um_Unsicherheiten_*_Report.md` "
+          "(`single_spot_unsicherheiten.py`).", ""]
+    return "\n".join(z)
 
 
 def _arbeitspunkt_block(results):
@@ -1297,6 +1672,7 @@ ausgewerteten Region.
 es vermutlich kein Optimum, sondern nur die Grenze - weitersuchen.
 
 {_arbeitspunkt_block(results)}
+{_textwerte_block(results)}
 ## Werte
 
 {_werte_tabelle(results)}
