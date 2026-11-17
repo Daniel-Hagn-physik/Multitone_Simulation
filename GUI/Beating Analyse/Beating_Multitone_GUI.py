@@ -1339,6 +1339,24 @@ class BeatingMultitoneWindow(QMainWindow):
         self.btn_save = QPushButton("Save view as PDF")
         self.btn_save.clicked.connect(self._on_save_clicked)
         lay.addWidget(self.btn_save)
+        # Beating als Animation: dieselbe Darstellung wie die drei Bilder der
+        # Periode (_period3.pdf), nur ueber alle Frames einer Grundperiode.
+        gif_row = QHBoxLayout()
+        self.btn_gif = QPushButton("Save beating as GIF")
+        self.btn_gif.setToolTip(
+            "Writes the whole profile over ONE fundamental period T_0 as an\n"
+            "animated GIF (endless loop) - the same picture as the three\n"
+            "panels of _period3.pdf: colour scale I / <I>_t with <I>_t the\n"
+            "time average of the atom weighted mean intensity, scale fixed\n"
+            "over the period so frames stay comparable.\n\n"
+            "Frames = frames/period (at most 240, otherwise thinned out).\n"
+            "fps sets the playback speed only, not the physics.")
+        self.btn_gif.clicked.connect(self._on_save_gif_clicked)
+        self.sp_gif_fps = self._ispin(10, 1, 50, " fps")
+        self.sp_gif_fps.setToolTip("Playback speed of the GIF (frames per second).")
+        gif_row.addWidget(self.btn_gif, 1)
+        gif_row.addWidget(self.sp_gif_fps)
+        lay.addLayout(gif_row)
         self.lbl_status = QLabel("")
         self.lbl_status.setWordWrap(True)
         self.lbl_status.setStyleSheet("color: #555; font-size: 10px;")
@@ -2382,6 +2400,134 @@ class BeatingMultitoneWindow(QMainWindow):
         cb.set_label(r"$%s(t)\,/\,\langle %s\rangle_t$" % (gname, gname))
         style_figure(fig)
         fig.savefig(path, format="pdf")
+
+    # --------------------------------------------------------
+    # Beating als GIF
+    # --------------------------------------------------------
+    GIF_MAX_FRAMES = 240
+
+    def _save_period_gif(self, path, fps=10, dpi=150, progress=None):
+        """Das ganze Profil ueber EINE Grundperiode als animiertes GIF.
+
+        Gleiche Groesse, gleiche Normierung wie _save_period_pdf: I / <I>_t
+        mit <I>_t = Zeitmittel der atomgewichteten mittleren Intensitaet,
+        Farbskala fest ueber alle gezeigten Frames, nichts wird abgeschnitten.
+        Gezeichnet wird einmal; pro Frame werden nur Bilddaten und Zeitlabel
+        getauscht. Gibt die Anzahl der geschriebenen Frames zurueck.
+        """
+        from PIL import Image
+
+        c, s = self.cache, self.state
+        fpp = int(s["frames_per_period"])
+        n = int(c["n_frames"])
+        if n < 3 or not np.isfinite(c["T0"]) or c["T0"] <= 0:
+            raise RuntimeError(
+                "no full beat period available - the pattern is not periodic, "
+                "or frames/period is too small")
+        # Eine Grundperiode: Frames 0 .. fpp-1 (offenes Intervall, der
+        # naechste waere wieder t = T_0 = Frame 0 -> nahtlose Schleife).
+        n_per = min(fpp, n)
+        step = max(1, int(np.ceil(n_per / self.GIF_MAX_FRAMES)))
+        idx = list(range(0, n_per, step))
+        T0 = c["T0"]
+        t_per_frame = (s["n_periods"] * T0) / n          # Zeitschritt im Cube
+
+        gname = "I" if s.get("rabi_law", "I") == "I" else r"\sqrt{I}"
+        mean_I, _ = self._atom_mean_intensity()
+        if not np.isfinite(mean_I) or mean_I <= 0:
+            raise RuntimeError("time average is zero - nothing to normalise to")
+        vmax = max(float(max(c["cube"][k].max() for k in idx)) / mean_I, 1e-12)
+
+        cx0, cy0 = c["r_center_x"] * 1e6, c["r_center_y"] * 1e6
+        x_um, y_um = c["x"] * 1e6 - cx0, c["y"] * 1e6 - cy0
+        extent = [x_um[0], x_um[-1], y_um[0], y_um[-1]]
+
+        # Ein Panel in der Breite eines Drittels der Figurbreite waere fuer
+        # einen Film zu klein - halbe Dokumentbreite plus Farbskala.
+        w_in = 0.62 * FIG_WIDTH_IN
+        asp = (y_um[-1] - y_um[0]) / max(x_um[-1] - x_um[0], 1e-12)
+        LEFT, RIGHT, BOT, TOP = 0.20, 0.78, 0.17, 0.97
+        panel_w = w_in * (RIGHT - LEFT)
+        h_in = panel_w * min(max(asp, 0.4), 1.8) / (TOP - BOT)
+
+        _font_rc = matplotlib.rc_context({**latex_rc(), **image_rc()})
+        _font_rc.__enter__()
+        try:
+            fig = Figure(figsize=(w_in, h_in), dpi=dpi)
+            canvas = FigureCanvas(fig)
+            ax = fig.add_subplot(111)
+            im = ax.imshow(c["cube"][idx[0]] / mean_I, extent=extent,
+                           origin="lower", cmap="inferno", vmin=0.0,
+                           vmax=vmax, aspect="equal")
+            lab = ax.text(0.04, 0.96, "", transform=ax.transAxes, ha="left",
+                          va="top", color="w")
+            ax.set_xlabel(r"$x$ (µm)")
+            ax.set_ylabel(r"$y$ (µm)")
+            t_tick = nice_symmetric_tick(0.85 * min(abs(x_um[0]), abs(x_um[-1]),
+                                                    abs(y_um[0]), abs(y_um[-1])))
+            ax.set_xticks([-t_tick, 0.0, t_tick])
+            ax.set_yticks([-t_tick, 0.0, t_tick])
+            fig.subplots_adjust(left=LEFT, right=RIGHT, bottom=BOT, top=TOP)
+            cax = ax.inset_axes([1.0 + 0.24 / (panel_w * 2.54), 0.0,
+                                 0.26 / (panel_w * 2.54), 1.0])
+            cb = fig.colorbar(im, cax=cax)
+            cb.set_label(r"$%s(t)\,/\,\langle %s\rangle_t$" % (gname, gname))
+            style_figure(fig)
+
+            frames = []
+            for j, k in enumerate(idx):
+                im.set_data(c["cube"][k] / mean_I)
+                frac = k * t_per_frame / T0
+                lab.set_text(r"$t = %.3f\,T_0$" % frac)
+                canvas.draw()
+                rgb = np.asarray(canvas.buffer_rgba())[..., :3].copy()
+                frames.append(Image.fromarray(rgb))
+                if progress is not None and (j % 10 == 0):
+                    progress(j, len(idx))
+        finally:
+            _font_rc.__exit__(None, None, None)
+
+        # Eine gemeinsame Palette fuer alle Frames (aus dem hellsten Frame),
+        # sonst flackern die Farben von Bild zu Bild.
+        k_bright = int(np.argmax([c["cube"][k].max() for k in idx]))
+        pal = frames[k_bright].quantize(colors=256, method=Image.MEDIANCUT)
+        frames_p = [f.quantize(palette=pal, dither=Image.NONE) for f in frames]
+        frames_p[0].save(path, format="GIF", save_all=True,
+                         append_images=frames_p[1:], loop=0,
+                         duration=max(20, int(round(1000.0 / max(fps, 1)))),
+                         optimize=False, disposal=1)
+        return len(idx), step
+
+    def _on_save_gif_clicked(self):
+        if not self.cache:
+            return
+        s = self.state
+        stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        tag = (f"_1lens{s['f_single'] * 1e3:.0f}mm" if s["one_lens"] else "")
+        tag += (f"_texp{s['t_exp'] * 1e6:.0f}us" if s["t_exp"] > 0 else "")
+        name = (f"Beating_N{s['N_x']}x{s['N_y']}_"
+                f"{'Airy' if s['use_airy'] else 'Gauss'}_"
+                f"w{s['win'] * 1e6:.3f}um_width{s['width_x'] * 1e-6:.4f}MHz"
+                f"{tag}_{stamp}")
+        p_gif = self.out_dir / (name + "_period.gif")
+
+        def progress(j, n):
+            self.lbl_status.setText(f"GIF: frame {j}/{n} ...")
+            QApplication.processEvents()
+
+        self.btn_gif.setEnabled(False)
+        try:
+            n_fr, step = self._save_period_gif(
+                p_gif, fps=self.sp_gif_fps.value(), progress=progress)
+            note = f" (every {step}. frame)" if step > 1 else ""
+            self.lbl_status.setText(
+                f"saved: {short_name(p_gif)}  - {n_fr} frames{note}")
+            self.lbl_status.setToolTip(str(p_gif))
+        except Exception as exc:
+            self.lbl_status.setText("")
+            QMessageBox.critical(self, "Saving GIF failed", str(exc))
+        finally:
+            self.btn_gif.setEnabled(True)
 
     def _crest_now(self):
         """Crest factors (x, y) of the current state - the same numbers as

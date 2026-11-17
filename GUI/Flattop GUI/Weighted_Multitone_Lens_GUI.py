@@ -782,15 +782,31 @@ class ExportOptionsDialog(QDialog):
                                  "als .txt neben das PDF geschrieben.")
         self.cb_crosshair = QCheckBox("Crosshair in the 2D views")
         self.cb_crosshair.setChecked(False)
-        self.cb_regions = QCheckBox("Uniformity / crosstalk region in the cross sections")
-        self.cb_regions.setChecked(True)
+        # Wo die Uniformity- und die Crosstalk-Region eingezeichnet werden:
+        # in allen Panels, nur in den Schnitten, nur in den 2D-Bildern oder
+        # gar nicht.
+        self.combo_regions = QComboBox()
+        self.combo_regions.addItems(["everywhere (cuts and 2D views)",
+                                     "only in the cross sections",
+                                     "only in the 2D views",
+                                     "nowhere"])
+        self.combo_regions.setCurrentIndex(0)
+        self.combo_regions.setToolTip(
+            "Uniformity-Region (cyan) und Crosstalk-Region (rot):\n"
+            "everywhere - in allen Schnitten und 2D-Bildern\n"
+            "nowhere    - in keinem Panel, auch nicht in der Legende")
+        row_regions = QHBoxLayout()
+        row_regions.addWidget(QLabel("Uniformity / crosstalk region:"))
+        row_regions.addWidget(self.combo_regions, 1)
         self.cb_pdf = QCheckBox("Atom probability density (cross section + spot profile)")
         self.cb_pdf.setChecked(bool(sigma_ok))
         self.cb_pdf.setEnabled(bool(sigma_ok))
         if not sigma_ok:
             self.cb_pdf.setToolTip("sigma_atom ist ungueltig - Temperatur/Fallenfrequenz pruefen.")
-        for w in (self.cb_title, self.cb_crosshair, self.cb_regions, self.cb_pdf):
+        for w in (self.cb_title, self.cb_crosshair):
             v_content.addWidget(w)
+        v_content.addLayout(row_regions)
+        v_content.addWidget(self.cb_pdf)
         layout.addWidget(box_content)
 
         box_zoom = QGroupBox("2D window")
@@ -829,7 +845,8 @@ class ExportOptionsDialog(QDialog):
                       (1 if (self._single_site or self.rb_one.isChecked()) else 2),
             "title": self.cb_title.isChecked(),
             "crosshair": self.cb_crosshair.isChecked(),
-            "regions_in_cut": self.cb_regions.isChecked(),
+            "regions_in_cut": self.combo_regions.currentIndex() in (0, 1),
+            "regions_in_2d": self.combo_regions.currentIndex() in (0, 2),
             "atom_pdf": self.cb_pdf.isChecked() and self.cb_pdf.isEnabled(),
             "zoom_factor": float(self.sp_zoom.value()),
         }
@@ -2976,6 +2993,8 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                 return out
 
             def draw_regions_2d(ax):
+                if not opts.get("regions_in_2d", True):
+                    return
                 for p in region_patches():
                     p.set_zorder(6)
                     ax.add_patch(p)
@@ -3153,17 +3172,22 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             # EINE Legende fuer die ganze Abbildung, unterhalb aller Achsen.
             # In den einzelnen Plots deckte sie bei dieser Schriftgroesse die
             # Kurve zu; hier stoert sie nichts und wird nur einmal gelesen.
-            legend_handles = region_patches()
+            regions_shown = opts.get("regions_in_2d", True) or opts["regions_in_cut"]
+            legend_handles = region_patches() if regions_shown else []
             if show_pdf:
                 legend_handles.append(Patch(facecolor="magenta", alpha=0.30,
                                             label=LBL_PSI))
             # Alle Eintraege in EINE Zeile - mit den gekuerzten Beschriftungen
             # passen sie bei 16 cm Breite nebeneinander.
-            n_col = len(legend_handles)
+            n_col = max(1, len(legend_handles))
             try:
+                if not legend_handles:
+                    raise StopIteration     # nichts einzutragen - keine Legende
                 fig_save.legend(handles=legend_handles, loc="outside lower center",
                                 ncol=n_col, frameon=False,
                                 fontsize=EXPORT_FONTSIZE_LEGEND)
+            except StopIteration:
+                pass
             except Exception:
                 # aeltere matplotlib-Versionen kennen "outside ..." nicht
                 fig_save.legend(handles=legend_handles, loc="lower center",
@@ -3290,7 +3314,9 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             S = ROWS_PANEL_CM
             W = EXPORT_FIG_WIDTH_IN * 2.54
             title_cm = 0.45 * len(c["title_lines"]) + 0.2 if opts["title"] else 0.0
-            y2 = 1.6
+            regions_shown = opts.get("regions_in_2d", True) or opts["regions_in_cut"]
+            # Platz fuer die Legende unten nur, wenn es etwas einzutragen gibt
+            y2 = 1.6 if (regions_shown or show_pdf) else 1.05
             y1 = y2 if own_only else y2 + S + 1.65
             H = y1 + S + 0.95 + title_cm
             if n_cuts == 2:
@@ -3318,6 +3344,8 @@ class WeightedFlatMultiToneWindow(QMainWindow):
 
             # --- Hilfen --------------------------------------------------
             def regions_2d(ax):
+                if not opts.get("regions_in_2d", True):
+                    return
                 if half_u_um > 0:
                     if self.state.get("uniformity_shape", "square") == "circle":
                         p = Circle((acx, acy), half_u_um, edgecolor="cyan",
@@ -3443,18 +3471,21 @@ class WeightedFlatMultiToneWindow(QMainWindow):
                 fig.suptitle("\n".join(c["title_lines"]), fontsize=EXPORT_FONTSIZE_SUPTITLE,
                              y=1.0 - 0.1 / H)
 
-            handles = [Patch(facecolor="none", edgecolor="cyan", linewidth=1.0,
-                             label=c["LBL_UNI"]),
-                       Patch(facecolor="none", edgecolor="red", linewidth=1.0,
-                             label=c["LBL_CROSS"])]
-            if half_u_um <= 0:
-                handles = handles[1:]
+            handles = []
+            if regions_shown:
+                handles = [Patch(facecolor="none", edgecolor="cyan", linewidth=1.0,
+                                 label=c["LBL_UNI"]),
+                           Patch(facecolor="none", edgecolor="red", linewidth=1.0,
+                                 label=c["LBL_CROSS"])]
+                if half_u_um <= 0:
+                    handles = handles[1:]
             if show_pdf:
                 handles.append(Patch(facecolor=(1, 0, 1, 0.3), edgecolor="none",
                                      label=c["LBL_PSI"]))
-            fig.legend(handles=handles, loc="lower center", ncol=len(handles), frameon=False,
-                       bbox_to_anchor=(0.5, -0.02 * 10.8 / H), handlelength=1.6,
-                       columnspacing=1.5)
+            if handles:
+                fig.legend(handles=handles, loc="lower center", ncol=len(handles),
+                           frameon=False, bbox_to_anchor=(0.5, -0.02 * 10.8 / H),
+                           handlelength=1.6, columnspacing=1.5)
 
             # y-Beschriftung der 2D-Kacheln direkt an die Tick-Zahlen setzen.
             # Mit set_ylabel() rueckt matplotlib sie an das breiteste Label
@@ -3667,6 +3698,7 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             f"2D window          +/- {half_win*1e6:.4f} um  (crosstalk square x {opts['zoom_factor']:.2f})",
             f"crosshair          {'on' if opts['crosshair'] else 'off'}",
             f"regions in cut     {'on' if opts['regions_in_cut'] else 'off'}",
+            f"regions in 2D      {'on' if opts.get('regions_in_2d', True) else 'off'}",
             f"atom density       {'on' if opts['atom_pdf'] else 'off'}",
             f"parameter title    {'on' if opts['title'] else 'off'}",
             f"grid resolution    {GRID_N_HIGHRES} x {GRID_N_HIGHRES}",
