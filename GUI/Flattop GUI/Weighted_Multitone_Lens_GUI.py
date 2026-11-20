@@ -57,6 +57,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.patches import Rectangle, Circle, Patch
+from matplotlib.lines import Line2D
 from matplotlib.ticker import MultipleLocator, FormatStrFormatter
 
 from PyQt5.QtWidgets import (
@@ -516,6 +517,12 @@ ROWS_PANEL_CM = 3.3
 ROWS_NB_AXIS_MAX_DEFAULT = 0.1     # y-Achse der Nachbar-Schnitte (in I/I_max)
 ROWS_COLOR_OWN = "tab:blue"
 ROWS_COLOR_NB = "tab:green"
+# Legendeneintraege fuer die beiden Kurven. Sie stehen in einer EIGENEN
+# zweiten Zeile unter den Regionen - in eine Zeile passen bei 16 cm Breite
+# nicht fuenf Eintraege.
+ROWS_LBL_OWN = "Beam profile"
+ROWS_LBL_NB = "Neighboring profiles"
+ROWS_LEGEND_LINE_CM = 0.55
 
 
 def _rows_export_rc():
@@ -798,6 +805,12 @@ class ExportOptionsDialog(QDialog):
         row_regions = QHBoxLayout()
         row_regions.addWidget(QLabel("Uniformity / crosstalk region:"))
         row_regions.addWidget(self.combo_regions, 1)
+        self.cb_curves = QCheckBox("Curves in the legend (beam / neighboring profiles)")
+        self.cb_curves.setChecked(True)
+        self.cb_curves.setToolTip(
+            "Zweite Legendenzeile mit den beiden Kurvenfarben:\n"
+            f"blau = {ROWS_LBL_OWN}, gruen = {ROWS_LBL_NB}.\n"
+            "Nur im Zeilen-Layout; kostet eine Zeile Hoehe.")
         self.cb_pdf = QCheckBox("Atom probability density (cross section + spot profile)")
         self.cb_pdf.setChecked(bool(sigma_ok))
         self.cb_pdf.setEnabled(bool(sigma_ok))
@@ -807,6 +820,7 @@ class ExportOptionsDialog(QDialog):
             v_content.addWidget(w)
         v_content.addLayout(row_regions)
         v_content.addWidget(self.cb_pdf)
+        v_content.addWidget(self.cb_curves)
         layout.addWidget(box_content)
 
         box_zoom = QGroupBox("2D window")
@@ -848,6 +862,7 @@ class ExportOptionsDialog(QDialog):
             "regions_in_cut": self.combo_regions.currentIndex() in (0, 1),
             "regions_in_2d": self.combo_regions.currentIndex() in (0, 2),
             "atom_pdf": self.cb_pdf.isChecked() and self.cb_pdf.isEnabled(),
+            "curve_legend": self.cb_curves.isChecked(),
             "zoom_factor": float(self.sp_zoom.value()),
         }
 
@@ -3315,8 +3330,12 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             W = EXPORT_FIG_WIDTH_IN * 2.54
             title_cm = 0.45 * len(c["title_lines"]) + 0.2 if opts["title"] else 0.0
             regions_shown = opts.get("regions_in_2d", True) or opts["regions_in_cut"]
-            # Platz fuer die Legende unten nur, wenn es etwas einzutragen gibt
-            y2 = 1.6 if (regions_shown or show_pdf) else 1.05
+            kurven_legende = bool(opts.get("curve_legend", True))
+            # Platz fuer die Legende unten nur, wenn es etwas einzutragen gibt -
+            # je Legendenzeile eine Zeilenhoehe.
+            legenden_zeilen = ((1 if (regions_shown or show_pdf) else 0)
+                               + (1 if kurven_legende else 0))
+            y2 = 1.05 + ROWS_LEGEND_LINE_CM * legenden_zeilen
             y1 = y2 if own_only else y2 + S + 1.65
             H = y1 + S + 0.95 + title_cm
             if n_cuts == 2:
@@ -3482,9 +3501,26 @@ class WeightedFlatMultiToneWindow(QMainWindow):
             if show_pdf:
                 handles.append(Patch(facecolor=(1, 0, 1, 0.3), edgecolor="none",
                                      label=c["LBL_PSI"]))
+            # Zweite Zeile: die beiden Kurvenfarben. Eigene Legende statt
+            # mehrspaltiger Umbruch - matplotlib fuellt ncol spaltenweise und
+            # wuerde Regionen und Kurven durcheinanderwerfen.
+            kurven = []
+            if kurven_legende:
+                kurven.append(Line2D([], [], color=ROWS_COLOR_OWN, lw=2,
+                                     label=ROWS_LBL_OWN))
+                if not own_only:
+                    kurven.append(Line2D([], [], color=ROWS_COLOR_NB, lw=2,
+                                         label=ROWS_LBL_NB))
+            anker = -0.02 * 10.8 / H
             if handles:
                 fig.legend(handles=handles, loc="lower center", ncol=len(handles),
-                           frameon=False, bbox_to_anchor=(0.5, -0.02 * 10.8 / H),
+                           frameon=False,
+                           bbox_to_anchor=(0.5, anker + (ROWS_LEGEND_LINE_CM / H
+                                                         if kurven else 0.0)),
+                           handlelength=1.6, columnspacing=1.5)
+            if kurven:
+                fig.legend(handles=kurven, loc="lower center", ncol=len(kurven),
+                           frameon=False, bbox_to_anchor=(0.5, anker),
                            handlelength=1.6, columnspacing=1.5)
 
             # y-Beschriftung der 2D-Kacheln direkt an die Tick-Zahlen setzen.
